@@ -9,10 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/artpar/apigate/adapters/metrics"
 	"github.com/artpar/apigate/app"
 	"github.com/artpar/apigate/domain/proxy"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
 )
 
@@ -20,6 +22,7 @@ import (
 type ProxyHandler struct {
 	service *app.ProxyService
 	logger  zerolog.Logger
+	metrics *metrics.Collector
 }
 
 // NewProxyHandler creates a new HTTP proxy handler.
@@ -27,6 +30,15 @@ func NewProxyHandler(service *app.ProxyService, logger zerolog.Logger) *ProxyHan
 	return &ProxyHandler{
 		service: service,
 		logger:  logger,
+	}
+}
+
+// NewProxyHandlerWithMetrics creates a new HTTP proxy handler with metrics.
+func NewProxyHandlerWithMetrics(service *app.ProxyService, logger zerolog.Logger, m *metrics.Collector) *ProxyHandler {
+	return &ProxyHandler{
+		service: service,
+		logger:  logger,
+		metrics: m,
 	}
 }
 
@@ -101,13 +113,53 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *ProxyHandler) logRequest(ctx context.Context, req proxy.Request, result app.HandleResult) {
 	event := h.logger.Info()
 
+	planID := ""
+	userID := ""
+	if result.Auth != nil {
+		planID = result.Auth.PlanID
+		userID = result.Auth.UserID
+	}
+
 	if result.Error != nil {
 		event = h.logger.Warn()
 		event.Int("error_status", result.Error.Status)
 		event.Str("error_code", result.Error.Code)
+
+		// Record error metrics
+		if h.metrics != nil {
+			status := "4xx"
+			if result.Error.Status >= 500 {
+				status = "5xx"
+			}
+			path := metrics.NormalizePath(req.Path)
+			h.metrics.RequestsTotal.WithLabelValues(req.Method, path, status, planID).Inc()
+
+			// Record specific error types
+			switch result.Error.Code {
+			case "invalid_api_key", "missing_api_key":
+				h.metrics.AuthFailures.WithLabelValues(result.Error.Code).Inc()
+			case "rate_limit_exceeded":
+				h.metrics.RateLimitHits.WithLabelValues(planID, userID).Inc()
+			}
+		}
 	} else {
 		event.Int("status", result.Response.Status)
 		event.Int64("latency_ms", result.Response.LatencyMs)
+
+		// Record success metrics
+		if h.metrics != nil {
+			path := metrics.NormalizePath(req.Path)
+			h.metrics.RequestsTotal.WithLabelValues(req.Method, path, "2xx", planID).Inc()
+			h.metrics.UsageRequests.WithLabelValues(userID, planID).Inc()
+
+			// Record bytes transferred
+			if len(req.Body) > 0 {
+				h.metrics.UsageBytes.WithLabelValues(userID, planID, "request").Add(float64(len(req.Body)))
+			}
+			if len(result.Response.Body) > 0 {
+				h.metrics.UsageBytes.WithLabelValues(userID, planID, "response").Add(float64(len(result.Response.Body)))
+			}
+		}
 	}
 
 	event.
@@ -246,8 +298,18 @@ func (h *HealthHandler) Readiness(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
+// RouterConfig holds optional configuration for the router.
+type RouterConfig struct {
+	Metrics *metrics.Collector
+}
+
 // NewRouter creates the main HTTP router.
 func NewRouter(proxyHandler *ProxyHandler, healthHandler *HealthHandler, logger zerolog.Logger) chi.Router {
+	return NewRouterWithConfig(proxyHandler, healthHandler, logger, RouterConfig{})
+}
+
+// NewRouterWithConfig creates the main HTTP router with optional config.
+func NewRouterWithConfig(proxyHandler *ProxyHandler, healthHandler *HealthHandler, logger zerolog.Logger, cfg RouterConfig) chi.Router {
 	r := chi.NewRouter()
 
 	// Middleware
@@ -257,10 +319,20 @@ func NewRouter(proxyHandler *ProxyHandler, healthHandler *HealthHandler, logger 
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
 
+	// Metrics middleware (if enabled)
+	if cfg.Metrics != nil {
+		r.Use(NewMetricsMiddleware(cfg.Metrics))
+	}
+
 	// Health endpoints (no auth required)
 	r.Get("/health", healthHandler.Liveness)
 	r.Get("/health/live", healthHandler.Liveness)
 	r.Get("/health/ready", healthHandler.Readiness)
+
+	// Metrics endpoint (if enabled)
+	if cfg.Metrics != nil {
+		r.Handle("/metrics", promhttp.Handler())
+	}
 
 	// Version endpoint
 	r.Get("/version", func(w http.ResponseWriter, r *http.Request) {
@@ -277,6 +349,49 @@ func NewRouter(proxyHandler *ProxyHandler, healthHandler *HealthHandler, logger 
 	return r
 }
 
+// NewMetricsMiddleware creates middleware that records request metrics.
+func NewMetricsMiddleware(m *metrics.Collector) func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Skip metrics for internal endpoints
+			if strings.HasPrefix(r.URL.Path, "/health") || r.URL.Path == "/metrics" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			m.RequestsInFlight.Inc()
+			defer m.RequestsInFlight.Dec()
+
+			start := time.Now()
+			ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+
+			next.ServeHTTP(ww, r)
+
+			duration := time.Since(start).Seconds()
+			status := statusLabel(ww.Status())
+			path := metrics.NormalizePath(r.URL.Path)
+
+			m.RequestDuration.WithLabelValues(r.Method, path, status).Observe(duration)
+		})
+	}
+}
+
+// statusLabel returns a string label for the status code.
+func statusLabel(status int) string {
+	switch {
+	case status >= 500:
+		return "5xx"
+	case status >= 400:
+		return "4xx"
+	case status >= 300:
+		return "3xx"
+	case status >= 200:
+		return "2xx"
+	default:
+		return "other"
+	}
+}
+
 // LoggingMiddleware logs HTTP requests.
 type LoggingMiddleware struct {
 	logger zerolog.Logger
@@ -291,8 +406,8 @@ func NewLoggingMiddleware(logger zerolog.Logger) func(next http.Handler) http.Ha
 			ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 			next.ServeHTTP(ww, r)
 
-			// Skip logging for health checks
-			if strings.HasPrefix(r.URL.Path, "/health") {
+			// Skip logging for health checks and metrics
+			if strings.HasPrefix(r.URL.Path, "/health") || r.URL.Path == "/metrics" {
 				return
 			}
 

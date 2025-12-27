@@ -4,7 +4,7 @@ Self-hosted API monetization solution with authentication, rate limiting, usage 
 
 **Architecture:** Values-as-boundaries for 100% testability
 
-## Progress: 7/24 tasks (29%) - MVP + Hot Reload COMPLETE
+## Progress: 8/24 tasks (33%) - MVP + Observability COMPLETE
 
 ---
 
@@ -33,7 +33,7 @@ Make the system self-documenting and add management APIs.
 | ⬜ | 2.1 OpenAPI/Swagger | Auto-generate spec at `/.well-known/openapi.json` | `swaggo/swag` |
 | ⬜ | 2.2 Admin REST API | CRUD users, keys, plans; view usage | `go-playground/validator` |
 | ⬜ | 2.3 Portal REST API | Self-service: register, login, manage keys | `golang-jwt/jwt/v5` |
-| ⬜ | 2.4 Prometheus Metrics | `/metrics` endpoint with request stats | `prometheus/client_golang` |
+| ✅ | 2.4 Prometheus Metrics | `/metrics` endpoint with request stats | `prometheus/client_golang` |
 
 **Dependencies:**
 ```
@@ -174,7 +174,8 @@ billing:
 | Config | 16 | ✅ All passing |
 | Bootstrap | 3 | ✅ All passing |
 | E2E | 7 | ✅ All passing |
-| **Total** | **77** | ✅ All passing |
+| Metrics | 9 | ✅ All passing |
+| **Total** | **86** | ✅ All passing |
 
 ---
 

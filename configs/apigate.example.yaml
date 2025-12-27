@@ -124,3 +124,8 @@ endpoints:
 logging:
   level: info                  # debug | info | warn | error
   format: json                 # json | console
+
+# Prometheus metrics
+metrics:
+  enabled: true                # Enable /metrics endpoint
+  # path: /metrics             # Custom path (default: /metrics)

@@ -11,16 +11,17 @@ import (
 
 // Config is the root configuration structure.
 type Config struct {
-	Server    ServerConfig    `yaml:"server"`
-	Upstream  UpstreamConfig  `yaml:"upstream"`
-	Auth      AuthConfig      `yaml:"auth"`
-	RateLimit RateLimitConfig `yaml:"rate_limit"`
-	Usage     UsageConfig     `yaml:"usage"`
-	Billing   BillingConfig   `yaml:"billing"`
-	Database  DatabaseConfig  `yaml:"database"`
-	Plans     []PlanConfig    `yaml:"plans"`
+	Server    ServerConfig     `yaml:"server"`
+	Upstream  UpstreamConfig   `yaml:"upstream"`
+	Auth      AuthConfig       `yaml:"auth"`
+	RateLimit RateLimitConfig  `yaml:"rate_limit"`
+	Usage     UsageConfig      `yaml:"usage"`
+	Billing   BillingConfig    `yaml:"billing"`
+	Database  DatabaseConfig   `yaml:"database"`
+	Plans     []PlanConfig     `yaml:"plans"`
 	Endpoints []EndpointConfig `yaml:"endpoints"`
-	Logging   LoggingConfig   `yaml:"logging"`
+	Logging   LoggingConfig    `yaml:"logging"`
+	Metrics   MetricsConfig    `yaml:"metrics"`
 }
 
 // ServerConfig configures the HTTP server.
@@ -107,8 +108,14 @@ type EndpointConfig struct {
 
 // LoggingConfig configures logging.
 type LoggingConfig struct {
-	Level  string `yaml:"level"` // "debug", "info", "warn", "error"
+	Level  string `yaml:"level"`  // "debug", "info", "warn", "error"
 	Format string `yaml:"format"` // "json" or "console"
+}
+
+// MetricsConfig configures Prometheus metrics.
+type MetricsConfig struct {
+	Enabled bool   `yaml:"enabled"` // Enable /metrics endpoint
+	Path    string `yaml:"path"`    // Custom path (default: /metrics)
 }
 
 // Load reads configuration from a YAML file.

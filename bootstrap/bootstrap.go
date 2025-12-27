@@ -14,6 +14,7 @@ import (
 	apihttp "github.com/artpar/apigate/adapters/http"
 	"github.com/artpar/apigate/adapters/idgen"
 	"github.com/artpar/apigate/adapters/memory"
+	"github.com/artpar/apigate/adapters/metrics"
 	"github.com/artpar/apigate/adapters/remote"
 	"github.com/artpar/apigate/adapters/sqlite"
 	"github.com/artpar/apigate/app"
@@ -30,6 +31,7 @@ type App struct {
 	Logger       zerolog.Logger
 	DB           *sqlite.DB
 	HTTPServer   *http.Server
+	Metrics      *metrics.Collector
 
 	// Services (for hot reload)
 	proxyService *app.ProxyService
@@ -154,6 +156,12 @@ func (a *App) onConfigChange(cfg *config.Config) {
 		}
 	}
 
+	// Record config reload in metrics
+	if a.Metrics != nil {
+		a.Metrics.ConfigReloads.Inc()
+		a.Metrics.ConfigLastReload.SetToCurrentTime()
+	}
+
 	// Store new config
 	a.Config = cfg
 }
@@ -205,12 +213,26 @@ func (a *App) initHTTPServer() error {
 	// Create proxy service
 	a.proxyService = app.NewProxyService(deps, proxyCfg)
 
+	// Initialize metrics if enabled
+	if a.Config.Metrics.Enabled {
+		a.Metrics = metrics.New()
+		a.Logger.Info().Msg("prometheus metrics enabled")
+	}
+
 	// Create HTTP handlers
-	proxyHandler := apihttp.NewProxyHandler(a.proxyService, a.Logger)
+	var proxyHandler *apihttp.ProxyHandler
+	if a.Metrics != nil {
+		proxyHandler = apihttp.NewProxyHandlerWithMetrics(a.proxyService, a.Logger, a.Metrics)
+	} else {
+		proxyHandler = apihttp.NewProxyHandler(a.proxyService, a.Logger)
+	}
 	healthHandler := apihttp.NewHealthHandler(a.upstream)
 
-	// Create router
-	router := apihttp.NewRouter(proxyHandler, healthHandler, a.Logger)
+	// Create router with metrics if enabled
+	routerCfg := apihttp.RouterConfig{
+		Metrics: a.Metrics,
+	}
+	router := apihttp.NewRouterWithConfig(proxyHandler, healthHandler, a.Logger, routerCfg)
 
 	// Create HTTP server
 	addr := fmt.Sprintf("%s:%d", a.Config.Server.Host, a.Config.Server.Port)
