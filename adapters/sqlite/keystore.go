@@ -77,6 +77,29 @@ func (s *KeyStore) Revoke(ctx context.Context, id string, at time.Time) error {
 	return nil
 }
 
+// List returns all keys.
+func (s *KeyStore) List(ctx context.Context) ([]key.Key, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, user_id, hash, prefix, name, scopes, expires_at, revoked_at, created_at, last_used
+		FROM api_keys
+		ORDER BY created_at DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var keys []key.Key
+	for rows.Next() {
+		k, err := scanKey(rows)
+		if err != nil {
+			return nil, err
+		}
+		keys = append(keys, k)
+	}
+	return keys, rows.Err()
+}
+
 // ListByUser returns all keys for a user.
 func (s *KeyStore) ListByUser(ctx context.Context, userID string) ([]key.Key, error) {
 	rows, err := s.db.QueryContext(ctx, `
@@ -107,6 +130,31 @@ func (s *KeyStore) UpdateLastUsed(ctx context.Context, id string, at time.Time) 
 		UPDATE api_keys SET last_used = ? WHERE id = ?
 	`, at, id)
 	return err
+}
+
+// Update modifies an existing key.
+func (s *KeyStore) Update(ctx context.Context, k key.Key) error {
+	scopes, err := json.Marshal(k.Scopes)
+	if err != nil {
+		return err
+	}
+
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE api_keys
+		SET name = ?, scopes = ?, expires_at = ?, revoked_at = ?, last_used = ?
+		WHERE id = ?
+	`, k.Name, string(scopes), nullTime(k.ExpiresAt), nullTime(k.RevokedAt), nullTime(k.LastUsed), k.ID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // GetByID retrieves a key by ID.

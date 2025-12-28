@@ -2,13 +2,27 @@
 
 Self-hosted API monetization solution with authentication, rate limiting, usage metering, and multi-provider billing.
 
-**Architecture:** Values-as-boundaries for 100% testability
+## Core Principle: Operator Self-Onboarding
 
-## Progress: 9/24 tasks (38%) - MVP + Observability + OpenAPI COMPLETE
+> **Anyone can deploy, configure, and operate APIGate without reading source code or asking for help.**
+
+Every feature ships with:
+1. **CLI management** - Full control via command line
+2. **Validation** - Pre-flight checks before deploy
+3. **Introspection** - Diagnose issues without debugging
+4. **Sensible defaults** - Works out of box
+
+**Architecture:** Values-as-boundaries for 100% testability
 
 ---
 
-## Phase 1: MVP (COMPLETE)
+## Progress: 13/28 tasks (46%)
+
+---
+
+## Phase 1: Foundation + CLI (IN PROGRESS)
+
+Core proxy with full CLI management capability.
 
 | Status | Task | Description |
 |--------|------|-------------|
@@ -16,79 +30,162 @@ Self-hosted API monetization solution with authentication, rate limiting, usage 
 | ✅ | SQLite Storage | KeyStore, UserStore, RateLimitStore, UsageStore adapters |
 | ✅ | Proxy HTTP Handler | Auth → RateLimit → Forward → Meter |
 | ✅ | Pluggable Components | Remote adapters for auth, usage, billing delegation |
-| ✅ | Config & Bootstrap | YAML loader, main.go, CLI, graceful shutdown |
-| ✅ | E2E Test | Full flow verification with real HTTP |
+| ✅ | Config & Bootstrap | YAML loader, graceful shutdown |
 | ✅ | Hot Reload | Config file watching, SIGHUP, atomic updates |
+| ✅ | Prometheus Metrics | `/metrics` endpoint with request stats |
+| ✅ | OpenAPI/Swagger | Auto-generate spec at `/.well-known/openapi.json` |
+| ✅ | CLI Foundation | Cobra subcommands: serve, init, validate |
+| ✅ | User Management CLI | `apigate users list/create/delete` |
+| ✅ | Key Management CLI | `apigate keys list/create/revoke` |
+| ✅ | First-Run Bootstrap | Auto-detect empty DB, create admin |
+| ⬜ | Env Var Config | `APIGATE_*` environment variables for Docker |
 
-**Deliverable:** Working proxy that authenticates, rate limits, and forwards requests with hot reload.
+**CLI Structure:**
+```
+apigate serve               # Run proxy server (default)
+apigate init                # Interactive setup wizard
+apigate validate            # Validate config before deploy
+apigate migrate             # Run database migrations
+apigate version             # Show version info
+
+apigate users list          # List all users
+apigate users create        # Create user (interactive or flags)
+apigate users delete <id>   # Delete user
+
+apigate keys list           # List all keys
+apigate keys create         # Create key for user
+apigate keys revoke <id>    # Revoke key
+```
+
+**First-Run Experience:**
+```bash
+$ apigate serve
+No configuration found. Run 'apigate init' to get started.
+
+$ apigate init
+Welcome to APIGate!
+
+? Upstream API URL: https://api.myservice.com
+? Database location [./apigate.db]:
+? Create admin user? Yes
+? Admin email: admin@example.com
+
+✓ Generated apigate.yaml
+✓ Created database
+✓ Created admin user
+
+Admin API Key (save this, shown once):
+  ak_abc123...
+
+Run 'apigate serve' to start.
+```
+
+**Deliverable:** Fully operable proxy via CLI only.
 
 ---
 
-## Phase 2: Transparency & APIs (NEXT)
+## Phase 2: Admin REST API
 
-Make the system self-documenting and add management APIs.
+REST API for programmatic management (powers future UI).
 
-| Status | Task | Description | 3rd Party Libs |
-|--------|------|-------------|----------------|
-| ✅ | 2.1 OpenAPI/Swagger | Auto-generate spec at `/.well-known/openapi.json` | `swaggo/swag` |
-| ⬜ | 2.2 Admin REST API | CRUD users, keys, plans; view usage | `go-playground/validator` |
-| ⬜ | 2.3 Portal REST API | Self-service: register, login, manage keys | `golang-jwt/jwt/v5` |
-| ✅ | 2.4 Prometheus Metrics | `/metrics` endpoint with request stats | `prometheus/client_golang` |
-
-**Dependencies:**
-```
-2.1 OpenAPI → 2.2 Admin API → 2.3 Portal API → Phase 3
-                            ↘ 2.4 Metrics (parallel)
-```
+| Status | Task | Description |
+|--------|------|-------------|
+| ⬜ | Admin Auth | Admin API key authentication |
+| ⬜ | Users API | `POST/GET/DELETE /admin/users` |
+| ⬜ | Keys API | `POST/GET/DELETE /admin/keys` |
+| ⬜ | Plans API | `GET /admin/plans`, `GET /admin/usage` |
+| ⬜ | Doctor Endpoint | `GET /admin/doctor` system health |
 
 **API Structure:**
 ```
-/admin/*     - Protected by admin key, CRUD operations
-/portal/*    - JWT auth, self-service for developers
-/metrics     - Prometheus scrape endpoint
-/.well-known/openapi.json - API specification
+POST   /admin/users          - Create user
+GET    /admin/users          - List users
+GET    /admin/users/:id      - Get user
+DELETE /admin/users/:id      - Delete user
+
+POST   /admin/keys           - Create key
+GET    /admin/keys           - List keys
+DELETE /admin/keys/:id       - Revoke key
+
+GET    /admin/plans          - List plans
+GET    /admin/usage          - Usage statistics
+GET    /admin/doctor         - System health check
 ```
+
+**Deliverable:** Full REST API for management automation.
 
 ---
 
-## Phase 3: Payment Integration
+## Phase 3: Portal API (Self-Service)
 
-Integrate payment providers for monetization.
-
-| Status | Task | Description | 3rd Party Libs |
-|--------|------|-------------|----------------|
-| ⬜ | 3.1 Provider Interface | Abstract port: CreateCustomer, CreateSubscription, RecordUsage | - |
-| ⬜ | 3.2 Stripe Adapter | Subscriptions, usage billing, webhooks | `stripe/stripe-go` |
-| ⬜ | 3.3 Paddle Adapter | EU/VAT compliant, international | Paddle API |
-| ⬜ | 3.4 LemonSqueezy | Simple alternative for indie devs | LemonSqueezy API |
-
-**Dependencies:**
-```
-3.1 Provider Interface → 3.2 Stripe → 3.3 Paddle → 3.4 LemonSqueezy
-                                    ↘ (parallel)  ↗
-```
-
----
-
-## Phase 4: Self-Onboarding & DX
-
-Make it trivial for new users to get started.
+Let developers manage their own keys.
 
 | Status | Task | Description |
 |--------|------|-------------|
-| ⬜ | Quick Start Script | `curl -sSL https://apigate.dev/install.sh \| sh` |
-| ⬜ | Interactive Wizard | `apigate init` with prompts |
-| ⬜ | Example Configs | FastAPI, Express, Rails, Django templates |
+| ⬜ | JWT Authentication | Login/register flow |
+| ⬜ | Self-Service Keys | Create/revoke own keys |
+| ⬜ | Usage Dashboard | View own usage |
+| ⬜ | Plan Selection | Choose/upgrade plan |
+
+**API Structure:**
+```
+POST   /portal/register      - Create account
+POST   /portal/login         - Get JWT
+GET    /portal/me            - Get profile
+POST   /portal/keys          - Create key
+GET    /portal/keys          - List own keys
+DELETE /portal/keys/:id      - Revoke own key
+GET    /portal/usage         - View usage
+```
+
+**Deliverable:** Developers can self-serve without admin.
+
+---
+
+## Phase 4: Billing Integration
+
+Payment provider integration with CLI management.
+
+| Status | Task | Description |
+|--------|------|-------------|
+| ⬜ | Billing Interface | Abstract port for providers |
+| ⬜ | Stripe Adapter | Subscriptions, usage billing |
+| ⬜ | Paddle Adapter | EU/VAT compliant |
+| ⬜ | LemonSqueezy | Indie-friendly option |
+| ⬜ | Billing CLI | `apigate billing status/sync` |
+
+**Deliverable:** Monetization with any major provider.
+
+---
+
+## Phase 5: Distribution & Operations
+
+Production deployment tooling.
+
+| Status | Task | Description |
+|--------|------|-------------|
+| ⬜ | Docker Image | Multi-arch, minimal base |
 | ⬜ | Docker Compose | One-command production setup |
+| ⬜ | Helm Chart | Kubernetes deployment |
+| ⬜ | Install Script | `curl \| sh` installer |
+| ⬜ | Backup/Restore | `apigate backup/restore` |
+| ⬜ | Upgrade CLI | `apigate upgrade` with rollback |
+
+**Deliverable:** Deploy anywhere with confidence.
 
 ---
 
-## Phase 5: Admin UI (Future)
+## Phase 6: Admin UI (Optional)
+
+Web interface built on Admin API.
 
 | Status | Task | Description |
 |--------|------|-------------|
-| ⬜ | Admin Dashboard | User/key management, analytics (React/htmx) |
-| ⬜ | Developer Portal | Self-service, usage, billing |
+| ⬜ | Admin Dashboard | User/key management |
+| ⬜ | Analytics | Usage graphs, trends |
+| ⬜ | Developer Portal | Self-service UI |
+
+**Deliverable:** Visual management (optional, CLI is primary).
 
 ---
 
@@ -96,6 +193,9 @@ Make it trivial for new users to get started.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
+│                         CLI Layer                            │
+│  serve │ init │ validate │ users │ keys │ backup │ doctor   │
+├─────────────────────────────────────────────────────────────┤
 │                      HTTP Layer                              │
 ├─────────────┬─────────────┬─────────────┬─────────┬─────────┤
 │   Proxy     │  Admin API  │ Portal API  │ Metrics │ OpenAPI │
@@ -117,50 +217,38 @@ Make it trivial for new users to get started.
 
 ---
 
-## 3rd Party Libraries
+## Environment Variables
 
-| Category | Library | Purpose |
-|----------|---------|---------|
-| Router | `go-chi/chi` | HTTP routing (already using) |
-| Logging | `rs/zerolog` | Structured logging (already using) |
-| Crypto | `golang.org/x/crypto/bcrypt` | Password hashing (already using) |
-| File Watcher | `fsnotify/fsnotify` | Hot reload config (already using) |
-| OpenAPI | `swaggo/swag` | Auto-generate OpenAPI from annotations |
-| Validation | `go-playground/validator` | Request validation |
-| JWT | `golang-jwt/jwt/v5` | Portal authentication |
-| Metrics | `prometheus/client_golang` | Prometheus metrics |
-| Stripe | `stripe/stripe-go` | Payment processing |
+All config can be set via `APIGATE_*` env vars:
+
+```bash
+APIGATE_UPSTREAM_URL=https://api.myservice.com
+APIGATE_DATABASE_DSN=./data/apigate.db
+APIGATE_SERVER_PORT=8080
+APIGATE_AUTH_MODE=local
+APIGATE_ADMIN_EMAIL=admin@example.com  # First-run only
+APIGATE_LOG_LEVEL=info
+APIGATE_LOG_FORMAT=json
+```
 
 ---
 
-## Pluggable Architecture
+## Docker Experience
 
-Components can run locally or delegate to external services:
-
-| Component | Local Mode | Remote Mode |
-|-----------|------------|-------------|
-| Auth | SQLite KeyStore | HTTP call to your auth API |
-| Usage | SQLite UsageStore | HTTP POST to your analytics |
-| Billing | Stripe/Paddle/Lemon | HTTP call to your billing API |
-
-Configuration:
 ```yaml
-auth:
-  mode: "remote"
-  remote:
-    url: "https://your-auth.com/api"
-    api_key: "${AUTH_API_KEY}"
-
-usage:
-  mode: "remote"
-  remote:
-    url: "https://your-analytics.com/api"
-
-billing:
-  mode: "remote"
-  remote:
-    url: "https://your-billing.com/api"
+services:
+  apigate:
+    image: apigate/apigate
+    environment:
+      - APIGATE_UPSTREAM_URL=https://api.myservice.com
+      - APIGATE_ADMIN_EMAIL=admin@example.com
+    volumes:
+      - ./data:/data
+    ports:
+      - "8080:8080"
 ```
+
+First run auto-creates admin and prints API key to logs.
 
 ---
 
@@ -182,11 +270,10 @@ billing:
 
 ## Principles
 
-1. **Values as Boundaries** - Pure domain, I/O at edges
-2. **Dependency Injection** - All via ports interfaces
-3. **No Mocks in Domain** - Pure functions don't need them
-4. **Incremental Delivery** - Each phase is deployable
-5. **Self-Documenting** - OpenAPI, CLI help, embedded docs
-6. **Pluggable by Default** - Local or remote for each component
-7. **3rd-Party Libraries** - Use battle-tested libs, maintain interfaces
-8. **Transparency** - Debug mode, metrics, request tracing
+1. **Operator Self-Onboarding** - Deploy without support
+2. **CLI-First** - Full control via command line
+3. **Values as Boundaries** - Pure domain, I/O at edges
+4. **Dependency Injection** - All via ports interfaces
+5. **Incremental Delivery** - Each phase is deployable
+6. **Sensible Defaults** - Works out of box
+7. **Transparency** - Validate, doctor, introspect

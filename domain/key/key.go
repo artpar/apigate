@@ -2,7 +2,14 @@
 // This package has NO dependencies on I/O or external packages.
 package key
 
-import "time"
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"time"
+
+	"golang.org/x/crypto/bcrypt"
+)
 
 // Key represents an API key (immutable value type).
 type Key struct {
@@ -51,3 +58,49 @@ const (
 	ReasonBadFormat   = "invalid_format"
 	ReasonUserSuspend = "user_suspended"
 )
+
+// Generate creates a new API key with the given prefix.
+// Returns the raw key (to give to user) and the Key struct (to store).
+// The raw key is: prefix + 64 hex chars (total 67 chars for "ak_" prefix).
+func Generate(prefix string) (rawKey string, k Key) {
+	// Generate 32 random bytes = 64 hex chars
+	randomBytes := make([]byte, 32)
+	if _, err := rand.Read(randomBytes); err != nil {
+		panic(fmt.Sprintf("crypto/rand failed: %v", err))
+	}
+
+	randomHex := hex.EncodeToString(randomBytes)
+	rawKey = prefix + randomHex
+
+	// Hash the raw key
+	hash, err := bcrypt.GenerateFromPassword([]byte(rawKey), bcrypt.DefaultCost)
+	if err != nil {
+		panic(fmt.Sprintf("bcrypt failed: %v", err))
+	}
+
+	// Generate key ID
+	idBytes := make([]byte, 8)
+	rand.Read(idBytes)
+	keyID := "key_" + hex.EncodeToString(idBytes)
+
+	k = Key{
+		ID:        keyID,
+		Hash:      hash,
+		Prefix:    rawKey[:12], // First 12 chars for lookup
+		CreatedAt: time.Now().UTC(),
+	}
+
+	return rawKey, k
+}
+
+// WithUserID returns a copy of the key with the UserID set.
+func (k Key) WithUserID(userID string) Key {
+	k.UserID = userID
+	return k
+}
+
+// WithName returns a copy of the key with the Name set.
+func (k Key) WithName(name string) Key {
+	k.Name = name
+	return k
+}
