@@ -83,15 +83,15 @@ type HeaderMatch struct {
 // All string values can be Expr expressions.
 type Transform struct {
 	// Header operations
-	SetHeaders    map[string]string // Header name -> value (can be Expr)
-	DeleteHeaders []string          // Headers to remove
+	SetHeaders    map[string]string `json:"set_headers,omitempty"`    // Header name -> value (can be Expr)
+	DeleteHeaders []string          `json:"delete_headers,omitempty"` // Headers to remove
 
 	// Body transformation
-	BodyExpr string // Expr expression that returns new body (JSON)
+	BodyExpr string `json:"body_expr,omitempty"` // Expr expression that returns new body (JSON)
 
 	// Query parameter operations
-	SetQuery    map[string]string // Query param name -> value (can be Expr)
-	DeleteQuery []string          // Query params to remove
+	SetQuery    map[string]string `json:"set_query,omitempty"`    // Query param name -> value (can be Expr)
+	DeleteQuery []string          `json:"delete_query,omitempty"` // Query params to remove
 }
 
 // Upstream represents a backend service configuration (immutable value type).
