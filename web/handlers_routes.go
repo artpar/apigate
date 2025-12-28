@@ -1,10 +1,12 @@
 package web
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/artpar/apigate/app"
 	"github.com/artpar/apigate/domain/route"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -448,4 +450,75 @@ func parseKeyValue(s string) map[string]string {
 		}
 	}
 	return result
+}
+
+// ValidateExpr validates an Expr expression via JSON API.
+// POST /api/expr/validate
+// Request: {"expression": "...", "context": "request|response|streaming"}
+// Response: {"valid": true/false, "error": "...", "message": "..."}
+func (h *Handler) ValidateExpr(w http.ResponseWriter, r *http.Request) {
+	if h.exprValidator == nil {
+		http.Error(w, "Expression validation not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	var req struct {
+		Expression string `json:"expression"`
+		Context    string `json:"context"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]any{
+			"valid": false,
+			"error": "Invalid JSON request",
+		})
+		return
+	}
+
+	// Default context to "request" if not specified
+	if req.Context == "" {
+		req.Context = "request"
+	}
+
+	result := h.exprValidator.ValidateExpr(req.Expression, req.Context)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+// TestRoute tests route matching and transformation.
+// POST /api/routes/test
+// Request: {"method": "POST", "path": "/v1/chat", "headers": {...}, "body": "...", "route_id": "..."}
+// Response: RouteTestResult JSON
+func (h *Handler) TestRoute(w http.ResponseWriter, r *http.Request) {
+	if h.routeTester == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(app.RouteTestResult{
+			Error: "Route testing not available",
+		})
+		return
+	}
+
+	var req app.RouteTestRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(app.RouteTestResult{
+			Error: "Invalid JSON request: " + err.Error(),
+		})
+		return
+	}
+
+	// Default method if not specified
+	if req.Method == "" {
+		req.Method = "GET"
+	}
+
+	result := h.routeTester.TestRoute(req)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
 }

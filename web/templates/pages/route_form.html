@@ -1,5 +1,5 @@
 {{define "content"}}
-<div class="page" style="max-width: 800px;">
+<div class="page" style="max-width: 900px;">
     <div class="mb-4">
         <a href="/routes" class="link text-sm">&larr; Back to Routes</a>
     </div>
@@ -7,48 +7,106 @@
         <h1 class="page-title">{{if .IsNew}}Create Route{{else}}Edit Route{{end}}</h1>
     </div>
 
+    {{if .IsNew}}
+    <!-- Quick Start Templates -->
+    <div class="card mb-4">
+        <div class="section-header">
+            <div class="section-title">Quick Start: Choose a Template</div>
+        </div>
+        <div class="card-body">
+            <p class="form-hint mb-4">Select a template to pre-fill the form, or start from scratch below.</p>
+            <div class="use-case-grid">
+                <div class="use-case-card" onclick="applyTemplate('simple')">
+                    <div class="use-case-icon">&#128640;</div>
+                    <div class="use-case-title">Simple Proxy</div>
+                    <div class="use-case-desc">Forward requests to upstream with no transformation</div>
+                </div>
+                <div class="use-case-card" onclick="applyTemplate('llm')">
+                    <div class="use-case-icon">&#129302;</div>
+                    <div class="use-case-title">LLM API</div>
+                    <div class="use-case-desc">OpenAI/Anthropic style with token metering</div>
+                </div>
+                <div class="use-case-card" onclick="applyTemplate('sse')">
+                    <div class="use-case-icon">&#128225;</div>
+                    <div class="use-case-title">SSE Streaming</div>
+                    <div class="use-case-desc">Server-Sent Events with accumulated metering</div>
+                </div>
+                <div class="use-case-card" onclick="applyTemplate('rewrite')">
+                    <div class="use-case-icon">&#128260;</div>
+                    <div class="use-case-title">URL Rewrite</div>
+                    <div class="use-case-desc">Transform paths between API versions</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {{end}}
+
     <form action="{{if .IsNew}}/routes{{else}}/routes/{{.Route.ID}}{{end}}" method="POST" class="form">
         <!-- Basic Info -->
         <div class="card mb-4">
-            <div class="card-header">Basic Information</div>
+            <div class="section-header">
+                <div class="section-title">
+                    Basic Information
+                    <span class="info-tooltip" data-tip="Define how this route is identified and when it matches incoming requests. Routes with higher priority are evaluated first.">?</span>
+                </div>
+            </div>
             <div class="card-body">
                 <div class="form-group">
-                    <label for="name" class="form-label">Name</label>
-                    <input type="text" id="name" name="name" required class="form-input" placeholder="my-route" value="{{.Route.Name}}">
+                    <label for="name" class="form-label">
+                        Name
+                        <span class="info-tooltip" data-tip="A human-readable identifier for this route. Use lowercase with hyphens (e.g., 'openai-chat', 'image-gen'). This appears in logs and the admin UI.">?</span>
+                    </label>
+                    <input type="text" id="name" name="name" required class="form-input" placeholder="my-api-route" value="{{.Route.Name}}">
                 </div>
 
                 <div class="form-row">
                     <div class="form-group" style="flex: 2;">
-                        <label for="path_pattern" class="form-label">Path Pattern</label>
+                        <label for="path_pattern" class="form-label">
+                            Path Pattern
+                            <span class="info-tooltip" data-tip="The URL path to match. Use * for wildcards (/api/*), {param} for path parameters (/users/{id}), or regex patterns when Match Type is 'regex'.">?</span>
+                        </label>
                         <input type="text" id="path_pattern" name="path_pattern" required class="form-input" placeholder="/api/v1/*" value="{{.Route.PathPattern}}">
-                        <div class="form-hint">Use * for wildcards, {param} for path parameters</div>
+                        <div class="form-hint">Examples: <code>/v1/chat/completions</code>, <code>/api/*</code>, <code>/users/{id}</code></div>
                     </div>
                     <div class="form-group" style="flex: 1;">
-                        <label for="match_type" class="form-label">Match Type</label>
+                        <label for="match_type" class="form-label">
+                            Match Type
+                            <span class="info-tooltip" data-tip="Exact: path must match exactly. Prefix: path must start with pattern. Regex: pattern is a regular expression.">?</span>
+                        </label>
                         <select id="match_type" name="match_type" class="form-input">
-                            <option value="exact" {{if eq .Route.MatchType "exact"}}selected{{end}}>Exact</option>
-                            <option value="prefix" {{if eq .Route.MatchType "prefix"}}selected{{end}}>Prefix</option>
-                            <option value="regex" {{if eq .Route.MatchType "regex"}}selected{{end}}>Regex</option>
+                            <option value="exact" {{if eq .Route.MatchType "exact"}}selected{{end}}>Exact - path must match exactly</option>
+                            <option value="prefix" {{if eq .Route.MatchType "prefix"}}selected{{end}}>Prefix - path starts with pattern</option>
+                            <option value="regex" {{if eq .Route.MatchType "regex"}}selected{{end}}>Regex - regular expression match</option>
                         </select>
                     </div>
                 </div>
 
                 <div class="form-group">
-                    <label for="methods" class="form-label">Methods (comma-separated, empty = all)</label>
-                    <input type="text" id="methods" name="methods" class="form-input" placeholder="GET, POST, PUT, DELETE" value="{{range $i, $m := .Route.Methods}}{{if $i}}, {{end}}{{$m}}{{end}}">
+                    <label for="methods" class="form-label">
+                        HTTP Methods
+                        <span class="info-tooltip" data-tip="Comma-separated list of HTTP methods this route handles. Leave empty to match ALL methods (GET, POST, PUT, DELETE, etc.).">?</span>
+                    </label>
+                    <input type="text" id="methods" name="methods" class="form-input" placeholder="Leave empty for all methods, or: GET, POST" value="{{range $i, $m := .Route.Methods}}{{if $i}}, {{end}}{{$m}}{{end}}">
+                    <div class="field-hint info">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        Empty = all methods. Common: <code>POST</code> for APIs, <code>GET, POST</code> for web endpoints.
+                    </div>
                 </div>
 
                 <div class="form-row">
                     <div class="form-group" style="flex: 1;">
-                        <label for="priority" class="form-label">Priority</label>
-                        <input type="number" id="priority" name="priority" class="form-input" value="{{.Route.Priority}}">
-                        <div class="form-hint">Higher priority routes are matched first</div>
+                        <label for="priority" class="form-label">
+                            Priority
+                            <span class="info-tooltip" data-tip="Routes are evaluated from highest to lowest priority. Use higher values (e.g., 100) for specific routes like /api/v1/chat/completions and lower values (e.g., 0) for catch-all routes like /api/*.">?</span>
+                        </label>
+                        <input type="number" id="priority" name="priority" class="form-input" value="{{.Route.Priority}}" placeholder="0">
+                        <div class="form-hint">Higher = matched first. Specific routes should have higher priority than wildcards.</div>
                     </div>
                     <div class="form-group" style="flex: 1;">
                         <label class="form-label">&nbsp;</label>
-                        <label class="form-checkbox">
+                        <label class="form-checkbox" style="margin-top: 10px;">
                             <input type="checkbox" name="enabled" {{if .Route.Enabled}}checked{{end}}>
-                            <span>Enabled</span>
+                            <span>Route Enabled</span>
                         </label>
                     </div>
                 </div>
@@ -57,60 +115,162 @@
 
         <!-- Upstream Configuration -->
         <div class="card mb-4">
-            <div class="card-header">Upstream Configuration</div>
+            <div class="section-header">
+                <div class="section-title">
+                    Target & Routing
+                    <span class="info-tooltip" data-tip="Configure where requests are forwarded and how paths/methods are transformed before forwarding.">?</span>
+                </div>
+            </div>
             <div class="card-body">
                 <div class="form-group">
-                    <label for="upstream_id" class="form-label">Target Upstream</label>
+                    <label for="upstream_id" class="form-label">
+                        Target Upstream
+                        <span class="info-tooltip" data-tip="Select the backend service to forward requests to. Upstreams define the base URL and authentication for backend APIs. Create upstreams in the Upstreams page.">?</span>
+                    </label>
                     <select id="upstream_id" name="upstream_id" class="form-input">
-                        <option value="">-- Select Upstream --</option>
+                        <option value="">-- Select an Upstream --</option>
                         {{range .Upstreams}}
                         <option value="{{.ID}}" {{if eq .ID $.Route.UpstreamID}}selected{{end}}>{{.Name}} ({{.BaseURL}})</option>
                         {{end}}
                     </select>
+                    {{if not .Upstreams}}
+                    <div class="field-hint">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                        No upstreams found. <a href="/upstreams/new" class="link">Create an upstream first</a>.
+                    </div>
+                    {{end}}
                 </div>
 
                 <div class="form-row">
                     <div class="form-group" style="flex: 2;">
-                        <label for="path_rewrite" class="form-label">Path Rewrite (Expr)</label>
-                        <input type="text" id="path_rewrite" name="path_rewrite" class="form-input" placeholder='"/v2" + trimPrefix(path, "/v1")' value="{{.Route.PathRewrite}}">
-                        <div class="form-hint">Expression to transform the path</div>
+                        <label for="path_rewrite" class="form-label">
+                            Path Rewrite
+                            <span class="info-tooltip" data-tip="An Expr expression that transforms the request path before forwarding. Leave empty to forward the original path unchanged.">?</span>
+                        </label>
+                        <input type="text" id="path_rewrite" name="path_rewrite" class="form-input expr-input" placeholder='"/v2" + trimPrefix(path, "/v1")' value="{{.Route.PathRewrite}}">
+                        <div class="context-vars">
+                            <span class="context-var" onclick="insertVar('path_rewrite', 'path')">path</span>
+                            <span class="context-var" onclick="insertVar('path_rewrite', 'method')">method</span>
+                            <span class="context-var" onclick="insertVar('path_rewrite', 'trimPrefix(path, &quot;/old&quot;)')">trimPrefix()</span>
+                            <span class="context-var" onclick="insertVar('path_rewrite', 'replace(path, &quot;old&quot;, &quot;new&quot;)')">replace()</span>
+                        </div>
+                        <button type="button" class="help-toggle" onclick="toggleHelp(this)" aria-expanded="false">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+                            Show Examples
+                        </button>
+                        <div class="help-content">
+                            <strong>Common Path Rewrite Patterns:</strong>
+                            <div class="example-block">
+                                <div class="example-header"><span class="example-label">Version Migration</span></div>
+                                <div class="example-code">"/v2" + trimPrefix(path, "/v1")</div>
+                            </div>
+                            <div class="example-block">
+                                <div class="example-header"><span class="example-label">Add Prefix</span></div>
+                                <div class="example-code">"/api" + path</div>
+                            </div>
+                            <div class="example-block">
+                                <div class="example-header"><span class="example-label">Remove Prefix</span></div>
+                                <div class="example-code">trimPrefix(path, "/proxy")</div>
+                            </div>
+                        </div>
                     </div>
                     <div class="form-group" style="flex: 1;">
-                        <label for="method_override" class="form-label">Method Override</label>
-                        <input type="text" id="method_override" name="method_override" class="form-input" placeholder="POST" value="{{.Route.MethodOverride}}">
+                        <label for="method_override" class="form-label">
+                            Method Override
+                            <span class="info-tooltip" data-tip="Change the HTTP method when forwarding. Leave empty to use the original method. Useful when wrapping REST APIs.">?</span>
+                        </label>
+                        <input type="text" id="method_override" name="method_override" class="form-input" placeholder="e.g., POST" value="{{.Route.MethodOverride}}">
                     </div>
                 </div>
 
                 <div class="form-group">
-                    <label for="protocol" class="form-label">Protocol</label>
-                    <select id="protocol" name="protocol" class="form-input">
-                        <option value="http" {{if eq .Route.Protocol "http"}}selected{{end}}>HTTP (buffered)</option>
-                        <option value="http_stream" {{if eq .Route.Protocol "http_stream"}}selected{{end}}>HTTP Stream (chunked)</option>
-                        <option value="sse" {{if eq .Route.Protocol "sse"}}selected{{end}}>SSE (Server-Sent Events)</option>
-                        <option value="websocket" {{if eq .Route.Protocol "websocket"}}selected{{end}}>WebSocket</option>
+                    <label for="protocol" class="form-label">
+                        Protocol
+                        <span class="info-tooltip" data-tip="How to handle the upstream response. HTTP buffers the full response. SSE/HTTP Stream forward chunks in real-time for streaming APIs.">?</span>
+                    </label>
+                    <select id="protocol" name="protocol" class="form-input" onchange="updateProtocolHint()">
+                        <option value="http" {{if eq .Route.Protocol "http"}}selected{{end}}>HTTP (buffered) - Standard request/response</option>
+                        <option value="http_stream" {{if eq .Route.Protocol "http_stream"}}selected{{end}}>HTTP Stream - Chunked transfer encoding</option>
+                        <option value="sse" {{if eq .Route.Protocol "sse"}}selected{{end}}>SSE - Server-Sent Events streaming</option>
+                        <option value="websocket" {{if eq .Route.Protocol "websocket"}}selected{{end}}>WebSocket - Bidirectional (coming soon)</option>
                     </select>
+                    <div id="protocol-hint" class="field-hint info" style="display: none;">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        <span id="protocol-hint-text"></span>
+                    </div>
                 </div>
             </div>
         </div>
 
         <!-- Metering -->
         <div class="card mb-4">
-            <div class="card-header">Usage Metering</div>
+            <div class="section-header">
+                <div class="section-title">
+                    Usage Metering
+                    <span class="info-tooltip" data-tip="Configure how usage is counted for billing and rate limiting. The metering expression extracts a numeric value from the response.">?</span>
+                </div>
+            </div>
             <div class="card-body">
                 <div class="form-row">
                     <div class="form-group" style="flex: 1;">
-                        <label for="metering_mode" class="form-label">Mode</label>
-                        <select id="metering_mode" name="metering_mode" class="form-input">
-                            <option value="request" {{if eq .Route.MeteringMode "request"}}selected{{end}}>Per Request (count=1)</option>
+                        <label for="metering_mode" class="form-label">
+                            Mode
+                            <span class="info-tooltip" data-tip="Preset metering modes. 'Custom Expression' lets you write any Expr formula to extract usage from the response.">?</span>
+                        </label>
+                        <select id="metering_mode" name="metering_mode" class="form-input" onchange="updateMeteringExpr()">
+                            <option value="request" {{if eq .Route.MeteringMode "request"}}selected{{end}}>Per Request (count = 1)</option>
                             <option value="response_field" {{if eq .Route.MeteringMode "response_field"}}selected{{end}}>Response Field</option>
                             <option value="bytes" {{if eq .Route.MeteringMode "bytes"}}selected{{end}}>Response Bytes</option>
                             <option value="custom" {{if eq .Route.MeteringMode "custom"}}selected{{end}}>Custom Expression</option>
                         </select>
                     </div>
                     <div class="form-group" style="flex: 2;">
-                        <label for="metering_expr" class="form-label">Metering Expression</label>
-                        <input type="text" id="metering_expr" name="metering_expr" class="form-input" placeholder='respBody.usage.total_tokens ?? 1' value="{{.Route.MeteringExpr}}">
-                        <div class="form-hint">Expr to extract usage value from response</div>
+                        <label for="metering_expr" class="form-label">
+                            Metering Expression
+                            <span class="info-tooltip" data-tip="An Expr expression that returns a number. This value is recorded as usage units for billing and rate limiting.">?</span>
+                        </label>
+                        <input type="text" id="metering_expr" name="metering_expr" class="form-input expr-input" placeholder='1' value="{{.Route.MeteringExpr}}">
+                        <div class="context-vars" id="metering-context-vars">
+                            <span class="context-var" onclick="insertVar('metering_expr', 'respBody')">respBody</span>
+                            <span class="context-var" onclick="insertVar('metering_expr', 'responseBytes')">responseBytes</span>
+                            <span class="context-var" onclick="insertVar('metering_expr', 'status')">status</span>
+                            <span class="context-var" onclick="insertVar('metering_expr', 'allData')">allData</span>
+                        </div>
+                    </div>
+                </div>
+                <button type="button" class="help-toggle" onclick="toggleHelp(this)" aria-expanded="false">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+                    Show Metering Examples
+                </button>
+                <div class="help-content">
+                    <strong>Common Metering Patterns:</strong>
+                    <div class="example-block">
+                        <div class="example-header"><span class="example-label">LLM Tokens (OpenAI style)</span></div>
+                        <div class="example-code">get(respBody, "usage.total_tokens") ?? 1</div>
+                    </div>
+                    <div class="example-block">
+                        <div class="example-header"><span class="example-label">SSE Stream Tokens</span></div>
+                        <div class="example-code">json(sseLastData(allData)).usage.total_tokens ?? 1</div>
+                    </div>
+                    <div class="example-block">
+                        <div class="example-header"><span class="example-label">Anthropic Tokens</span></div>
+                        <div class="example-code">(json(sseEvents(allData)[0].data).message.usage.input_tokens ?? 0) + (json(sseEvents(allData)[count(sseEvents(allData))-2].data).usage.output_tokens ?? 0)</div>
+                    </div>
+                    <div class="example-block">
+                        <div class="example-header"><span class="example-label">Response Size (KB)</span></div>
+                        <div class="example-code">responseBytes / 1024</div>
+                    </div>
+                    <div class="example-block">
+                        <div class="example-header"><span class="example-label">Array Item Count</span></div>
+                        <div class="example-code">len(respBody)</div>
+                    </div>
+                    <div class="example-block">
+                        <div class="example-header"><span class="example-label">Nested Field with Default</span></div>
+                        <div class="example-code">get(respBody, "data.credits_used") ?? 1</div>
+                    </div>
+                    <div class="example-block">
+                        <div class="example-header"><span class="example-label">Conditional (only on success)</span></div>
+                        <div class="example-code">status < 400 ? respBody.units : 0</div>
                     </div>
                 </div>
             </div>
@@ -118,53 +278,424 @@
 
         <!-- Request Transform -->
         <div class="card mb-4">
-            <div class="card-header">Request Transform</div>
+            <div class="section-header">
+                <div class="section-title">
+                    Request Transform
+                    <span class="info-tooltip" data-tip="Modify the request before forwarding to the upstream. Add/remove headers, query parameters, or transform the request body.">?</span>
+                </div>
+                <div class="section-actions">
+                    <span class="badge badge-info">Optional</span>
+                </div>
+            </div>
             <div class="card-body">
                 <div class="form-group">
-                    <label for="request_set_headers" class="form-label">Set Headers (one per line: Header-Name=Expr)</label>
-                    <textarea id="request_set_headers" name="request_set_headers" class="form-input" rows="3" placeholder='X-Custom-Header="value"&#10;Authorization="Bearer " + env("API_KEY")'>{{range $k, $v := .Route.RequestTransform.SetHeaders}}{{$k}}={{$v}}
-{{end}}</textarea>
+                    <label for="request_set_headers" class="form-label">
+                        Set Headers
+                        <span class="info-tooltip" data-tip="Add or override request headers. One per line as Header-Name=Expr. Values are Expr expressions, so wrap strings in quotes.">?</span>
+                    </label>
+                    <textarea id="request_set_headers" name="request_set_headers" class="form-input" rows="3" placeholder='X-Custom-Header="value"
+Authorization="Bearer " + env("API_KEY")'>{{if .Route.RequestTransform}}{{range $k, $v := .Route.RequestTransform.SetHeaders}}{{$k}}={{$v}}
+{{end}}{{end}}</textarea>
+                    <div class="context-vars">
+                        <span class="context-var" onclick="insertVar('request_set_headers', 'env(&quot;VAR&quot;)')">env()</span>
+                        <span class="context-var" onclick="insertVar('request_set_headers', 'userID')">userID</span>
+                        <span class="context-var" onclick="insertVar('request_set_headers', 'keyID')">keyID</span>
+                        <span class="context-var" onclick="insertVar('request_set_headers', 'planID')">planID</span>
+                    </div>
                 </div>
                 <div class="form-group">
-                    <label for="request_delete_headers" class="form-label">Delete Headers (comma-separated)</label>
-                    <input type="text" id="request_delete_headers" name="request_delete_headers" class="form-input" placeholder="X-Remove-This, X-And-This" value="{{range $i, $h := .Route.RequestTransform.DeleteHeaders}}{{if $i}}, {{end}}{{$h}}{{end}}">
+                    <label for="request_delete_headers" class="form-label">
+                        Delete Headers
+                        <span class="info-tooltip" data-tip="Headers to remove from the request before forwarding. Comma-separated list of header names.">?</span>
+                    </label>
+                    <input type="text" id="request_delete_headers" name="request_delete_headers" class="form-input" placeholder="X-Remove-This, X-And-This" value="{{if .Route.RequestTransform}}{{range $i, $h := .Route.RequestTransform.DeleteHeaders}}{{if $i}}, {{end}}{{$h}}{{end}}{{end}}">
                 </div>
                 <div class="form-group">
-                    <label for="request_set_query" class="form-label">Set Query Params (one per line: param=Expr)</label>
-                    <textarea id="request_set_query" name="request_set_query" class="form-input" rows="2" placeholder='api_key=env("API_KEY")'>{{range $k, $v := .Route.RequestTransform.SetQuery}}{{$k}}={{$v}}
-{{end}}</textarea>
+                    <label for="request_set_query" class="form-label">
+                        Set Query Parameters
+                        <span class="info-tooltip" data-tip="Add or override URL query parameters. One per line as param=Expr. Used for APIs that require API keys in the URL.">?</span>
+                    </label>
+                    <textarea id="request_set_query" name="request_set_query" class="form-input" rows="2" placeholder='key=env("API_KEY")
+alt="sse"'>{{if .Route.RequestTransform}}{{range $k, $v := .Route.RequestTransform.SetQuery}}{{$k}}={{$v}}
+{{end}}{{end}}</textarea>
+                    <button type="button" class="help-toggle" onclick="toggleHelp(this)" aria-expanded="false">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+                        Show Query Parameter Examples
+                    </button>
+                    <div class="help-content">
+                        <strong>Query Parameter Use Cases:</strong>
+                        <p style="margin-bottom: 12px;">Some APIs (like Google's Gemini) require authentication via query parameters rather than headers.</p>
+                        <div class="example-block">
+                            <div class="example-header"><span class="example-label">API Key in Query</span></div>
+                            <div class="example-code">key=env("GEMINI_API_KEY")</div>
+                        </div>
+                        <div class="example-block">
+                            <div class="example-header"><span class="example-label">Force SSE for Gemini</span></div>
+                            <div class="example-code">alt="sse"</div>
+                        </div>
+                    </div>
                 </div>
                 <div class="form-group">
-                    <label for="request_body_expr" class="form-label">Body Transform (Expr returning JSON)</label>
-                    <textarea id="request_body_expr" name="request_body_expr" class="form-input" rows="3" placeholder='{"wrapped": body, "extra": "added"}'>{{if .Route.RequestTransform}}{{.Route.RequestTransform.BodyExpr}}{{end}}</textarea>
+                    <label for="request_body_expr" class="form-label">
+                        Body Transform
+                        <span class="info-tooltip" data-tip="An Expr expression that returns the new request body as JSON. Use 'body' to access the original parsed JSON body.">?</span>
+                    </label>
+                    <textarea id="request_body_expr" name="request_body_expr" class="form-input expr-input" rows="3" placeholder='{"wrapped": body, "metadata": {"user": userID}}'>{{if .Route.RequestTransform}}{{.Route.RequestTransform.BodyExpr}}{{end}}</textarea>
+                    <div class="context-vars">
+                        <span class="context-var" onclick="insertVar('request_body_expr', 'body')">body</span>
+                        <span class="context-var" onclick="insertVar('request_body_expr', 'rawBody')">rawBody</span>
+                        <span class="context-var" onclick="insertVar('request_body_expr', 'headers')">headers</span>
+                        <span class="context-var" onclick="insertVar('request_body_expr', 'query')">query</span>
+                    </div>
                 </div>
             </div>
         </div>
 
         <!-- Response Transform -->
         <div class="card mb-4">
-            <div class="card-header">Response Transform</div>
+            <div class="section-header">
+                <div class="section-title">
+                    Response Transform
+                    <span class="info-tooltip" data-tip="Modify the response before returning to the client. Add/remove headers or transform the response body.">?</span>
+                </div>
+                <div class="section-actions">
+                    <span class="badge badge-info">Optional</span>
+                </div>
+            </div>
             <div class="card-body">
                 <div class="form-group">
-                    <label for="response_set_headers" class="form-label">Set Headers (one per line: Header-Name=Expr)</label>
-                    <textarea id="response_set_headers" name="response_set_headers" class="form-input" rows="2" placeholder='X-Response-ID=uuid()'>{{range $k, $v := .Route.ResponseTransform.SetHeaders}}{{$k}}={{$v}}
-{{end}}</textarea>
+                    <label for="response_set_headers" class="form-label">
+                        Set Headers
+                        <span class="info-tooltip" data-tip="Add or override response headers. One per line as Header-Name=Expr.">?</span>
+                    </label>
+                    <textarea id="response_set_headers" name="response_set_headers" class="form-input" rows="2" placeholder='X-Request-ID=uuid()
+X-Response-Time=now()'>{{if .Route.ResponseTransform}}{{range $k, $v := .Route.ResponseTransform.SetHeaders}}{{$k}}={{$v}}
+{{end}}{{end}}</textarea>
                 </div>
                 <div class="form-group">
-                    <label for="response_delete_headers" class="form-label">Delete Headers (comma-separated)</label>
-                    <input type="text" id="response_delete_headers" name="response_delete_headers" class="form-input" placeholder="X-Internal-Header" value="{{range $i, $h := .Route.ResponseTransform.DeleteHeaders}}{{if $i}}, {{end}}{{$h}}{{end}}">
+                    <label for="response_delete_headers" class="form-label">
+                        Delete Headers
+                        <span class="info-tooltip" data-tip="Headers to remove from the response. Useful for hiding internal headers.">?</span>
+                    </label>
+                    <input type="text" id="response_delete_headers" name="response_delete_headers" class="form-input" placeholder="X-Internal-Header, Server" value="{{if .Route.ResponseTransform}}{{range $i, $h := .Route.ResponseTransform.DeleteHeaders}}{{if $i}}, {{end}}{{$h}}{{end}}{{end}}">
                 </div>
                 <div class="form-group">
-                    <label for="response_body_expr" class="form-label">Body Transform (Expr returning JSON)</label>
-                    <textarea id="response_body_expr" name="response_body_expr" class="form-input" rows="3" placeholder='{"success": status < 400, "data": respBody}'>{{if .Route.ResponseTransform}}{{.Route.ResponseTransform.BodyExpr}}{{end}}</textarea>
+                    <label for="response_body_expr" class="form-label">
+                        Body Transform
+                        <span class="info-tooltip" data-tip="An Expr expression that returns the new response body as JSON. Use 'respBody' to access the original parsed JSON response.">?</span>
+                    </label>
+                    <textarea id="response_body_expr" name="response_body_expr" class="form-input expr-input" rows="3" placeholder='{"success": status < 400, "data": respBody}'>{{if .Route.ResponseTransform}}{{.Route.ResponseTransform.BodyExpr}}{{end}}</textarea>
+                    <div class="context-vars">
+                        <span class="context-var" onclick="insertVar('response_body_expr', 'respBody')">respBody</span>
+                        <span class="context-var" onclick="insertVar('response_body_expr', 'status')">status</span>
+                        <span class="context-var" onclick="insertVar('response_body_expr', 'respHeaders')">respHeaders</span>
+                    </div>
                 </div>
             </div>
         </div>
+
+        {{if not .IsNew}}
+        <!-- Route Test Panel -->
+        <div class="test-panel" id="route-test-panel">
+            <div class="test-panel-header">
+                <div class="test-panel-title">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                    Test Route
+                </div>
+                <svg class="test-panel-toggle" xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+            </div>
+            <div class="test-panel-body">
+                <p class="form-hint mb-4">Test this route with a sample request to see matching, transformations, and metering preview.</p>
+
+                <div class="test-input-row">
+                    <select id="test-method" class="form-input test-method-select">
+                        <option value="GET">GET</option>
+                        <option value="POST" selected>POST</option>
+                        <option value="PUT">PUT</option>
+                        <option value="DELETE">DELETE</option>
+                        <option value="PATCH">PATCH</option>
+                    </select>
+                    <input type="text" id="test-path" class="form-input test-path-input" placeholder="/v1/chat/completions" value="{{.Route.PathPattern}}">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Headers <span class="text-muted">(one per line: Name: Value)</span></label>
+                    <textarea id="test-headers" class="form-input test-headers-input" placeholder="Content-Type: application/json
+Authorization: Bearer sk-test-key"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Request Body <span class="text-muted">(JSON)</span></label>
+                    <textarea id="test-body" class="form-input test-body-input" placeholder='{"model": "gpt-4", "messages": [{"role": "user", "content": "Hello"}]}'></textarea>
+                </div>
+
+                <button type="button" id="test-route-btn" class="test-btn">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    Test Route
+                </button>
+
+                <div class="test-result" id="test-result" style="display: none;"></div>
+            </div>
+        </div>
+        {{end}}
 
         <div class="form-actions">
             <a href="/routes" class="btn btn-secondary">Cancel</a>
             <button type="submit" class="btn btn-primary">{{if .IsNew}}Create Route{{else}}Update Route{{end}}</button>
         </div>
     </form>
+</div>
+
+<script>
+// Toggle help sections
+function toggleHelp(btn) {
+    const content = btn.nextElementSibling;
+    const expanded = btn.getAttribute('aria-expanded') === 'true';
+    btn.setAttribute('aria-expanded', !expanded);
+    content.classList.toggle('show');
+}
+
+// Insert variable into input
+function insertVar(fieldId, text) {
+    const field = document.getElementById(fieldId);
+    const start = field.selectionStart;
+    const end = field.selectionEnd;
+    const value = field.value;
+    field.value = value.substring(0, start) + text + value.substring(end);
+    field.focus();
+    field.setSelectionRange(start + text.length, start + text.length);
+}
+
+// Update protocol hint based on selection
+function updateProtocolHint() {
+    const protocol = document.getElementById('protocol').value;
+    const hint = document.getElementById('protocol-hint');
+    const text = document.getElementById('protocol-hint-text');
+
+    const hints = {
+        'http': 'Standard request/response. Response is fully buffered before returning. Best for most APIs.',
+        'http_stream': 'Chunked transfer encoding. Response is streamed in real-time. Use for download/upload progress.',
+        'sse': 'Server-Sent Events. For LLM streaming APIs (OpenAI, Anthropic, etc). Metering uses allData/sseLastData.',
+        'websocket': 'Bidirectional WebSocket connection. Coming soon.'
+    };
+
+    if (hints[protocol]) {
+        text.textContent = hints[protocol];
+        hint.style.display = 'flex';
+    } else {
+        hint.style.display = 'none';
+    }
+}
+
+// Update metering expression based on mode
+function updateMeteringExpr() {
+    const mode = document.getElementById('metering_mode').value;
+    const expr = document.getElementById('metering_expr');
+
+    const defaults = {
+        'request': '1',
+        'response_field': 'get(respBody, "usage.total_tokens") ?? 1',
+        'bytes': 'responseBytes / 1024',
+        'custom': expr.value || '1'
+    };
+
+    if (mode !== 'custom') {
+        expr.value = defaults[mode];
+    }
+}
+
+// Apply template
+function applyTemplate(template) {
+    const templates = {
+        'simple': {
+            name: 'api-proxy',
+            path_pattern: '/api/*',
+            match_type: 'prefix',
+            protocol: 'http',
+            metering_mode: 'request',
+            metering_expr: '1'
+        },
+        'llm': {
+            name: 'llm-completions',
+            path_pattern: '/v1/chat/completions',
+            match_type: 'exact',
+            methods: 'POST',
+            protocol: 'sse',
+            metering_mode: 'custom',
+            metering_expr: 'json(sseLastData(allData)).usage.total_tokens ?? 1'
+        },
+        'sse': {
+            name: 'sse-stream',
+            path_pattern: '/stream/*',
+            match_type: 'prefix',
+            protocol: 'sse',
+            metering_mode: 'custom',
+            metering_expr: 'count(sseEvents(allData))'
+        },
+        'rewrite': {
+            name: 'version-rewrite',
+            path_pattern: '/v1/*',
+            match_type: 'prefix',
+            protocol: 'http',
+            path_rewrite: '"/v2" + trimPrefix(path, "/v1")',
+            metering_mode: 'request',
+            metering_expr: '1'
+        }
+    };
+
+    const t = templates[template];
+    if (!t) return;
+
+    // Apply values to form
+    for (const [key, value] of Object.entries(t)) {
+        const field = document.getElementById(key);
+        if (field) {
+            field.value = value;
+            // Trigger change event for select fields
+            if (field.tagName === 'SELECT') {
+                field.dispatchEvent(new Event('change'));
+            }
+        }
+    }
+
+    // Highlight selected template card
+    document.querySelectorAll('.use-case-card').forEach(c => c.classList.remove('selected'));
+    event.target.closest('.use-case-card').classList.add('selected');
+}
+
+// Initialize on load
+document.addEventListener('DOMContentLoaded', function() {
+    updateProtocolHint();
+});
+</script>
+{{end}}
+
+{{define "panel-docs"}}
+<div class="panel-section">
+    <h3>Route Configuration</h3>
+    <p>Routes define how incoming API requests are matched, transformed, and forwarded to upstream services.</p>
+</div>
+
+{{if not .IsNew}}
+<div class="panel-section">
+    <h4>Test This Route</h4>
+    <p>Try your route configuration without making a real API call.</p>
+    <button type="button" class="btn btn-primary btn-sm" onclick="document.getElementById('route-test-panel').scrollIntoView({behavior: 'smooth'}); document.getElementById('route-test-panel').classList.add('open');">
+        Test Route
+    </button>
+</div>
+
+<div class="panel-section">
+    <h4>Code Examples</h4>
+    <p>Call this route with your API key:</p>
+
+    <div class="panel-example">
+        <div class="panel-example-header">curl</div>
+        <div class="panel-example-code">curl -X {{if .Route.Methods}}{{.Route.Methods}}{{else}}GET{{end}} \
+  'http://localhost:8080{{.Route.PathPattern}}' \
+  -H 'Authorization: Bearer YOUR_API_KEY'</div>
+    </div>
+
+    <div class="panel-example">
+        <div class="panel-example-header">JavaScript</div>
+        <div class="panel-example-code">const response = await fetch(
+  'http://localhost:8080{{.Route.PathPattern}}',
+  {
+    method: '{{if .Route.Methods}}{{.Route.Methods}}{{else}}GET{{end}}',
+    headers: {
+      'Authorization': 'Bearer YOUR_API_KEY'
+    }
+  }
+);</div>
+    </div>
+</div>
+{{end}}
+
+<div class="panel-section">
+    <h4>Route Matching</h4>
+    <p><strong>Exact:</strong> Path must match exactly (e.g., <code>/api/users</code>)</p>
+    <p><strong>Prefix:</strong> Path starts with pattern (e.g., <code>/api/*</code> matches <code>/api/users</code>)</p>
+    <p><strong>Regex:</strong> Full regex support for complex patterns</p>
+</div>
+
+<div class="panel-section">
+    <h4>Protocols</h4>
+    <p><strong>HTTP:</strong> Standard request/response. Response buffered before returning.</p>
+    <p><strong>HTTP Stream:</strong> Chunked transfer. Response streamed in real-time.</p>
+    <p><strong>SSE:</strong> Server-Sent Events. For LLM streaming APIs.</p>
+</div>
+{{end}}
+
+{{define "panel-reference"}}
+<div class="panel-section">
+    <h4>Request Context</h4>
+    <div class="panel-ref-group">
+        <div class="panel-ref-item"><span class="panel-ref-name">path</span><span class="panel-ref-type">string</span></div>
+        <div class="panel-ref-item"><span class="panel-ref-name">method</span><span class="panel-ref-type">string</span></div>
+        <div class="panel-ref-item"><span class="panel-ref-name">query</span><span class="panel-ref-type">map</span></div>
+        <div class="panel-ref-item"><span class="panel-ref-name">headers</span><span class="panel-ref-type">map</span></div>
+        <div class="panel-ref-item"><span class="panel-ref-name">body</span><span class="panel-ref-type">any (parsed JSON)</span></div>
+        <div class="panel-ref-item"><span class="panel-ref-name">rawBody</span><span class="panel-ref-type">[]byte</span></div>
+        <div class="panel-ref-item"><span class="panel-ref-name">userID</span><span class="panel-ref-type">string</span></div>
+        <div class="panel-ref-item"><span class="panel-ref-name">planID</span><span class="panel-ref-type">string</span></div>
+        <div class="panel-ref-item"><span class="panel-ref-name">keyID</span><span class="panel-ref-type">string</span></div>
+    </div>
+</div>
+
+<div class="panel-section">
+    <h4>Response Context</h4>
+    <div class="panel-ref-group">
+        <div class="panel-ref-item"><span class="panel-ref-name">status</span><span class="panel-ref-type">int</span></div>
+        <div class="panel-ref-item"><span class="panel-ref-name">respBody</span><span class="panel-ref-type">any (parsed JSON)</span></div>
+        <div class="panel-ref-item"><span class="panel-ref-name">respHeaders</span><span class="panel-ref-type">map</span></div>
+        <div class="panel-ref-item"><span class="panel-ref-name">responseBytes</span><span class="panel-ref-type">int64</span></div>
+    </div>
+</div>
+
+<div class="panel-section">
+    <h4>SSE/Streaming</h4>
+    <div class="panel-ref-group">
+        <div class="panel-ref-item"><span class="panel-ref-name">allData</span><span class="panel-ref-type">[]byte (accumulated)</span></div>
+        <div class="panel-ref-item"><span class="panel-ref-name">lastChunk</span><span class="panel-ref-type">[]byte</span></div>
+        <div class="panel-ref-item"><span class="panel-ref-name">sseEvents(allData)</span><span class="panel-ref-type">[]Event</span></div>
+        <div class="panel-ref-item"><span class="panel-ref-name">sseLastData(allData)</span><span class="panel-ref-type">string</span></div>
+    </div>
+</div>
+
+<div class="panel-section">
+    <h4>String Functions</h4>
+    <div class="panel-ref-group">
+        <div class="panel-ref-item"><span class="panel-ref-name">trimPrefix(s, prefix)</span></div>
+        <div class="panel-ref-item"><span class="panel-ref-name">trimSuffix(s, suffix)</span></div>
+        <div class="panel-ref-item"><span class="panel-ref-name">replace(s, old, new)</span></div>
+        <div class="panel-ref-item"><span class="panel-ref-name">lower(s) / upper(s)</span></div>
+        <div class="panel-ref-item"><span class="panel-ref-name">split(s, sep) / join(arr, sep)</span></div>
+    </div>
+</div>
+
+<div class="panel-section">
+    <h4>Data Functions</h4>
+    <div class="panel-ref-group">
+        <div class="panel-ref-item"><span class="panel-ref-name">json(data)</span><span class="panel-ref-type">parse JSON</span></div>
+        <div class="panel-ref-item"><span class="panel-ref-name">get(obj, "path")</span><span class="panel-ref-type">nested access</span></div>
+        <div class="panel-ref-item"><span class="panel-ref-name">len(arr) / count(arr)</span><span class="panel-ref-type">int</span></div>
+        <div class="panel-ref-item"><span class="panel-ref-name">env("VAR")</span><span class="panel-ref-type">env variable</span></div>
+    </div>
+</div>
+
+<div class="panel-section">
+    <h4>Common Patterns</h4>
+    <div class="panel-example">
+        <div class="panel-example-header">Token Metering (LLM)</div>
+        <div class="panel-example-code">json(sseLastData(allData)).usage.total_tokens ?? 1</div>
+    </div>
+    <div class="panel-example">
+        <div class="panel-example-header">Path Rewrite</div>
+        <div class="panel-example-code">"/v2" + trimPrefix(path, "/v1")</div>
+    </div>
+    <div class="panel-example">
+        <div class="panel-example-header">Add Auth Header</div>
+        <div class="panel-example-code">"Bearer " + env("API_KEY")</div>
+    </div>
 </div>
 {{end}}

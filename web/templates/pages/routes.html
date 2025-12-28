@@ -1,7 +1,10 @@
 {{define "content"}}
 <div class="page">
     <div class="page-header">
-        <h1 class="page-title">Routes</h1>
+        <div>
+            <h1 class="page-title">Routes</h1>
+            <p class="text-muted text-sm" style="margin-top: 4px;">Define how incoming requests are matched, transformed, and forwarded to upstreams.</p>
+        </div>
         <a href="/routes/new" class="btn btn-primary">Create Route</a>
     </div>
 
@@ -10,5 +13,70 @@
             <div class="table-empty">Loading routes...</div>
         </div>
     </div>
+
+    <!-- Getting Started Guide (shown via JS when no routes) -->
+    <div id="routes-guide" class="card mt-4" style="display: none;">
+        <div class="section-header">
+            <div class="section-title">Getting Started with Routes</div>
+        </div>
+        <div class="card-body">
+            <div class="wizard-steps">
+                <div class="wizard-step done">
+                    <span class="wizard-step-num">1</span>
+                    Create Upstream
+                </div>
+                <div class="wizard-step-divider"></div>
+                <div class="wizard-step active">
+                    <span class="wizard-step-num">2</span>
+                    Create Route
+                </div>
+                <div class="wizard-step-divider"></div>
+                <div class="wizard-step">
+                    <span class="wizard-step-num">3</span>
+                    Test API
+                </div>
+            </div>
+
+            <div style="max-width: 600px; margin: 0 auto;">
+                <h3 style="font-size: 1rem; font-weight: 600; margin-bottom: 12px;">How Routes Work</h3>
+                <p style="color: #6b7280; margin-bottom: 16px;">
+                    Routes define how incoming API requests are processed:
+                </p>
+                <ol style="padding-left: 20px; color: #374151; line-height: 1.8;">
+                    <li><strong>Match</strong> - Request path and method are checked against route patterns</li>
+                    <li><strong>Transform</strong> - Headers, query params, or body can be modified</li>
+                    <li><strong>Forward</strong> - Request is sent to the target upstream</li>
+                    <li><strong>Meter</strong> - Usage is extracted from the response for billing</li>
+                </ol>
+
+                <div class="example-block mt-4">
+                    <div class="example-header"><span class="example-label">Example Flow</span></div>
+                    <div class="example-code">Client: POST /v1/chat/completions
+  ↓ Route: /v1/* → OpenAI upstream
+  ↓ Add: Authorization header
+  ↓ Forward to: https://api.openai.com/v1/chat/completions
+  ↓ Extract: usage.total_tokens for metering
+Response: 200 OK (14 tokens used)</div>
+                </div>
+
+                <div class="mt-4" style="text-align: center;">
+                    <a href="/routes/new" class="btn btn-primary">Create Your First Route</a>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
+
+<script>
+// Show guide when table is empty
+document.body.addEventListener('htmx:afterSwap', function(evt) {
+    if (evt.detail.target.id === 'routes-table') {
+        const hasRoutes = evt.detail.target.querySelector('tbody tr:not(:has(.table-empty))');
+        const guide = document.getElementById('routes-guide');
+        if (guide) {
+            guide.style.display = hasRoutes ? 'none' : 'block';
+        }
+    }
+});
+</script>
 {{end}}

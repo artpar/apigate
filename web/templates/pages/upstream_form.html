@@ -7,55 +7,152 @@
         <h1 class="page-title">{{if .IsNew}}Create Upstream{{else}}Edit Upstream{{end}}</h1>
     </div>
 
+    {{if .IsNew}}
+    <!-- Quick Start Templates -->
+    <div class="card mb-4">
+        <div class="section-header">
+            <div class="section-title">Quick Start: Common Providers</div>
+        </div>
+        <div class="card-body">
+            <p class="form-hint mb-4">Select a provider template to pre-fill settings, or configure manually below.</p>
+            <div class="use-case-grid">
+                <div class="use-case-card" onclick="applyUpstreamTemplate('openai')">
+                    <div class="use-case-icon">&#129302;</div>
+                    <div class="use-case-title">OpenAI</div>
+                    <div class="use-case-desc">ChatGPT, DALL-E, Whisper APIs</div>
+                </div>
+                <div class="use-case-card" onclick="applyUpstreamTemplate('anthropic')">
+                    <div class="use-case-icon">&#129520;</div>
+                    <div class="use-case-title">Anthropic</div>
+                    <div class="use-case-desc">Claude API with x-api-key</div>
+                </div>
+                <div class="use-case-card" onclick="applyUpstreamTemplate('gemini')">
+                    <div class="use-case-icon">&#128161;</div>
+                    <div class="use-case-title">Google Gemini</div>
+                    <div class="use-case-desc">API key in query params</div>
+                </div>
+                <div class="use-case-card" onclick="applyUpstreamTemplate('custom')">
+                    <div class="use-case-icon">&#128295;</div>
+                    <div class="use-case-title">Custom API</div>
+                    <div class="use-case-desc">Configure from scratch</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {{end}}
+
     <form action="{{if .IsNew}}/upstreams{{else}}/upstreams/{{.Upstream.ID}}{{end}}" method="POST" class="form">
         <!-- Basic Info -->
         <div class="card mb-4">
-            <div class="card-header">Basic Information</div>
+            <div class="section-header">
+                <div class="section-title">
+                    Basic Information
+                    <span class="info-tooltip" data-tip="An upstream represents a backend API service. Routes can target different upstreams to forward requests to different APIs.">?</span>
+                </div>
+            </div>
             <div class="card-body">
                 <div class="form-group">
-                    <label for="name" class="form-label">Name</label>
+                    <label for="name" class="form-label">
+                        Name
+                        <span class="info-tooltip" data-tip="A human-readable identifier for this upstream. Use lowercase with hyphens (e.g., 'openai', 'my-backend'). This appears in the route dropdown.">?</span>
+                    </label>
                     <input type="text" id="name" name="name" required class="form-input" placeholder="my-backend" value="{{.Upstream.Name}}">
                 </div>
 
                 <div class="form-group">
-                    <label for="base_url" class="form-label">Base URL</label>
+                    <label for="base_url" class="form-label">
+                        Base URL
+                        <span class="info-tooltip" data-tip="The root URL of the backend API. All request paths are appended to this URL. Include the scheme (https://) but no trailing slash.">?</span>
+                    </label>
                     <input type="url" id="base_url" name="base_url" required class="form-input" placeholder="https://api.example.com" value="{{.Upstream.BaseURL}}">
+                    <div class="field-hint info">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        Request path is appended: <code>https://api.example.com</code> + <code>/v1/chat</code>
+                    </div>
                 </div>
 
                 <div class="form-group">
                     <label class="form-checkbox">
                         <input type="checkbox" name="enabled" {{if .Upstream.Enabled}}checked{{end}}>
-                        <span>Enabled</span>
+                        <span>Upstream Enabled</span>
                     </label>
+                    <div class="form-hint">Disabled upstreams cannot be used by routes.</div>
                 </div>
             </div>
         </div>
 
         <!-- Authentication -->
         <div class="card mb-4">
-            <div class="card-header">Authentication</div>
+            <div class="section-header">
+                <div class="section-title">
+                    Authentication
+                    <span class="info-tooltip" data-tip="Configure how requests are authenticated with this upstream. The auth credentials are automatically added to every forwarded request.">?</span>
+                </div>
+            </div>
             <div class="card-body">
                 <div class="form-group">
-                    <label for="auth_type" class="form-label">Auth Type</label>
-                    <select id="auth_type" name="auth_type" class="form-input" onchange="toggleAuthFields()">
-                        <option value="none" {{if eq .Upstream.AuthType "none"}}selected{{end}}>None</option>
-                        <option value="header" {{if eq .Upstream.AuthType "header"}}selected{{end}}>Header</option>
-                        <option value="bearer" {{if eq .Upstream.AuthType "bearer"}}selected{{end}}>Bearer Token</option>
-                        <option value="basic" {{if eq .Upstream.AuthType "basic"}}selected{{end}}>Basic Auth</option>
+                    <label for="auth_type" class="form-label">
+                        Auth Type
+                        <span class="info-tooltip" data-tip="None: No auth added. Header: Custom header (X-API-Key). Bearer: Authorization: Bearer &lt;token&gt;. Basic: Authorization: Basic &lt;base64&gt;.">?</span>
+                    </label>
+                    <select id="auth_type" name="auth_type" class="form-input" onchange="toggleAuthFields(); updateAuthHint()">
+                        <option value="none" {{if eq .Upstream.AuthType "none"}}selected{{end}}>None - No authentication</option>
+                        <option value="header" {{if eq .Upstream.AuthType "header"}}selected{{end}}>Header - Custom header (e.g., X-API-Key)</option>
+                        <option value="bearer" {{if eq .Upstream.AuthType "bearer"}}selected{{end}}>Bearer - Authorization: Bearer &lt;token&gt;</option>
+                        <option value="basic" {{if eq .Upstream.AuthType "basic"}}selected{{end}}>Basic - Authorization: Basic &lt;base64&gt;</option>
                     </select>
                 </div>
 
                 <div id="auth-fields" class="{{if eq .Upstream.AuthType "none"}}hidden{{end}}">
                     <div class="form-group">
-                        <label for="auth_header" class="form-label">Header Name</label>
+                        <label for="auth_header" class="form-label">
+                            Header Name
+                            <span class="info-tooltip" data-tip="The HTTP header name. For Bearer/Basic, use 'Authorization'. For custom headers, use the API's required header name (e.g., 'X-API-Key', 'api-key').">?</span>
+                        </label>
                         <input type="text" id="auth_header" name="auth_header" class="form-input" placeholder="X-API-Key" value="{{.Upstream.AuthHeader}}">
-                        <div class="form-hint">For bearer: Authorization, for header: your custom header name</div>
+                        <div id="auth-header-hint" class="form-hint"></div>
                     </div>
 
                     <div class="form-group">
-                        <label for="auth_value" class="form-label">Auth Value</label>
-                        <input type="password" id="auth_value" name="auth_value" class="form-input" placeholder="${ENV_VAR} or literal value" value="{{.Upstream.AuthValue}}">
-                        <div class="form-hint">Use ${ENV_VAR} to reference environment variables</div>
+                        <label for="auth_value" class="form-label">
+                            Auth Value
+                            <span class="info-tooltip" data-tip="The authentication credential. Use ${ENV_VAR} syntax to reference environment variables for security. Never commit actual API keys.">?</span>
+                        </label>
+                        <input type="password" id="auth_value" name="auth_value" class="form-input" placeholder="${OPENAI_API_KEY}" value="{{.Upstream.AuthValue}}">
+                        <div class="field-hint info">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                            Use <code>${ENV_VAR}</code> to reference environment variables. Example: <code>${OPENAI_API_KEY}</code>
+                        </div>
+                    </div>
+                </div>
+
+                <button type="button" class="help-toggle" onclick="toggleHelp(this)" aria-expanded="false">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+                    Auth Examples by Provider
+                </button>
+                <div class="help-content">
+                    <div class="example-block">
+                        <div class="example-header"><span class="example-label">OpenAI</span></div>
+                        <div class="example-code">Type: Bearer
+Header: Authorization
+Value: ${OPENAI_API_KEY}</div>
+                    </div>
+                    <div class="example-block">
+                        <div class="example-header"><span class="example-label">Anthropic</span></div>
+                        <div class="example-code">Type: Header
+Header: x-api-key
+Value: ${ANTHROPIC_API_KEY}</div>
+                    </div>
+                    <div class="example-block">
+                        <div class="example-header"><span class="example-label">Google Gemini</span></div>
+                        <div class="example-code">Type: None (use query param in route transform)
+Route Set Query: key=env("GEMINI_API_KEY")</div>
+                    </div>
+                    <div class="example-block">
+                        <div class="example-header"><span class="example-label">Custom Header</span></div>
+                        <div class="example-code">Type: Header
+Header: X-API-Key
+Value: ${MY_API_KEY}</div>
                     </div>
                 </div>
             </div>
@@ -63,21 +160,65 @@
 
         <!-- Connection Settings -->
         <div class="card mb-4">
-            <div class="card-header">Connection Settings</div>
+            <div class="section-header">
+                <div class="section-title">
+                    Connection Settings
+                    <span class="info-tooltip" data-tip="Configure timeouts and connection pooling for optimal performance and reliability.">?</span>
+                </div>
+                <div class="section-actions">
+                    <span class="badge badge-info">Advanced</span>
+                </div>
+            </div>
             <div class="card-body">
                 <div class="form-row">
                     <div class="form-group" style="flex: 1;">
-                        <label for="timeout_ms" class="form-label">Timeout (ms)</label>
+                        <label for="timeout_ms" class="form-label">
+                            Request Timeout
+                            <span class="info-tooltip" data-tip="Maximum time to wait for a response in milliseconds. LLM APIs may need longer timeouts (60000+). Default: 30000ms (30 seconds).">?</span>
+                        </label>
                         <input type="number" id="timeout_ms" name="timeout_ms" class="form-input" placeholder="30000" value="{{.Upstream.Timeout.Milliseconds}}">
+                        <div class="form-hint">ms (30000 = 30s, 60000 = 1min)</div>
                     </div>
                     <div class="form-group" style="flex: 1;">
-                        <label for="max_idle_conns" class="form-label">Max Idle Connections</label>
+                        <label for="max_idle_conns" class="form-label">
+                            Max Idle Connections
+                            <span class="info-tooltip" data-tip="Number of idle HTTP connections to keep in the pool. Higher values improve performance for high-traffic upstreams. Default: 100.">?</span>
+                        </label>
                         <input type="number" id="max_idle_conns" name="max_idle_conns" class="form-input" placeholder="100" value="{{.Upstream.MaxIdleConns}}">
                     </div>
                     <div class="form-group" style="flex: 1;">
-                        <label for="idle_conn_timeout_ms" class="form-label">Idle Timeout (ms)</label>
+                        <label for="idle_conn_timeout_ms" class="form-label">
+                            Idle Timeout
+                            <span class="info-tooltip" data-tip="How long to keep idle connections in the pool in milliseconds. Default: 90000ms (90 seconds).">?</span>
+                        </label>
                         <input type="number" id="idle_conn_timeout_ms" name="idle_conn_timeout_ms" class="form-input" placeholder="90000" value="{{.Upstream.IdleConnTimeout.Milliseconds}}">
+                        <div class="form-hint">ms</div>
                     </div>
+                </div>
+
+                <button type="button" class="help-toggle" onclick="toggleHelp(this)" aria-expanded="false">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+                    Recommended Settings
+                </button>
+                <div class="help-content">
+                    <table style="width: 100%; font-size: 0.875rem;">
+                        <tr style="border-bottom: 1px solid #e5e7eb;">
+                            <td style="padding: 8px 0; font-weight: 500;">LLM APIs (OpenAI, Anthropic)</td>
+                            <td style="padding: 8px 0;">Timeout: 120000ms, Idle: 50</td>
+                        </tr>
+                        <tr style="border-bottom: 1px solid #e5e7eb;">
+                            <td style="padding: 8px 0; font-weight: 500;">Fast APIs (JSON responses)</td>
+                            <td style="padding: 8px 0;">Timeout: 30000ms, Idle: 100</td>
+                        </tr>
+                        <tr style="border-bottom: 1px solid #e5e7eb;">
+                            <td style="padding: 8px 0; font-weight: 500;">Image/Media APIs</td>
+                            <td style="padding: 8px 0;">Timeout: 60000ms, Idle: 50</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; font-weight: 500;">Low Traffic</td>
+                            <td style="padding: 8px 0;">Timeout: 30000ms, Idle: 10</td>
+                        </tr>
+                    </table>
                 </div>
             </div>
         </div>
@@ -99,5 +240,97 @@ function toggleAuthFields() {
         authFields.classList.remove('hidden');
     }
 }
+
+function updateAuthHint() {
+    var authType = document.getElementById('auth_type').value;
+    var headerHint = document.getElementById('auth-header-hint');
+    var headerInput = document.getElementById('auth_header');
+
+    const hints = {
+        'none': '',
+        'header': 'Use the API\'s required header name (e.g., x-api-key, X-API-Key)',
+        'bearer': 'For Bearer auth, header is automatically set to "Authorization"',
+        'basic': 'For Basic auth, header is automatically set to "Authorization"'
+    };
+
+    const placeholders = {
+        'none': '',
+        'header': 'X-API-Key',
+        'bearer': 'Authorization',
+        'basic': 'Authorization'
+    };
+
+    headerHint.textContent = hints[authType] || '';
+    headerInput.placeholder = placeholders[authType] || 'Header Name';
+
+    // Auto-fill for bearer/basic
+    if (authType === 'bearer' || authType === 'basic') {
+        if (!headerInput.value) {
+            headerInput.value = 'Authorization';
+        }
+    }
+}
+
+function toggleHelp(btn) {
+    const content = btn.nextElementSibling;
+    const expanded = btn.getAttribute('aria-expanded') === 'true';
+    btn.setAttribute('aria-expanded', !expanded);
+    content.classList.toggle('show');
+}
+
+function applyUpstreamTemplate(template) {
+    const templates = {
+        'openai': {
+            name: 'openai',
+            base_url: 'https://api.openai.com',
+            auth_type: 'bearer',
+            auth_header: 'Authorization',
+            auth_value: '${OPENAI_API_KEY}',
+            timeout_ms: 120000
+        },
+        'anthropic': {
+            name: 'anthropic',
+            base_url: 'https://api.anthropic.com',
+            auth_type: 'header',
+            auth_header: 'x-api-key',
+            auth_value: '${ANTHROPIC_API_KEY}',
+            timeout_ms: 120000
+        },
+        'gemini': {
+            name: 'gemini',
+            base_url: 'https://generativelanguage.googleapis.com',
+            auth_type: 'none',
+            timeout_ms: 120000
+        },
+        'custom': {
+            name: '',
+            base_url: '',
+            auth_type: 'none',
+            timeout_ms: 30000
+        }
+    };
+
+    const t = templates[template];
+    if (!t) return;
+
+    for (const [key, value] of Object.entries(t)) {
+        const field = document.getElementById(key);
+        if (field) {
+            field.value = value;
+            if (field.tagName === 'SELECT') {
+                field.dispatchEvent(new Event('change'));
+            }
+        }
+    }
+
+    // Highlight selected template
+    document.querySelectorAll('.use-case-card').forEach(c => c.classList.remove('selected'));
+    event.target.closest('.use-case-card').classList.add('selected');
+}
+
+// Initialize hints on load
+document.addEventListener('DOMContentLoaded', function() {
+    updateAuthHint();
+});
 </script>
 {{end}}

@@ -878,3 +878,86 @@ func (s *TransformService) ClearCache() {
 	s.cache = make(map[string]*vm.Program)
 	s.cacheMu.Unlock()
 }
+
+// ExprValidationResult contains the result of validating an Expr expression.
+type ExprValidationResult struct {
+	Valid   bool   `json:"valid"`
+	Error   string `json:"error,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+// ValidateExpr validates an Expr expression without executing it.
+// The context parameter determines which variables are available:
+// - "request": method, path, query, headers, body, rawBody, userID, planID, keyID
+// - "response": status, respBody, respHeaders, responseBytes, userID, planID, keyID
+// - "streaming": allData, lastChunk, status, responseBytes, requestBytes, userID, planID, keyID
+func (s *TransformService) ValidateExpr(expression, context string) ExprValidationResult {
+	if expression == "" {
+		return ExprValidationResult{Valid: true, Message: "Empty expression is valid"}
+	}
+
+	// Build environment based on context
+	env := s.buildValidationEnv(context)
+
+	// Try to compile the expression
+	opts := append([]expr.Option{expr.Env(env)}, s.envOptions...)
+	_, err := expr.Compile(expression, opts...)
+	if err != nil {
+		return ExprValidationResult{
+			Valid: false,
+			Error: err.Error(),
+		}
+	}
+
+	return ExprValidationResult{
+		Valid:   true,
+		Message: "Expression is valid",
+	}
+}
+
+// buildValidationEnv creates a sample environment for expression validation.
+func (s *TransformService) buildValidationEnv(context string) map[string]any {
+	env := map[string]any{
+		"userID": "",
+		"planID": "",
+		"keyID":  "",
+	}
+
+	switch context {
+	case "request":
+		env["method"] = ""
+		env["path"] = ""
+		env["query"] = map[string]string{}
+		env["headers"] = map[string]string{}
+		env["body"] = map[string]any{}
+		env["rawBody"] = []byte{}
+	case "response":
+		env["status"] = 0
+		env["respBody"] = map[string]any{}
+		env["respHeaders"] = map[string]string{}
+		env["responseBytes"] = int64(0)
+	case "streaming":
+		env["allData"] = []byte{}
+		env["lastChunk"] = []byte{}
+		env["status"] = 0
+		env["responseBytes"] = int64(0)
+		env["requestBytes"] = int64(0)
+	default:
+		// Default to request context
+		env["method"] = ""
+		env["path"] = ""
+		env["query"] = map[string]string{}
+		env["headers"] = map[string]string{}
+		env["body"] = map[string]any{}
+		env["rawBody"] = []byte{}
+		env["status"] = 0
+		env["respBody"] = map[string]any{}
+		env["respHeaders"] = map[string]string{}
+		env["responseBytes"] = int64(0)
+		env["allData"] = []byte{}
+		env["lastChunk"] = []byte{}
+		env["requestBytes"] = int64(0)
+	}
+
+	return env
+}

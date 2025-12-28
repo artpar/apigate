@@ -278,15 +278,17 @@ func (a *App) initHTTPServer() error {
 
 	// Create web UI handler
 	webHandler, err := web.NewHandler(web.Deps{
-		Users:     deps.Users,
-		Keys:      deps.Keys,
-		Usage:     usageStore,
-		Routes:    routeStore,
-		Upstreams: upstreamStore,
-		Config:    a.Config,
-		Logger:    a.Logger,
-		Hasher:    bcryptHasher,
-		JWTSecret: a.Config.Auth.JWTSecret,
+		Users:         deps.Users,
+		Keys:          deps.Keys,
+		Usage:         usageStore,
+		Routes:        routeStore,
+		Upstreams:     upstreamStore,
+		Config:        a.Config,
+		Logger:        a.Logger,
+		Hasher:        bcryptHasher,
+		JWTSecret:     a.Config.Auth.JWTSecret,
+		ExprValidator: a.transformService,
+		RouteTester:   a.routeService,
 		IsSetup: func() bool {
 			// Check if admin user exists
 			users, err := deps.Users.List(context.Background(), 1, 0)

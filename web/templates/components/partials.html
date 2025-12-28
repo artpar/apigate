@@ -54,12 +54,20 @@
             </td>
             <td class="text-muted">{{.UserID}}</td>
             <td>
-                <span class="badge {{if eq .Status "active"}}badge-success{{else}}badge-error{{end}}">{{.Status}}</span>
+                {{if .RevokedAt}}
+                <span class="badge badge-error">revoked</span>
+                {{else}}
+                <span class="badge badge-success">active</span>
+                {{end}}
             </td>
             <td class="text-muted">{{formatDate .CreatedAt}}</td>
-            <td class="text-muted">{{if .LastUsedAt}}{{timeAgo .LastUsedAt}}{{else}}Never{{end}}</td>
+            <td class="text-muted">{{if .LastUsed}}{{timeAgo .LastUsed}}{{else}}Never{{end}}</td>
             <td class="cell-actions">
+                {{if not .RevokedAt}}
                 <button hx-delete="/keys/{{.ID}}" hx-confirm="Revoke this key?" hx-target="#keys-table" class="link link-danger">Revoke</button>
+                {{else}}
+                <span class="text-muted">-</span>
+                {{end}}
             </td>
         </tr>
         {{else}}

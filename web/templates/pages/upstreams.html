@@ -1,7 +1,10 @@
 {{define "content"}}
 <div class="page">
     <div class="page-header">
-        <h1 class="page-title">Upstreams</h1>
+        <div>
+            <h1 class="page-title">Upstreams</h1>
+            <p class="text-muted text-sm" style="margin-top: 4px;">Backend APIs that routes forward requests to. Configure URLs, authentication, and connection settings.</p>
+        </div>
         <a href="/upstreams/new" class="btn btn-primary">Create Upstream</a>
     </div>
 
@@ -10,5 +13,86 @@
             <div class="table-empty">Loading upstreams...</div>
         </div>
     </div>
+
+    <!-- Getting Started Guide (shown via JS when no upstreams) -->
+    <div id="upstreams-guide" class="card mt-4" style="display: none;">
+        <div class="section-header">
+            <div class="section-title">Getting Started with Upstreams</div>
+        </div>
+        <div class="card-body">
+            <div class="wizard-steps">
+                <div class="wizard-step active">
+                    <span class="wizard-step-num">1</span>
+                    Create Upstream
+                </div>
+                <div class="wizard-step-divider"></div>
+                <div class="wizard-step">
+                    <span class="wizard-step-num">2</span>
+                    Create Route
+                </div>
+                <div class="wizard-step-divider"></div>
+                <div class="wizard-step">
+                    <span class="wizard-step-num">3</span>
+                    Test API
+                </div>
+            </div>
+
+            <div style="max-width: 600px; margin: 0 auto;">
+                <h3 style="font-size: 1rem; font-weight: 600; margin-bottom: 12px;">What is an Upstream?</h3>
+                <p style="color: #6b7280; margin-bottom: 16px;">
+                    An upstream represents a backend API service. It defines:
+                </p>
+                <ul style="padding-left: 20px; color: #374151; line-height: 1.8; margin-bottom: 20px;">
+                    <li><strong>Base URL</strong> - Where requests are forwarded (e.g., https://api.openai.com)</li>
+                    <li><strong>Authentication</strong> - API keys, Bearer tokens, or custom headers</li>
+                    <li><strong>Connection Settings</strong> - Timeouts and connection pooling</li>
+                </ul>
+
+                <p style="color: #6b7280; margin-bottom: 16px;">
+                    Once you create an upstream, you can create routes that target it.
+                </p>
+
+                <div class="use-case-grid">
+                    <div class="use-case-card" style="cursor: default;">
+                        <div class="use-case-icon">&#129302;</div>
+                        <div class="use-case-title">LLM APIs</div>
+                        <div class="use-case-desc">OpenAI, Anthropic, Gemini, etc.</div>
+                    </div>
+                    <div class="use-case-card" style="cursor: default;">
+                        <div class="use-case-icon">&#128247;</div>
+                        <div class="use-case-title">Image APIs</div>
+                        <div class="use-case-desc">DALL-E, Stability AI, etc.</div>
+                    </div>
+                    <div class="use-case-card" style="cursor: default;">
+                        <div class="use-case-icon">&#127897;</div>
+                        <div class="use-case-title">Audio APIs</div>
+                        <div class="use-case-desc">Whisper, ElevenLabs, etc.</div>
+                    </div>
+                    <div class="use-case-card" style="cursor: default;">
+                        <div class="use-case-icon">&#128295;</div>
+                        <div class="use-case-title">Custom APIs</div>
+                        <div class="use-case-desc">Your own backend services</div>
+                    </div>
+                </div>
+
+                <div class="mt-4" style="text-align: center;">
+                    <a href="/upstreams/new" class="btn btn-primary">Create Your First Upstream</a>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
+
+<script>
+// Show guide when table is empty
+document.body.addEventListener('htmx:afterSwap', function(evt) {
+    if (evt.detail.target.id === 'upstreams-table') {
+        const hasUpstreams = evt.detail.target.querySelector('tbody tr:not(:has(.table-empty))');
+        const guide = document.getElementById('upstreams-guide');
+        if (guide) {
+            guide.style.display = hasUpstreams ? 'none' : 'block';
+        }
+    }
+});
+</script>
 {{end}}

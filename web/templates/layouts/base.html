@@ -7,49 +7,148 @@
     <title>{{.Title}} - APIGate</title>
     <link rel="stylesheet" href="/static/css/styles.css">
     <script src="/static/js/htmx.min.js"></script>
+    <script src="/static/js/panel.js" defer></script>
+    <script src="/static/js/expr-editor.js" defer></script>
+    <script src="/static/js/route-test.js" defer></script>
 </head>
 <body>
     {{if .User}}
-    <nav class="nav">
-        <div class="nav-inner">
-            <div class="flex gap-4">
-                <a href="/dashboard" class="nav-brand">APIGate</a>
-                <div class="nav-links">
-                    <a href="/dashboard" class="nav-link{{if eq .CurrentPath "/dashboard"}} active{{end}}">Dashboard</a>
-                    <a href="/users" class="nav-link{{if eq .CurrentPath "/users"}} active{{end}}">Users</a>
-                    <a href="/keys" class="nav-link{{if eq .CurrentPath "/keys"}} active{{end}}">API Keys</a>
-                    <a href="/plans" class="nav-link{{if eq .CurrentPath "/plans"}} active{{end}}">Plans</a>
-                    <a href="/routes" class="nav-link{{if eq .CurrentPath "/routes"}} active{{end}}">Routes</a>
-                    <a href="/upstreams" class="nav-link{{if eq .CurrentPath "/upstreams"}} active{{end}}">Upstreams</a>
-                    <a href="/usage" class="nav-link{{if eq .CurrentPath "/usage"}} active{{end}}">Usage</a>
-                    <a href="/settings" class="nav-link{{if eq .CurrentPath "/settings"}} active{{end}}">Settings</a>
-                    <a href="/system" class="nav-link{{if eq .CurrentPath "/system"}} active{{end}}">System</a>
+    <div class="app-shell">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <a href="/dashboard" class="sidebar-brand">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                    <span>APIGate</span>
+                </a>
+            </div>
+
+            <nav class="sidebar-nav">
+                <div class="nav-section">
+                    <a href="/dashboard" class="nav-item{{if eq .CurrentPath "/dashboard"}} active{{end}}">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                        <span>Dashboard</span>
+                    </a>
+                </div>
+
+                <div class="nav-section">
+                    <div class="nav-section-label">Gateway</div>
+                    <a href="/routes" class="nav-item{{if eq .CurrentPath "/routes"}} active{{end}}">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                        <span>Routes</span>
+                    </a>
+                    <a href="/upstreams" class="nav-item{{if eq .CurrentPath "/upstreams"}} active{{end}}">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+                        <span>Upstreams</span>
+                    </a>
+                </div>
+
+                <div class="nav-section">
+                    <div class="nav-section-label">Access</div>
+                    <a href="/users" class="nav-item{{if eq .CurrentPath "/users"}} active{{end}}">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                        <span>Users</span>
+                    </a>
+                    <a href="/keys" class="nav-item{{if eq .CurrentPath "/keys"}} active{{end}}">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+                        <span>API Keys</span>
+                    </a>
+                    <a href="/plans" class="nav-item{{if eq .CurrentPath "/plans"}} active{{end}}">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                        <span>Plans</span>
+                    </a>
+                </div>
+
+                <div class="nav-section">
+                    <div class="nav-section-label">Analytics</div>
+                    <a href="/usage" class="nav-item{{if eq .CurrentPath "/usage"}} active{{end}}">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                        <span>Usage</span>
+                    </a>
+                </div>
+
+                <div class="nav-section">
+                    <div class="nav-section-label">System</div>
+                    <a href="/settings" class="nav-item{{if eq .CurrentPath "/settings"}} active{{end}}">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                        <span>Settings</span>
+                    </a>
+                    <a href="/system" class="nav-item{{if eq .CurrentPath "/system"}} active{{end}}">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                        <span>Health</span>
+                    </a>
+                </div>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="sidebar-user">
+                    <div class="sidebar-user-email" title="{{.User.Email}}">{{.User.Email}}</div>
+                    <div class="sidebar-user-actions">
+                        <button type="button" class="sidebar-action-btn" onclick="window.ContextPanel.toggle()" title="Help (?)">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                        </button>
+                        <form action="/logout" method="POST" class="sidebar-logout-form">
+                            <button type="submit" class="sidebar-action-btn" title="Logout">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                            </button>
+                        </form>
+                    </div>
+                </div>
+                <div class="sidebar-version">{{.Config.Version}}</div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            {{if .Flash}}
+            <div class="alert alert-{{.Flash.Type}}">
+                {{.Flash.Message}}
+            </div>
+            {{end}}
+
+            {{template "content" .}}
+        </main>
+
+        <!-- Context Panel -->
+        <aside id="context-panel" class="context-panel">
+            <div class="context-panel-header">
+                <div class="context-panel-tabs">
+                    <button class="panel-tab active" data-tab="docs">Docs</button>
+                    <button class="panel-tab" data-tab="reference">Reference</button>
+                </div>
+                <button class="panel-close" onclick="window.ContextPanel.close()" title="Close (Esc)">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="context-panel-body">
+                <div id="panel-docs" class="panel-content active">
+                    {{block "panel-docs" .}}
+                    <div class="panel-section">
+                        <h3>Welcome to APIGate</h3>
+                        <p>APIGate is a flexible API gateway that handles routing, rate limiting, and usage tracking.</p>
+                    </div>
+                    {{end}}
+                </div>
+                <div id="panel-reference" class="panel-content">
+                    {{block "panel-reference" .}}
+                    <div class="panel-section">
+                        <p class="text-muted">No reference content for this page.</p>
+                    </div>
+                    {{end}}
                 </div>
             </div>
-            <div class="nav-user">
-                <span class="nav-email">{{.User.Email}}</span>
-                <form action="/logout" method="POST">
-                    <button type="submit" class="btn btn-secondary btn-sm">Logout</button>
-                </form>
-            </div>
-        </div>
-    </nav>
-    {{end}}
-
-    {{if .Flash}}
-    <div class="alert alert-{{.Flash.Type}}" style="border-radius: 0;">
-        <div class="page">{{.Flash.Message}}</div>
+        </aside>
     </div>
-    {{end}}
-
-    <main>
+    {{else}}
+    <!-- Non-authenticated layout (login, setup) -->
+    <main class="auth-layout">
+        {{if .Flash}}
+        <div class="alert alert-{{.Flash.Type}}">
+            {{.Flash.Message}}
+        </div>
+        {{end}}
         {{template "content" .}}
     </main>
-
-    {{if .User}}
-    <footer class="footer">
-        APIGate {{.Config.Version}} | Upstream: {{.Config.UpstreamURL}}
-    </footer>
     {{end}}
 </body>
 </html>

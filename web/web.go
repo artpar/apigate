@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/artpar/apigate/adapters/auth"
+	"github.com/artpar/apigate/app"
 	"github.com/artpar/apigate/config"
 	"github.com/artpar/apigate/ports"
 	"github.com/go-chi/chi/v5"
@@ -22,33 +23,47 @@ import (
 //go:embed templates/* static/*
 var assets embed.FS
 
+// ExprValidator can validate Expr expressions.
+type ExprValidator interface {
+	ValidateExpr(expression, context string) app.ExprValidationResult
+}
+
+// RouteTester can test route matching and transformations.
+type RouteTester interface {
+	TestRoute(req app.RouteTestRequest) app.RouteTestResult
+}
+
 // Handler provides the web UI endpoints.
 type Handler struct {
-	templates map[string]*template.Template // One template per page
-	tokens    *auth.TokenService
-	users     ports.UserStore
-	keys      ports.KeyStore
-	usage     ports.UsageStore
-	routes    ports.RouteStore
-	upstreams ports.UpstreamStore
-	config    *config.Config
-	logger    zerolog.Logger
-	hasher    ports.Hasher
-	isSetup   func() bool // Returns true if initial setup is complete
+	templates     map[string]*template.Template // One template per page
+	tokens        *auth.TokenService
+	users         ports.UserStore
+	keys          ports.KeyStore
+	usage         ports.UsageStore
+	routes        ports.RouteStore
+	upstreams     ports.UpstreamStore
+	config        *config.Config
+	logger        zerolog.Logger
+	hasher        ports.Hasher
+	isSetup       func() bool // Returns true if initial setup is complete
+	exprValidator ExprValidator
+	routeTester   RouteTester
 }
 
 // Deps contains dependencies for the web handler.
 type Deps struct {
-	Users     ports.UserStore
-	Keys      ports.KeyStore
-	Usage     ports.UsageStore
-	Routes    ports.RouteStore
-	Upstreams ports.UpstreamStore
-	Config    *config.Config
-	Logger    zerolog.Logger
-	Hasher    ports.Hasher
-	JWTSecret string
-	IsSetup   func() bool
+	Users         ports.UserStore
+	Keys          ports.KeyStore
+	Usage         ports.UsageStore
+	Routes        ports.RouteStore
+	Upstreams     ports.UpstreamStore
+	Config        *config.Config
+	Logger        zerolog.Logger
+	Hasher        ports.Hasher
+	JWTSecret     string
+	IsSetup       func() bool
+	ExprValidator ExprValidator
+	RouteTester   RouteTester
 }
 
 // NewHandler creates a new web UI handler.
@@ -60,17 +75,19 @@ func NewHandler(deps Deps) (*Handler, error) {
 	}
 
 	return &Handler{
-		templates: tmpl,
-		tokens:    auth.NewTokenService(deps.JWTSecret, 24*time.Hour),
-		users:     deps.Users,
-		keys:      deps.Keys,
-		usage:     deps.Usage,
-		routes:    deps.Routes,
-		upstreams: deps.Upstreams,
-		config:    deps.Config,
-		logger:    deps.Logger,
-		hasher:    deps.Hasher,
-		isSetup:   deps.IsSetup,
+		templates:     tmpl,
+		tokens:        auth.NewTokenService(deps.JWTSecret, 24*time.Hour),
+		users:         deps.Users,
+		keys:          deps.Keys,
+		usage:         deps.Usage,
+		routes:        deps.Routes,
+		upstreams:     deps.Upstreams,
+		config:        deps.Config,
+		logger:        deps.Logger,
+		hasher:        deps.Hasher,
+		isSetup:       deps.IsSetup,
+		exprValidator: deps.ExprValidator,
+		routeTester:   deps.RouteTester,
 	}, nil
 }
 
@@ -149,6 +166,10 @@ func (h *Handler) Router() chi.Router {
 		r.Get("/partials/activity", h.PartialActivity)
 		r.Get("/partials/routes", h.PartialRoutes)
 		r.Get("/partials/upstreams", h.PartialUpstreams)
+
+		// API endpoints for dynamic UI features
+		r.Post("/api/expr/validate", h.ValidateExpr)
+		r.Post("/api/routes/test", h.TestRoute)
 	})
 
 	return r
@@ -256,6 +277,15 @@ func parseTemplates() (map[string]*template.Template, error) {
 			default:
 				return 0
 			}
+		},
+		"split": func(sep, s string) []string {
+			return strings.Split(s, sep)
+		},
+		"first": func(items []string) string {
+			if len(items) > 0 {
+				return items[0]
+			}
+			return ""
 		},
 	}
 
