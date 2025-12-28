@@ -25,3 +25,4 @@ Thumbs.db
 # Local config overrides
 *.local.yaml
 bin/
+e2e.test
