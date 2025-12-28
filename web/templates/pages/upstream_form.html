@@ -1,0 +1,103 @@
+{{define "content"}}
+<div class="page" style="max-width: 700px;">
+    <div class="mb-4">
+        <a href="/upstreams" class="link text-sm">&larr; Back to Upstreams</a>
+    </div>
+    <div class="page-header">
+        <h1 class="page-title">{{if .IsNew}}Create Upstream{{else}}Edit Upstream{{end}}</h1>
+    </div>
+
+    <form action="{{if .IsNew}}/upstreams{{else}}/upstreams/{{.Upstream.ID}}{{end}}" method="POST" class="form">
+        <!-- Basic Info -->
+        <div class="card mb-4">
+            <div class="card-header">Basic Information</div>
+            <div class="card-body">
+                <div class="form-group">
+                    <label for="name" class="form-label">Name</label>
+                    <input type="text" id="name" name="name" required class="form-input" placeholder="my-backend" value="{{.Upstream.Name}}">
+                </div>
+
+                <div class="form-group">
+                    <label for="base_url" class="form-label">Base URL</label>
+                    <input type="url" id="base_url" name="base_url" required class="form-input" placeholder="https://api.example.com" value="{{.Upstream.BaseURL}}">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-checkbox">
+                        <input type="checkbox" name="enabled" {{if .Upstream.Enabled}}checked{{end}}>
+                        <span>Enabled</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- Authentication -->
+        <div class="card mb-4">
+            <div class="card-header">Authentication</div>
+            <div class="card-body">
+                <div class="form-group">
+                    <label for="auth_type" class="form-label">Auth Type</label>
+                    <select id="auth_type" name="auth_type" class="form-input" onchange="toggleAuthFields()">
+                        <option value="none" {{if eq .Upstream.AuthType "none"}}selected{{end}}>None</option>
+                        <option value="header" {{if eq .Upstream.AuthType "header"}}selected{{end}}>Header</option>
+                        <option value="bearer" {{if eq .Upstream.AuthType "bearer"}}selected{{end}}>Bearer Token</option>
+                        <option value="basic" {{if eq .Upstream.AuthType "basic"}}selected{{end}}>Basic Auth</option>
+                    </select>
+                </div>
+
+                <div id="auth-fields" class="{{if eq .Upstream.AuthType "none"}}hidden{{end}}">
+                    <div class="form-group">
+                        <label for="auth_header" class="form-label">Header Name</label>
+                        <input type="text" id="auth_header" name="auth_header" class="form-input" placeholder="X-API-Key" value="{{.Upstream.AuthHeader}}">
+                        <div class="form-hint">For bearer: Authorization, for header: your custom header name</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="auth_value" class="form-label">Auth Value</label>
+                        <input type="password" id="auth_value" name="auth_value" class="form-input" placeholder="${ENV_VAR} or literal value" value="{{.Upstream.AuthValue}}">
+                        <div class="form-hint">Use ${ENV_VAR} to reference environment variables</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Connection Settings -->
+        <div class="card mb-4">
+            <div class="card-header">Connection Settings</div>
+            <div class="card-body">
+                <div class="form-row">
+                    <div class="form-group" style="flex: 1;">
+                        <label for="timeout_ms" class="form-label">Timeout (ms)</label>
+                        <input type="number" id="timeout_ms" name="timeout_ms" class="form-input" placeholder="30000" value="{{.Upstream.Timeout.Milliseconds}}">
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="max_idle_conns" class="form-label">Max Idle Connections</label>
+                        <input type="number" id="max_idle_conns" name="max_idle_conns" class="form-input" placeholder="100" value="{{.Upstream.MaxIdleConns}}">
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="idle_conn_timeout_ms" class="form-label">Idle Timeout (ms)</label>
+                        <input type="number" id="idle_conn_timeout_ms" name="idle_conn_timeout_ms" class="form-input" placeholder="90000" value="{{.Upstream.IdleConnTimeout.Milliseconds}}">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="form-actions">
+            <a href="/upstreams" class="btn btn-secondary">Cancel</a>
+            <button type="submit" class="btn btn-primary">{{if .IsNew}}Create Upstream{{else}}Update Upstream{{end}}</button>
+        </div>
+    </form>
+</div>
+
+<script>
+function toggleAuthFields() {
+    var authType = document.getElementById('auth_type').value;
+    var authFields = document.getElementById('auth-fields');
+    if (authType === 'none') {
+        authFields.classList.add('hidden');
+    } else {
+        authFields.classList.remove('hidden');
+    }
+}
+</script>
+{{end}}

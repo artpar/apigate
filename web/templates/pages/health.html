@@ -1,0 +1,90 @@
+{{define "content"}}
+<div class="page" style="max-width: 800px;">
+    <div class="page-header">
+        <h1 class="page-title">System Status</h1>
+        <div class="flex gap-2">
+            <span class="badge {{if eq .Health.Status "healthy"}}badge-success{{else if eq .Health.Status "degraded"}}badge-warning{{else}}badge-error{{end}}">
+                {{.Health.Status}}
+            </span>
+            <button hx-get="/system" hx-target="body" class="btn btn-secondary btn-sm">Refresh</button>
+        </div>
+    </div>
+
+    <!-- Health Checks -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <span class="card-title">Health Checks</span>
+        </div>
+        <div class="card-body flush">
+            {{range .Health.Checks}}
+            <div class="activity-item">
+                <div class="activity-dot {{if eq .Status "pass"}}create{{else if eq .Status "warn"}}update{{else}}delete{{end}}"></div>
+                <div style="flex: 1;">
+                    <div class="cell-primary">{{.Name}}</div>
+                    <div class="cell-secondary">{{.Message}}</div>
+                </div>
+                {{if .Latency}}<span class="text-muted text-sm">{{.Latency}}</span>{{end}}
+            </div>
+            {{end}}
+        </div>
+    </div>
+
+    <!-- System Info -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <span class="card-title">System Information</span>
+        </div>
+        <div class="card-body">
+            <div class="grid grid-2" style="gap: 16px;">
+                <div>
+                    <div class="text-muted text-sm">Go Version</div>
+                    <div class="cell-primary">{{.Health.System.GoVersion}}</div>
+                </div>
+                <div>
+                    <div class="text-muted text-sm">CPUs</div>
+                    <div class="cell-primary">{{.Health.System.NumCPU}}</div>
+                </div>
+                <div>
+                    <div class="text-muted text-sm">Goroutines</div>
+                    <div class="cell-primary">{{.Health.System.NumGoroutine}}</div>
+                </div>
+                <div>
+                    <div class="text-muted text-sm">Memory Allocated</div>
+                    <div class="cell-primary">{{.Health.System.MemAlloc}}</div>
+                </div>
+                <div>
+                    <div class="text-muted text-sm">System Memory</div>
+                    <div class="cell-primary">{{.Health.System.MemSys}}</div>
+                </div>
+                <div>
+                    <div class="text-muted text-sm">Uptime</div>
+                    <div class="cell-primary">{{.Health.System.Uptime}}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Statistics -->
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title">Statistics</span>
+        </div>
+        <div class="card-body">
+            <div class="grid grid-3 text-center">
+                <div>
+                    <div class="text-muted text-sm">Total Users</div>
+                    <div class="stat-value">{{.Health.Statistics.TotalUsers}}</div>
+                </div>
+                <div>
+                    <div class="text-muted text-sm">Total Keys</div>
+                    <div class="stat-value">{{.Health.Statistics.TotalKeys}}</div>
+                </div>
+                <div>
+                    <div class="text-muted text-sm">Active Sessions</div>
+                    <div class="stat-value">{{.Health.Statistics.ActiveSessions}}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{{end}}

@@ -16,6 +16,7 @@ import (
 	"github.com/artpar/apigate/domain/key"
 	"github.com/artpar/apigate/domain/plan"
 	"github.com/artpar/apigate/domain/proxy"
+	"github.com/artpar/apigate/domain/route"
 	"github.com/artpar/apigate/domain/usage"
 	"github.com/artpar/apigate/ports"
 	"github.com/rs/zerolog"
@@ -354,6 +355,10 @@ func (u *testUpstream) HealthCheck(ctx context.Context) error {
 		return context.DeadlineExceeded
 	}
 	return nil
+}
+
+func (u *testUpstream) ForwardTo(ctx context.Context, req proxy.Request, upstream *route.Upstream) (proxy.Response, error) {
+	return u.Forward(ctx, req)
 }
 
 type testIDGen struct {

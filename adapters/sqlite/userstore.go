@@ -28,7 +28,7 @@ func NewUserStore(db *DB) *UserStore {
 // Get retrieves a user by ID.
 func (s *UserStore) Get(ctx context.Context, id string) (ports.User, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, email, name, stripe_id, plan_id, status, created_at, updated_at
+		SELECT id, email, password_hash, name, stripe_id, plan_id, status, created_at, updated_at
 		FROM users
 		WHERE id = ?
 	`, id)
@@ -38,7 +38,7 @@ func (s *UserStore) Get(ctx context.Context, id string) (ports.User, error) {
 // GetByEmail retrieves a user by email.
 func (s *UserStore) GetByEmail(ctx context.Context, email string) (ports.User, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, email, name, stripe_id, plan_id, status, created_at, updated_at
+		SELECT id, email, password_hash, name, stripe_id, plan_id, status, created_at, updated_at
 		FROM users
 		WHERE email = ?
 	`, email)
@@ -56,9 +56,9 @@ func (s *UserStore) Create(ctx context.Context, u ports.User) error {
 	}
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO users (id, email, name, stripe_id, plan_id, status, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, u.ID, u.Email, u.Name, nullString(u.StripeID), u.PlanID, u.Status, u.CreatedAt, u.UpdatedAt)
+		INSERT INTO users (id, email, password_hash, name, stripe_id, plan_id, status, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, u.ID, u.Email, u.PasswordHash, u.Name, nullString(u.StripeID), u.PlanID, u.Status, u.CreatedAt, u.UpdatedAt)
 
 	if err != nil && isUniqueConstraintError(err) {
 		return ErrDuplicate
@@ -72,9 +72,9 @@ func (s *UserStore) Update(ctx context.Context, u ports.User) error {
 
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE users
-		SET email = ?, name = ?, stripe_id = ?, plan_id = ?, status = ?, updated_at = ?
+		SET email = ?, password_hash = ?, name = ?, stripe_id = ?, plan_id = ?, status = ?, updated_at = ?
 		WHERE id = ?
-	`, u.Email, u.Name, nullString(u.StripeID), u.PlanID, u.Status, u.UpdatedAt, u.ID)
+	`, u.Email, u.PasswordHash, u.Name, nullString(u.StripeID), u.PlanID, u.Status, u.UpdatedAt, u.ID)
 	if err != nil {
 		if isUniqueConstraintError(err) {
 			return ErrDuplicate
@@ -95,7 +95,7 @@ func (s *UserStore) Update(ctx context.Context, u ports.User) error {
 // List returns users with pagination.
 func (s *UserStore) List(ctx context.Context, limit, offset int) ([]ports.User, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, email, name, stripe_id, plan_id, status, created_at, updated_at
+		SELECT id, email, password_hash, name, stripe_id, plan_id, status, created_at, updated_at
 		FROM users
 		ORDER BY created_at DESC
 		LIMIT ? OFFSET ?
@@ -142,9 +142,10 @@ func (s *UserStore) Delete(ctx context.Context, id string) error {
 func scanUser(row *sql.Row) (ports.User, error) {
 	var u ports.User
 	var stripeID sql.NullString
+	var passwordHash []byte
 
 	err := row.Scan(
-		&u.ID, &u.Email, &u.Name, &stripeID, &u.PlanID, &u.Status, &u.CreatedAt, &u.UpdatedAt,
+		&u.ID, &u.Email, &passwordHash, &u.Name, &stripeID, &u.PlanID, &u.Status, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ports.User{}, ErrNotFound
@@ -153,6 +154,7 @@ func scanUser(row *sql.Row) (ports.User, error) {
 		return ports.User{}, err
 	}
 
+	u.PasswordHash = passwordHash
 	if stripeID.Valid {
 		u.StripeID = stripeID.String
 	}
@@ -162,14 +164,16 @@ func scanUser(row *sql.Row) (ports.User, error) {
 func scanUserRows(rows *sql.Rows) (ports.User, error) {
 	var u ports.User
 	var stripeID sql.NullString
+	var passwordHash []byte
 
 	err := rows.Scan(
-		&u.ID, &u.Email, &u.Name, &stripeID, &u.PlanID, &u.Status, &u.CreatedAt, &u.UpdatedAt,
+		&u.ID, &u.Email, &passwordHash, &u.Name, &stripeID, &u.PlanID, &u.Status, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err != nil {
 		return ports.User{}, err
 	}
 
+	u.PasswordHash = passwordHash
 	if stripeID.Valid {
 		u.StripeID = stripeID.String
 	}

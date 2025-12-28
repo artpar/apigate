@@ -1,0 +1,25 @@
+{{define "content"}}
+<div class="login-container">
+    <div class="card login-card">
+        <div class="login-header">
+            <h1 class="login-title">Admin Login</h1>
+        </div>
+        <div class="login-body">
+            {{if .Error}}
+            <div class="alert alert-error mb-4">{{.Error}}</div>
+            {{end}}
+            <form action="/login" method="POST" class="form">
+                <div class="form-group">
+                    <label for="email" class="form-label">Email</label>
+                    <input type="email" id="email" name="email" value="{{.Email}}" required class="form-input" autofocus>
+                </div>
+                <div class="form-group">
+                    <label for="password" class="form-label">Password</label>
+                    <input type="password" id="password" name="password" required class="form-input">
+                </div>
+                <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 8px;">Sign In</button>
+            </form>
+        </div>
+    </div>
+</div>
+{{end}}

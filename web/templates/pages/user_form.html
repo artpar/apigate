@@ -1,0 +1,54 @@
+{{define "content"}}
+<div class="page" style="max-width: 600px;">
+    <div class="mb-4">
+        <a href="/users" class="link text-sm">&larr; Back to Users</a>
+    </div>
+    <div class="page-header">
+        <h1 class="page-title">{{if .IsEdit}}Edit User{{else}}Create User{{end}}</h1>
+    </div>
+
+    <div class="card">
+        <div class="card-body">
+            {{if .Error}}
+            <div class="alert alert-error mb-4">{{.Error}}</div>
+            {{end}}
+
+            <form action="{{if .IsEdit}}/users/{{.FormUser.ID}}{{else}}/users{{end}}" method="POST" class="form">
+                <div class="form-group">
+                    <label for="email" class="form-label">Email</label>
+                    <input type="email" id="email" name="email" required class="form-input" placeholder="user@example.com" value="{{.FormUser.Email}}" {{if .IsEdit}}readonly style="background: #f9fafb;"{{end}}>
+                </div>
+
+                {{if not .IsEdit}}
+                <div class="form-group">
+                    <label for="password" class="form-label">Password</label>
+                    <input type="password" id="password" name="password" required class="form-input" minlength="8">
+                </div>
+                {{end}}
+
+                <div class="form-group">
+                    <label for="plan_id" class="form-label">Plan</label>
+                    <select id="plan_id" name="plan_id" class="form-input">
+                        {{range .Plans}}
+                        <option value="{{.ID}}" {{if eq .ID $.FormUser.PlanID}}selected{{end}}>{{.Name}}</option>
+                        {{end}}
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="status" class="form-label">Status</label>
+                    <select id="status" name="status" class="form-input">
+                        <option value="active" {{if eq .FormUser.Status "active"}}selected{{end}}>Active</option>
+                        <option value="suspended" {{if eq .FormUser.Status "suspended"}}selected{{end}}>Suspended</option>
+                    </select>
+                </div>
+
+                <div class="form-actions">
+                    <a href="/users" class="btn btn-secondary">Cancel</a>
+                    <button type="submit" class="btn btn-primary">{{if .IsEdit}}Update User{{else}}Create User{{end}}</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{{end}}

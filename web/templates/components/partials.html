@@ -1,0 +1,165 @@
+{{define "partial_users"}}
+<table class="table">
+    <thead>
+        <tr>
+            <th>Email</th>
+            <th>Plan</th>
+            <th>Status</th>
+            <th>Created</th>
+            <th class="cell-actions">Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .Users}}
+        <tr>
+            <td>
+                <div class="cell-primary">{{.Email}}</div>
+                <div class="cell-secondary">{{.ID}}</div>
+            </td>
+            <td class="text-muted">{{.PlanID}}</td>
+            <td>
+                <span class="badge {{if eq .Status "active"}}badge-success{{else}}badge-error{{end}}">{{.Status}}</span>
+            </td>
+            <td class="text-muted">{{formatDate .CreatedAt}}</td>
+            <td class="cell-actions">
+                <a href="/users/{{.ID}}" class="link">Edit</a>
+                <button hx-delete="/users/{{.ID}}" hx-confirm="Delete this user?" hx-target="#users-table" class="link link-danger" style="margin-left: 12px;">Delete</button>
+            </td>
+        </tr>
+        {{else}}
+        <tr><td colspan="5" class="table-empty">No users found.</td></tr>
+        {{end}}
+    </tbody>
+</table>
+{{end}}
+
+{{define "partial_keys"}}
+<table class="table">
+    <thead>
+        <tr>
+            <th>Key</th>
+            <th>User</th>
+            <th>Status</th>
+            <th>Created</th>
+            <th>Last Used</th>
+            <th class="cell-actions">Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .Keys}}
+        <tr>
+            <td>
+                <div class="cell-primary cell-mono">{{maskKey .ID}}</div>
+                {{if .Name}}<div class="cell-secondary">{{.Name}}</div>{{end}}
+            </td>
+            <td class="text-muted">{{.UserID}}</td>
+            <td>
+                <span class="badge {{if eq .Status "active"}}badge-success{{else}}badge-error{{end}}">{{.Status}}</span>
+            </td>
+            <td class="text-muted">{{formatDate .CreatedAt}}</td>
+            <td class="text-muted">{{if .LastUsedAt}}{{timeAgo .LastUsedAt}}{{else}}Never{{end}}</td>
+            <td class="cell-actions">
+                <button hx-delete="/keys/{{.ID}}" hx-confirm="Revoke this key?" hx-target="#keys-table" class="link link-danger">Revoke</button>
+            </td>
+        </tr>
+        {{else}}
+        <tr><td colspan="6" class="table-empty">No API keys found.</td></tr>
+        {{end}}
+    </tbody>
+</table>
+{{end}}
+
+{{define "partial_activity"}}
+{{if .Activities}}
+<div>
+    {{range .Activities}}
+    <div class="activity-item">
+        <div class="activity-dot {{.Type}}"></div>
+        <div>
+            <div class="activity-text">{{.Message}}</div>
+            <div class="activity-time">{{timeAgo .Timestamp}}</div>
+        </div>
+    </div>
+    {{end}}
+</div>
+{{else}}
+<div class="table-empty">No recent activity.</div>
+{{end}}
+{{end}}
+
+{{define "partial_routes"}}
+<table class="table">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Path Pattern</th>
+            <th>Upstream</th>
+            <th>Protocol</th>
+            <th>Status</th>
+            <th class="cell-actions">Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .Routes}}
+        <tr>
+            <td>
+                <div class="cell-primary">{{.Name}}</div>
+                <div class="cell-secondary">Priority: {{.Priority}}</div>
+            </td>
+            <td>
+                <div class="cell-primary cell-mono">{{.PathPattern}}</div>
+                <div class="cell-secondary">{{.MatchType}}{{if .Methods}} | {{range $i, $m := .Methods}}{{if $i}}, {{end}}{{$m}}{{end}}{{end}}</div>
+            </td>
+            <td class="text-muted">{{index $.UpstreamMap .UpstreamID}}</td>
+            <td class="text-muted">{{.Protocol}}</td>
+            <td>
+                <span class="badge {{if .Enabled}}badge-success{{else}}badge-error{{end}}">{{if .Enabled}}enabled{{else}}disabled{{end}}</span>
+            </td>
+            <td class="cell-actions">
+                <a href="/routes/{{.ID}}" class="link">Edit</a>
+                <button hx-delete="/routes/{{.ID}}" hx-confirm="Delete this route?" hx-target="#routes-table" class="link link-danger" style="margin-left: 12px;">Delete</button>
+            </td>
+        </tr>
+        {{else}}
+        <tr><td colspan="6" class="table-empty">No routes found. <a href="/routes/new" class="link">Create one</a></td></tr>
+        {{end}}
+    </tbody>
+</table>
+{{end}}
+
+{{define "partial_upstreams"}}
+<table class="table">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Base URL</th>
+            <th>Auth</th>
+            <th>Timeout</th>
+            <th>Status</th>
+            <th class="cell-actions">Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .Upstreams}}
+        <tr>
+            <td>
+                <div class="cell-primary">{{.Name}}</div>
+                <div class="cell-secondary">{{.ID}}</div>
+            </td>
+            <td class="cell-mono text-muted">{{truncate .BaseURL 50}}</td>
+            <td class="text-muted">{{.AuthType}}</td>
+            <td class="text-muted">{{.Timeout}}</td>
+            <td>
+                <span class="badge {{if .Enabled}}badge-success{{else}}badge-error{{end}}">{{if .Enabled}}enabled{{else}}disabled{{end}}</span>
+            </td>
+            <td class="cell-actions">
+                <a href="/upstreams/{{.ID}}" class="link">Edit</a>
+                <button hx-delete="/upstreams/{{.ID}}" hx-confirm="Delete this upstream?" hx-target="#upstreams-table" class="link link-danger" style="margin-left: 12px;">Delete</button>
+            </td>
+        </tr>
+        {{else}}
+        <tr><td colspan="6" class="table-empty">No upstreams found. <a href="/upstreams/new" class="link">Create one</a></td></tr>
+        {{end}}
+    </tbody>
+</table>
+{{end}}

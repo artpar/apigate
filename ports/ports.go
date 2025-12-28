@@ -5,12 +5,14 @@ package ports
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"github.com/artpar/apigate/domain/billing"
 	"github.com/artpar/apigate/domain/key"
 	"github.com/artpar/apigate/domain/proxy"
 	"github.com/artpar/apigate/domain/ratelimit"
+	"github.com/artpar/apigate/domain/route"
 	"github.com/artpar/apigate/domain/usage"
 )
 
@@ -60,14 +62,15 @@ type KeyStore interface {
 
 // User represents a user account.
 type User struct {
-	ID        string
-	Email     string
-	Name      string
-	StripeID  string
-	PlanID    string
-	Status    string // "active", "suspended", "cancelled"
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID           string
+	Email        string
+	PasswordHash []byte // bcrypt hash for web UI login (optional for API-only users)
+	Name         string
+	StripeID     string
+	PlanID       string
+	Status       string // "active", "suspended", "cancelled"
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 // UserStore persists user accounts.
@@ -83,6 +86,9 @@ type UserStore interface {
 
 	// Update modifies an existing user.
 	Update(ctx context.Context, u User) error
+
+	// Delete removes a user.
+	Delete(ctx context.Context, id string) error
 
 	// List returns users with pagination.
 	List(ctx context.Context, limit, offset int) ([]User, error)
@@ -151,6 +157,10 @@ type Upstream interface {
 	// Forward sends a request to the upstream and returns the response.
 	Forward(ctx context.Context, req proxy.Request) (proxy.Response, error)
 
+	// ForwardTo sends a request to a specific upstream (not the default).
+	// Used when a route specifies a different upstream.
+	ForwardTo(ctx context.Context, req proxy.Request, upstream *route.Upstream) (proxy.Response, error)
+
 	// HealthCheck verifies upstream is reachable.
 	HealthCheck(ctx context.Context) error
 }
@@ -207,4 +217,114 @@ type Hasher interface {
 
 	// Compare checks if plaintext matches hash.
 	Compare(hash []byte, plaintext string) bool
+}
+
+// -----------------------------------------------------------------------------
+// Route Ports
+// -----------------------------------------------------------------------------
+
+// RouteStore persists route configurations.
+type RouteStore interface {
+	// Get retrieves a route by ID.
+	Get(ctx context.Context, id string) (route.Route, error)
+
+	// List returns all routes ordered by priority.
+	List(ctx context.Context) ([]route.Route, error)
+
+	// ListEnabled returns only enabled routes ordered by priority.
+	ListEnabled(ctx context.Context) ([]route.Route, error)
+
+	// Create stores a new route.
+	Create(ctx context.Context, r route.Route) error
+
+	// Update modifies an existing route.
+	Update(ctx context.Context, r route.Route) error
+
+	// Delete removes a route.
+	Delete(ctx context.Context, id string) error
+}
+
+// UpstreamStore persists upstream configurations.
+type UpstreamStore interface {
+	// Get retrieves an upstream by ID.
+	Get(ctx context.Context, id string) (route.Upstream, error)
+
+	// List returns all upstreams.
+	List(ctx context.Context) ([]route.Upstream, error)
+
+	// ListEnabled returns only enabled upstreams.
+	ListEnabled(ctx context.Context) ([]route.Upstream, error)
+
+	// Create stores a new upstream.
+	Create(ctx context.Context, u route.Upstream) error
+
+	// Update modifies an existing upstream.
+	Update(ctx context.Context, u route.Upstream) error
+
+	// Delete removes an upstream.
+	Delete(ctx context.Context, id string) error
+}
+
+// -----------------------------------------------------------------------------
+// Router Ports
+// -----------------------------------------------------------------------------
+
+// Router matches incoming requests to routes.
+type Router interface {
+	// Match finds the best matching route for a request.
+	// Returns nil if no route matches.
+	Match(method, path string, headers map[string]string) *route.MatchResult
+
+	// Reload refreshes routes from storage.
+	Reload(ctx context.Context) error
+}
+
+// -----------------------------------------------------------------------------
+// Transformer Ports
+// -----------------------------------------------------------------------------
+
+// Transformer applies transformations to requests and responses.
+type Transformer interface {
+	// TransformRequest applies request transformations.
+	TransformRequest(ctx context.Context, req proxy.Request, transform *route.Transform, auth *proxy.AuthContext) (proxy.Request, error)
+
+	// TransformResponse applies response transformations.
+	TransformResponse(ctx context.Context, resp proxy.Response, transform *route.Transform, auth *proxy.AuthContext) (proxy.Response, error)
+
+	// EvalString evaluates an Expr expression and returns a string.
+	EvalString(ctx context.Context, expr string, data map[string]any) (string, error)
+
+	// EvalFloat evaluates an Expr expression and returns a float64.
+	EvalFloat(ctx context.Context, expr string, data map[string]any) (float64, error)
+}
+
+// -----------------------------------------------------------------------------
+// Streaming Ports
+// -----------------------------------------------------------------------------
+
+// StreamingResponse represents a response that may be streamed.
+type StreamingResponse struct {
+	Status       int
+	Headers      map[string]string
+	Body         io.ReadCloser // For streaming (nil if buffered)
+	BodyBytes    []byte        // For buffered (nil if streaming)
+	IsStreaming  bool
+	ContentType  string
+	LatencyMs    int64
+	UpstreamAddr string
+}
+
+// StreamingUpstream extends Upstream with streaming capabilities.
+type StreamingUpstream interface {
+	Upstream // Embed existing interface for backward compatibility
+
+	// ForwardStreaming returns a streaming response.
+	// The caller is responsible for closing the response body.
+	ForwardStreaming(ctx context.Context, req proxy.Request) (StreamingResponse, error)
+
+	// ForwardStreamingTo sends a streaming request to a specific upstream (not the default).
+	ForwardStreamingTo(ctx context.Context, req proxy.Request, upstream *route.Upstream) (StreamingResponse, error)
+
+	// ShouldStream determines if a request should use streaming.
+	ShouldStream(req proxy.Request, protocol route.Protocol) bool
 }

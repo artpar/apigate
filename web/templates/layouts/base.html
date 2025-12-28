@@ -1,0 +1,56 @@
+{{define "base"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - APIGate</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <script src="/static/js/htmx.min.js"></script>
+</head>
+<body>
+    {{if .User}}
+    <nav class="nav">
+        <div class="nav-inner">
+            <div class="flex gap-4">
+                <a href="/dashboard" class="nav-brand">APIGate</a>
+                <div class="nav-links">
+                    <a href="/dashboard" class="nav-link{{if eq .CurrentPath "/dashboard"}} active{{end}}">Dashboard</a>
+                    <a href="/users" class="nav-link{{if eq .CurrentPath "/users"}} active{{end}}">Users</a>
+                    <a href="/keys" class="nav-link{{if eq .CurrentPath "/keys"}} active{{end}}">API Keys</a>
+                    <a href="/plans" class="nav-link{{if eq .CurrentPath "/plans"}} active{{end}}">Plans</a>
+                    <a href="/routes" class="nav-link{{if eq .CurrentPath "/routes"}} active{{end}}">Routes</a>
+                    <a href="/upstreams" class="nav-link{{if eq .CurrentPath "/upstreams"}} active{{end}}">Upstreams</a>
+                    <a href="/usage" class="nav-link{{if eq .CurrentPath "/usage"}} active{{end}}">Usage</a>
+                    <a href="/settings" class="nav-link{{if eq .CurrentPath "/settings"}} active{{end}}">Settings</a>
+                    <a href="/system" class="nav-link{{if eq .CurrentPath "/system"}} active{{end}}">System</a>
+                </div>
+            </div>
+            <div class="nav-user">
+                <span class="nav-email">{{.User.Email}}</span>
+                <form action="/logout" method="POST">
+                    <button type="submit" class="btn btn-secondary btn-sm">Logout</button>
+                </form>
+            </div>
+        </div>
+    </nav>
+    {{end}}
+
+    {{if .Flash}}
+    <div class="alert alert-{{.Flash.Type}}" style="border-radius: 0;">
+        <div class="page">{{.Flash.Message}}</div>
+    </div>
+    {{end}}
+
+    <main>
+        {{template "content" .}}
+    </main>
+
+    {{if .User}}
+    <footer class="footer">
+        APIGate {{.Config.Version}} | Upstream: {{.Config.UpstreamURL}}
+    </footer>
+    {{end}}
+</body>
+</html>
+{{end}}

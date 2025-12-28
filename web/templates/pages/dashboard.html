@@ -1,0 +1,66 @@
+{{define "content"}}
+<div class="page">
+    <div class="page-header">
+        <h1 class="page-title">Dashboard</h1>
+    </div>
+
+    <!-- Stats -->
+    <div class="grid grid-3 mb-4" hx-get="/partials/stats" hx-trigger="load, every 30s" hx-swap="innerHTML">
+        {{template "stats" .Stats}}
+    </div>
+
+    <!-- Recent Data -->
+    <div class="grid grid-2">
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">Recent Users</span>
+                <a href="/users" class="link text-sm">View all</a>
+            </div>
+            <div class="card-body flush" hx-get="/partials/users?limit=5" hx-trigger="load" hx-swap="innerHTML">
+                <div class="table-empty">Loading...</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">Recent API Keys</span>
+                <a href="/keys" class="link text-sm">View all</a>
+            </div>
+            <div class="card-body flush" hx-get="/partials/keys?limit=5" hx-trigger="load" hx-swap="innerHTML">
+                <div class="table-empty">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Activity -->
+    <div class="card mt-6">
+        <div class="card-header">
+            <span class="card-title">Recent Activity</span>
+        </div>
+        <div class="card-body flush" hx-get="/partials/activity?limit=10" hx-trigger="load, every 30s" hx-swap="innerHTML">
+            <div class="table-empty">Loading...</div>
+        </div>
+    </div>
+</div>
+{{end}}
+
+{{define "stats"}}
+<div class="card">
+    <div class="stat">
+        <div class="stat-label">Total Users</div>
+        <div class="stat-value">{{.TotalUsers}}</div>
+    </div>
+</div>
+<div class="card">
+    <div class="stat">
+        <div class="stat-label">Active API Keys</div>
+        <div class="stat-value">{{.ActiveKeys}}</div>
+    </div>
+</div>
+<div class="card">
+    <div class="stat">
+        <div class="stat-label">Requests Today</div>
+        <div class="stat-value">{{.RequestsToday}}</div>
+    </div>
+</div>
+{{end}}

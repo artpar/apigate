@@ -1,0 +1,41 @@
+{{define "content"}}
+<div class="page">
+    <div class="page-header">
+        <h1 class="page-title">Plans</h1>
+    </div>
+
+    <div class="grid grid-3">
+        {{range .Plans}}
+        <div class="card">
+            <div class="card-body">
+                <h3 class="card-title">{{.Name}}</h3>
+                <p class="text-sm text-muted">{{.ID}}</p>
+
+                <div class="mt-4" style="display: flex; flex-direction: column; gap: 8px;">
+                    <div class="flex flex-between text-sm">
+                        <span class="text-muted">Rate Limit</span>
+                        <span style="font-weight: 500;">{{.RateLimit}} req/min</span>
+                    </div>
+                    <div class="flex flex-between text-sm">
+                        <span class="text-muted">Monthly Quota</span>
+                        <span style="font-weight: 500;">{{.MonthlyQuota}} requests</span>
+                    </div>
+                    <div class="flex flex-between text-sm">
+                        <span class="text-muted">Price</span>
+                        <span style="font-weight: 500;">${{printf "%.2f" .PriceMonthly}}/mo</span>
+                    </div>
+                </div>
+
+                <div class="mt-4" style="padding-top: 16px; border-top: 1px solid #e5e7eb; font-size: 0.875rem; color: #6b7280;">
+                    {{.UserCount}} users on this plan
+                </div>
+            </div>
+        </div>
+        {{else}}
+        <div class="card" style="grid-column: 1 / -1;">
+            <div class="table-empty">No plans configured yet.</div>
+        </div>
+        {{end}}
+    </div>
+</div>
+{{end}}

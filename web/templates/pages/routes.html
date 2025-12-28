@@ -1,0 +1,14 @@
+{{define "content"}}
+<div class="page">
+    <div class="page-header">
+        <h1 class="page-title">Routes</h1>
+        <a href="/routes/new" class="btn btn-primary">Create Route</a>
+    </div>
+
+    <div class="card">
+        <div class="card-body flush" id="routes-table" hx-get="/partials/routes" hx-trigger="load" hx-swap="innerHTML">
+            <div class="table-empty">Loading routes...</div>
+        </div>
+    </div>
+</div>
+{{end}}

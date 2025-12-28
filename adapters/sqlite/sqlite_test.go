@@ -9,6 +9,7 @@ import (
 	"github.com/artpar/apigate/adapters/sqlite"
 	"github.com/artpar/apigate/domain/key"
 	"github.com/artpar/apigate/domain/ratelimit"
+	"github.com/artpar/apigate/domain/route"
 	"github.com/artpar/apigate/domain/usage"
 	"github.com/artpar/apigate/ports"
 )
@@ -622,6 +623,592 @@ func TestMigration_Idempotent(t *testing.T) {
 	// Run migrations again - should be idempotent
 	if err := db.Migrate(); err != nil {
 		t.Fatalf("second migration: %v", err)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// RouteStore Tests
+// -----------------------------------------------------------------------------
+
+func TestRouteStore_CreateAndGet(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	// First create an upstream (foreign key reference)
+	upstreamStore := sqlite.NewUpstreamStore(db)
+	ctx := context.Background()
+
+	upstream := route.NewUpstream("up-1", "Test Upstream", "https://api.example.com")
+	if err := upstreamStore.Create(ctx, upstream); err != nil {
+		t.Fatalf("create upstream: %v", err)
+	}
+
+	store := sqlite.NewRouteStore(db)
+
+	r := route.NewRoute("route-1", "Test Route", "/api/*", "up-1")
+	r.Description = "A test route"
+	r.MatchType = route.MatchPrefix
+	r.Methods = []string{"GET", "POST"}
+	r.Priority = 10
+	r.MeteringExpr = `respBody.usage.tokens ?? 1`
+
+	if err := store.Create(ctx, r); err != nil {
+		t.Fatalf("create route: %v", err)
+	}
+
+	got, err := store.Get(ctx, r.ID)
+	if err != nil {
+		t.Fatalf("get route: %v", err)
+	}
+
+	if got.ID != r.ID {
+		t.Errorf("ID = %s, want %s", got.ID, r.ID)
+	}
+	if got.Name != r.Name {
+		t.Errorf("Name = %s, want %s", got.Name, r.Name)
+	}
+	if got.PathPattern != r.PathPattern {
+		t.Errorf("PathPattern = %s, want %s", got.PathPattern, r.PathPattern)
+	}
+	if got.MatchType != route.MatchPrefix {
+		t.Errorf("MatchType = %s, want prefix", got.MatchType)
+	}
+	if len(got.Methods) != 2 {
+		t.Errorf("Methods len = %d, want 2", len(got.Methods))
+	}
+	if got.Priority != 10 {
+		t.Errorf("Priority = %d, want 10", got.Priority)
+	}
+	if got.MeteringExpr != r.MeteringExpr {
+		t.Errorf("MeteringExpr = %s, want %s", got.MeteringExpr, r.MeteringExpr)
+	}
+}
+
+func TestRouteStore_CreateWithTransforms(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	upstreamStore := sqlite.NewUpstreamStore(db)
+	ctx := context.Background()
+
+	upstream := route.NewUpstream("up-1", "Upstream", "https://api.example.com")
+	upstreamStore.Create(ctx, upstream)
+
+	store := sqlite.NewRouteStore(db)
+
+	r := route.NewRoute("route-1", "Transform Route", "/api/*", "up-1")
+	r.RequestTransform = &route.Transform{
+		SetHeaders:    map[string]string{"X-Custom": `"value"`},
+		DeleteHeaders: []string{"X-Remove"},
+		SetQuery:      map[string]string{"added": `"param"`},
+		BodyExpr:      `{"wrapped": body}`,
+	}
+	r.ResponseTransform = &route.Transform{
+		SetHeaders:    map[string]string{"X-Response": `"resp-value"`},
+		DeleteHeaders: []string{"X-Internal"},
+	}
+
+	if err := store.Create(ctx, r); err != nil {
+		t.Fatalf("create route: %v", err)
+	}
+
+	got, err := store.Get(ctx, r.ID)
+	if err != nil {
+		t.Fatalf("get route: %v", err)
+	}
+
+	if got.RequestTransform == nil {
+		t.Fatal("RequestTransform should not be nil")
+	}
+	if got.RequestTransform.SetHeaders["X-Custom"] != `"value"` {
+		t.Errorf("SetHeaders = %v", got.RequestTransform.SetHeaders)
+	}
+	if got.RequestTransform.BodyExpr != `{"wrapped": body}` {
+		t.Errorf("BodyExpr = %s", got.RequestTransform.BodyExpr)
+	}
+	if got.ResponseTransform == nil {
+		t.Fatal("ResponseTransform should not be nil")
+	}
+}
+
+func TestRouteStore_CreateWithHeaders(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	upstreamStore := sqlite.NewUpstreamStore(db)
+	ctx := context.Background()
+
+	upstream := route.NewUpstream("up-1", "Upstream", "https://api.example.com")
+	upstreamStore.Create(ctx, upstream)
+
+	store := sqlite.NewRouteStore(db)
+
+	r := route.NewRoute("route-1", "Header Route", "/api/*", "up-1")
+	r.Headers = []route.HeaderMatch{
+		{Name: "Content-Type", Value: "application/json", Required: true},
+		{Name: "X-Version", Value: `^v[0-9]+$`, IsRegex: true, Required: false},
+	}
+
+	if err := store.Create(ctx, r); err != nil {
+		t.Fatalf("create route: %v", err)
+	}
+
+	got, err := store.Get(ctx, r.ID)
+	if err != nil {
+		t.Fatalf("get route: %v", err)
+	}
+
+	if len(got.Headers) != 2 {
+		t.Fatalf("Headers len = %d, want 2", len(got.Headers))
+	}
+	if got.Headers[0].Name != "Content-Type" {
+		t.Errorf("Headers[0].Name = %s, want Content-Type", got.Headers[0].Name)
+	}
+	if !got.Headers[0].Required {
+		t.Error("Headers[0].Required should be true")
+	}
+	if !got.Headers[1].IsRegex {
+		t.Error("Headers[1].IsRegex should be true")
+	}
+}
+
+func TestRouteStore_List(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	upstreamStore := sqlite.NewUpstreamStore(db)
+	ctx := context.Background()
+
+	upstream := route.NewUpstream("up-1", "Upstream", "https://api.example.com")
+	upstreamStore.Create(ctx, upstream)
+
+	store := sqlite.NewRouteStore(db)
+
+	// Create routes with different priorities
+	for i := 0; i < 5; i++ {
+		r := route.NewRoute("route-"+itoa(i), "Route "+itoa(i), "/api/"+itoa(i)+"/*", "up-1")
+		r.Priority = i * 10
+		if err := store.Create(ctx, r); err != nil {
+			t.Fatalf("create route %d: %v", i, err)
+		}
+	}
+
+	routes, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("list routes: %v", err)
+	}
+
+	if len(routes) != 5 {
+		t.Errorf("len = %d, want 5", len(routes))
+	}
+
+	// Should be ordered by priority descending
+	if routes[0].Priority != 40 {
+		t.Errorf("first route priority = %d, want 40", routes[0].Priority)
+	}
+}
+
+func TestRouteStore_ListEnabled(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	upstreamStore := sqlite.NewUpstreamStore(db)
+	ctx := context.Background()
+
+	upstream := route.NewUpstream("up-1", "Upstream", "https://api.example.com")
+	upstreamStore.Create(ctx, upstream)
+
+	store := sqlite.NewRouteStore(db)
+
+	// Create enabled and disabled routes
+	for i := 0; i < 5; i++ {
+		r := route.NewRoute("route-"+itoa(i), "Route "+itoa(i), "/api/"+itoa(i)+"/*", "up-1")
+		r.Enabled = i%2 == 0 // 0, 2, 4 are enabled
+		if err := store.Create(ctx, r); err != nil {
+			t.Fatalf("create route %d: %v", i, err)
+		}
+	}
+
+	routes, err := store.ListEnabled(ctx)
+	if err != nil {
+		t.Fatalf("list enabled routes: %v", err)
+	}
+
+	if len(routes) != 3 {
+		t.Errorf("len = %d, want 3", len(routes))
+	}
+
+	for _, r := range routes {
+		if !r.Enabled {
+			t.Errorf("route %s should be enabled", r.ID)
+		}
+	}
+}
+
+func TestRouteStore_Update(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	upstreamStore := sqlite.NewUpstreamStore(db)
+	ctx := context.Background()
+
+	upstream := route.NewUpstream("up-1", "Upstream", "https://api.example.com")
+	upstreamStore.Create(ctx, upstream)
+
+	store := sqlite.NewRouteStore(db)
+
+	r := route.NewRoute("route-1", "Original", "/api/*", "up-1")
+	if err := store.Create(ctx, r); err != nil {
+		t.Fatalf("create route: %v", err)
+	}
+
+	// Update
+	r.Name = "Updated"
+	r.Priority = 100
+	r.MeteringExpr = "2"
+	r.Enabled = false
+
+	if err := store.Update(ctx, r); err != nil {
+		t.Fatalf("update route: %v", err)
+	}
+
+	got, err := store.Get(ctx, r.ID)
+	if err != nil {
+		t.Fatalf("get route: %v", err)
+	}
+
+	if got.Name != "Updated" {
+		t.Errorf("Name = %s, want Updated", got.Name)
+	}
+	if got.Priority != 100 {
+		t.Errorf("Priority = %d, want 100", got.Priority)
+	}
+	if got.Enabled {
+		t.Error("Enabled should be false")
+	}
+}
+
+func TestRouteStore_Delete(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	upstreamStore := sqlite.NewUpstreamStore(db)
+	ctx := context.Background()
+
+	upstream := route.NewUpstream("up-1", "Upstream", "https://api.example.com")
+	upstreamStore.Create(ctx, upstream)
+
+	store := sqlite.NewRouteStore(db)
+
+	r := route.NewRoute("route-1", "To Delete", "/api/*", "up-1")
+	if err := store.Create(ctx, r); err != nil {
+		t.Fatalf("create route: %v", err)
+	}
+
+	if err := store.Delete(ctx, r.ID); err != nil {
+		t.Fatalf("delete route: %v", err)
+	}
+
+	_, err := store.Get(ctx, r.ID)
+	if err != sqlite.ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestRouteStore_NotFound(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewRouteStore(db)
+	ctx := context.Background()
+
+	_, err := store.Get(ctx, "nonexistent")
+	if err != sqlite.ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestRouteStore_DeleteNotFound(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewRouteStore(db)
+	ctx := context.Background()
+
+	err := store.Delete(ctx, "nonexistent")
+	if err != sqlite.ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// UpstreamStore Tests
+// -----------------------------------------------------------------------------
+
+func TestUpstreamStore_CreateAndGet(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewUpstreamStore(db)
+	ctx := context.Background()
+
+	u := route.NewUpstream("up-1", "API Backend", "https://api.example.com")
+	u.Description = "Backend API server"
+	u.Timeout = 30 * time.Second
+	u.MaxIdleConns = 50
+	u.IdleConnTimeout = 60 * time.Second
+
+	if err := store.Create(ctx, u); err != nil {
+		t.Fatalf("create upstream: %v", err)
+	}
+
+	got, err := store.Get(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("get upstream: %v", err)
+	}
+
+	if got.ID != u.ID {
+		t.Errorf("ID = %s, want %s", got.ID, u.ID)
+	}
+	if got.Name != u.Name {
+		t.Errorf("Name = %s, want %s", got.Name, u.Name)
+	}
+	if got.BaseURL != u.BaseURL {
+		t.Errorf("BaseURL = %s, want %s", got.BaseURL, u.BaseURL)
+	}
+	if got.Timeout != 30*time.Second {
+		t.Errorf("Timeout = %v, want 30s", got.Timeout)
+	}
+	if got.MaxIdleConns != 50 {
+		t.Errorf("MaxIdleConns = %d, want 50", got.MaxIdleConns)
+	}
+}
+
+func TestUpstreamStore_CreateWithAuth(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewUpstreamStore(db)
+	ctx := context.Background()
+
+	u := route.NewUpstream("up-1", "Auth Upstream", "https://api.example.com")
+	u = u.WithAuth(route.AuthBearer, "", "secret-token")
+
+	if err := store.Create(ctx, u); err != nil {
+		t.Fatalf("create upstream: %v", err)
+	}
+
+	got, err := store.Get(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("get upstream: %v", err)
+	}
+
+	if got.AuthType != route.AuthBearer {
+		t.Errorf("AuthType = %s, want bearer", got.AuthType)
+	}
+	if got.AuthValue != "secret-token" {
+		t.Errorf("AuthValue = %s, want secret-token", got.AuthValue)
+	}
+}
+
+func TestUpstreamStore_CreateWithHeaderAuth(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewUpstreamStore(db)
+	ctx := context.Background()
+
+	u := route.NewUpstream("up-1", "Header Auth", "https://api.example.com")
+	u = u.WithAuth(route.AuthHeader, "X-API-Key", "api-key-123")
+
+	if err := store.Create(ctx, u); err != nil {
+		t.Fatalf("create upstream: %v", err)
+	}
+
+	got, err := store.Get(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("get upstream: %v", err)
+	}
+
+	if got.AuthType != route.AuthHeader {
+		t.Errorf("AuthType = %s, want header", got.AuthType)
+	}
+	if got.AuthHeader != "X-API-Key" {
+		t.Errorf("AuthHeader = %s, want X-API-Key", got.AuthHeader)
+	}
+	if got.AuthValue != "api-key-123" {
+		t.Errorf("AuthValue = %s, want api-key-123", got.AuthValue)
+	}
+}
+
+func TestUpstreamStore_List(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewUpstreamStore(db)
+	ctx := context.Background()
+
+	// Create multiple upstreams
+	names := []string{"Alpha", "Beta", "Gamma"}
+	for i, name := range names {
+		u := route.NewUpstream("up-"+itoa(i), name, "https://"+name+".example.com")
+		if err := store.Create(ctx, u); err != nil {
+			t.Fatalf("create upstream %s: %v", name, err)
+		}
+	}
+
+	upstreams, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("list upstreams: %v", err)
+	}
+
+	if len(upstreams) != 3 {
+		t.Errorf("len = %d, want 3", len(upstreams))
+	}
+
+	// Should be ordered by name
+	if upstreams[0].Name != "Alpha" {
+		t.Errorf("first upstream = %s, want Alpha", upstreams[0].Name)
+	}
+}
+
+func TestUpstreamStore_ListEnabled(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewUpstreamStore(db)
+	ctx := context.Background()
+
+	// Create enabled and disabled upstreams
+	for i := 0; i < 4; i++ {
+		u := route.NewUpstream("up-"+itoa(i), "Upstream "+itoa(i), "https://up"+itoa(i)+".example.com")
+		u.Enabled = i%2 == 0
+		if err := store.Create(ctx, u); err != nil {
+			t.Fatalf("create upstream %d: %v", i, err)
+		}
+	}
+
+	upstreams, err := store.ListEnabled(ctx)
+	if err != nil {
+		t.Fatalf("list enabled upstreams: %v", err)
+	}
+
+	if len(upstreams) != 2 {
+		t.Errorf("len = %d, want 2", len(upstreams))
+	}
+
+	for _, u := range upstreams {
+		if !u.Enabled {
+			t.Errorf("upstream %s should be enabled", u.ID)
+		}
+	}
+}
+
+func TestUpstreamStore_Update(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewUpstreamStore(db)
+	ctx := context.Background()
+
+	u := route.NewUpstream("up-1", "Original", "https://original.example.com")
+	if err := store.Create(ctx, u); err != nil {
+		t.Fatalf("create upstream: %v", err)
+	}
+
+	// Update
+	u.Name = "Updated"
+	u.BaseURL = "https://updated.example.com"
+	u.Timeout = 60 * time.Second
+	u.Enabled = false
+
+	if err := store.Update(ctx, u); err != nil {
+		t.Fatalf("update upstream: %v", err)
+	}
+
+	got, err := store.Get(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("get upstream: %v", err)
+	}
+
+	if got.Name != "Updated" {
+		t.Errorf("Name = %s, want Updated", got.Name)
+	}
+	if got.BaseURL != "https://updated.example.com" {
+		t.Errorf("BaseURL = %s, want https://updated.example.com", got.BaseURL)
+	}
+	if got.Timeout != 60*time.Second {
+		t.Errorf("Timeout = %v, want 60s", got.Timeout)
+	}
+	if got.Enabled {
+		t.Error("Enabled should be false")
+	}
+}
+
+func TestUpstreamStore_Delete(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewUpstreamStore(db)
+	ctx := context.Background()
+
+	u := route.NewUpstream("up-1", "To Delete", "https://delete.example.com")
+	if err := store.Create(ctx, u); err != nil {
+		t.Fatalf("create upstream: %v", err)
+	}
+
+	if err := store.Delete(ctx, u.ID); err != nil {
+		t.Fatalf("delete upstream: %v", err)
+	}
+
+	_, err := store.Get(ctx, u.ID)
+	if err != sqlite.ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestUpstreamStore_NotFound(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewUpstreamStore(db)
+	ctx := context.Background()
+
+	_, err := store.Get(ctx, "nonexistent")
+	if err != sqlite.ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestUpstreamStore_DeleteNotFound(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewUpstreamStore(db)
+	ctx := context.Background()
+
+	err := store.Delete(ctx, "nonexistent")
+	if err != sqlite.ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestUpstreamStore_DuplicateID(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewUpstreamStore(db)
+	ctx := context.Background()
+
+	u := route.NewUpstream("up-1", "First", "https://first.example.com")
+	if err := store.Create(ctx, u); err != nil {
+		t.Fatalf("create first: %v", err)
+	}
+
+	u2 := route.NewUpstream("up-1", "Second", "https://second.example.com")
+	err := store.Create(ctx, u2)
+	if err == nil {
+		t.Fatal("expected error for duplicate ID")
 	}
 }
 

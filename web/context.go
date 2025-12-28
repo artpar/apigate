@@ -1,0 +1,74 @@
+package web
+
+import (
+	"context"
+
+	"github.com/artpar/apigate/adapters/auth"
+)
+
+type ctxKey string
+
+const claimsKey ctxKey = "claims"
+
+// withClaims adds JWT claims to the context.
+func withClaims(ctx context.Context, claims *auth.Claims) context.Context {
+	return context.WithValue(ctx, claimsKey, claims)
+}
+
+// getClaims retrieves JWT claims from context.
+func getClaims(ctx context.Context) *auth.Claims {
+	claims, ok := ctx.Value(claimsKey).(*auth.Claims)
+	if !ok {
+		return nil
+	}
+	return claims
+}
+
+// PageData holds common data for all pages.
+type PageData struct {
+	Title       string
+	User        *UserInfo
+	CurrentPath string
+	Flash       *FlashMessage
+	Config      *ConfigInfo
+}
+
+// UserInfo represents the logged-in user.
+type UserInfo struct {
+	ID    string
+	Email string
+	Role  string
+}
+
+// FlashMessage represents a one-time notification.
+type FlashMessage struct {
+	Type    string // "success", "error", "warning", "info"
+	Message string
+}
+
+// ConfigInfo represents config for templates.
+type ConfigInfo struct {
+	UpstreamURL string
+	Version     string
+}
+
+// newPageData creates base page data from request context.
+func (h *Handler) newPageData(ctx context.Context, title string) PageData {
+	data := PageData{
+		Title: title,
+		Config: &ConfigInfo{
+			UpstreamURL: h.config.Upstream.URL,
+			Version:     "dev",
+		},
+	}
+
+	if claims := getClaims(ctx); claims != nil {
+		data.User = &UserInfo{
+			ID:    claims.UserID,
+			Email: claims.Email,
+			Role:  claims.Role,
+		}
+	}
+
+	return data
+}

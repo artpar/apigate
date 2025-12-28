@@ -4,6 +4,8 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -46,6 +48,8 @@ type UpstreamConfig struct {
 type AuthConfig struct {
 	Mode      string       `yaml:"mode"` // "local" or "remote"
 	KeyPrefix string       `yaml:"key_prefix"`
+	Header    string       `yaml:"header"` // Header name for API key (default: X-API-Key)
+	JWTSecret string       `yaml:"jwt_secret,omitempty"` // Secret for JWT signing (web UI auth)
 	Remote    RemoteConfig `yaml:"remote,omitempty"`
 }
 
@@ -139,6 +143,9 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
 
+	// Apply environment variable overrides
+	applyEnvOverrides(&cfg)
+
 	setDefaults(&cfg)
 
 	if err := validate(&cfg); err != nil {
@@ -146,6 +153,171 @@ func Load(path string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+// LoadFromEnv creates configuration entirely from environment variables.
+// This is useful for Docker deployments where no config file is needed.
+//
+// Environment variables:
+//
+//	APIGATE_UPSTREAM_URL      - Upstream API URL (required)
+//	APIGATE_DATABASE_DSN      - Database path (default: apigate.db)
+//	APIGATE_SERVER_HOST       - Server host (default: 0.0.0.0)
+//	APIGATE_SERVER_PORT       - Server port (default: 8080)
+//	APIGATE_AUTH_MODE         - Auth mode: local or remote (default: local)
+//	APIGATE_AUTH_KEY_PREFIX   - API key prefix (default: ak_)
+//	APIGATE_RATELIMIT_ENABLED - Enable rate limiting (default: true)
+//	APIGATE_LOG_LEVEL         - Log level: debug, info, warn, error (default: info)
+//	APIGATE_LOG_FORMAT        - Log format: json or console (default: json)
+//	APIGATE_METRICS_ENABLED   - Enable /metrics endpoint (default: true)
+//	APIGATE_OPENAPI_ENABLED   - Enable OpenAPI/Swagger (default: true)
+//	APIGATE_ADMIN_EMAIL       - Admin email for first-run bootstrap
+func LoadFromEnv() (*Config, error) {
+	var cfg Config
+
+	applyEnvOverrides(&cfg)
+	setDefaults(&cfg)
+
+	if err := validate(&cfg); err != nil {
+		return nil, fmt.Errorf("validate config: %w", err)
+	}
+
+	return &cfg, nil
+}
+
+// LoadWithFallback tries to load from file, falls back to environment variables.
+// This is the recommended method for Docker deployments.
+func LoadWithFallback(path string) (*Config, error) {
+	// Try loading from file first
+	if path != "" {
+		if _, err := os.Stat(path); err == nil {
+			return Load(path)
+		}
+	}
+
+	// Check if we have enough env vars to run
+	if os.Getenv("APIGATE_UPSTREAM_URL") != "" {
+		return LoadFromEnv()
+	}
+
+	// No config available
+	return nil, fmt.Errorf("no configuration found: provide config file or set APIGATE_UPSTREAM_URL")
+}
+
+// HasEnvConfig returns true if essential environment variables are set.
+func HasEnvConfig() bool {
+	return os.Getenv("APIGATE_UPSTREAM_URL") != ""
+}
+
+// applyEnvOverrides applies APIGATE_* environment variables to the config.
+// Environment variables always override file-based configuration.
+func applyEnvOverrides(cfg *Config) {
+	// Server configuration
+	if v := os.Getenv("APIGATE_SERVER_HOST"); v != "" {
+		cfg.Server.Host = v
+	}
+	if v := os.Getenv("APIGATE_SERVER_PORT"); v != "" {
+		if port, err := strconv.Atoi(v); err == nil {
+			cfg.Server.Port = port
+		}
+	}
+	if v := os.Getenv("APIGATE_SERVER_READ_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.Server.ReadTimeout = d
+		}
+	}
+	if v := os.Getenv("APIGATE_SERVER_WRITE_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.Server.WriteTimeout = d
+		}
+	}
+
+	// Upstream configuration
+	if v := os.Getenv("APIGATE_UPSTREAM_URL"); v != "" {
+		cfg.Upstream.URL = v
+	}
+	if v := os.Getenv("APIGATE_UPSTREAM_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.Upstream.Timeout = d
+		}
+	}
+
+	// Auth configuration
+	if v := os.Getenv("APIGATE_AUTH_MODE"); v != "" {
+		cfg.Auth.Mode = v
+	}
+	if v := os.Getenv("APIGATE_AUTH_KEY_PREFIX"); v != "" {
+		cfg.Auth.KeyPrefix = v
+	}
+	if v := os.Getenv("APIGATE_AUTH_REMOTE_URL"); v != "" {
+		cfg.Auth.Remote.URL = v
+	}
+
+	// Rate limit configuration
+	if v := os.Getenv("APIGATE_RATELIMIT_ENABLED"); v != "" {
+		cfg.RateLimit.Enabled = parseBool(v)
+	}
+	if v := os.Getenv("APIGATE_RATELIMIT_BURST"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.RateLimit.BurstTokens = n
+		}
+	}
+	if v := os.Getenv("APIGATE_RATELIMIT_WINDOW"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.RateLimit.WindowSecs = n
+		}
+	}
+
+	// Usage configuration
+	if v := os.Getenv("APIGATE_USAGE_MODE"); v != "" {
+		cfg.Usage.Mode = v
+	}
+	if v := os.Getenv("APIGATE_USAGE_REMOTE_URL"); v != "" {
+		cfg.Usage.Remote.URL = v
+	}
+
+	// Billing configuration
+	if v := os.Getenv("APIGATE_BILLING_MODE"); v != "" {
+		cfg.Billing.Mode = v
+	}
+	if v := os.Getenv("APIGATE_BILLING_STRIPE_KEY"); v != "" {
+		cfg.Billing.StripeKey = v
+	}
+
+	// Database configuration
+	if v := os.Getenv("APIGATE_DATABASE_DRIVER"); v != "" {
+		cfg.Database.Driver = v
+	}
+	if v := os.Getenv("APIGATE_DATABASE_DSN"); v != "" {
+		cfg.Database.DSN = v
+	}
+
+	// Logging configuration
+	if v := os.Getenv("APIGATE_LOG_LEVEL"); v != "" {
+		cfg.Logging.Level = v
+	}
+	if v := os.Getenv("APIGATE_LOG_FORMAT"); v != "" {
+		cfg.Logging.Format = v
+	}
+
+	// Metrics configuration
+	if v := os.Getenv("APIGATE_METRICS_ENABLED"); v != "" {
+		cfg.Metrics.Enabled = parseBool(v)
+	}
+	if v := os.Getenv("APIGATE_METRICS_PATH"); v != "" {
+		cfg.Metrics.Path = v
+	}
+
+	// OpenAPI configuration
+	if v := os.Getenv("APIGATE_OPENAPI_ENABLED"); v != "" {
+		cfg.OpenAPI.Enabled = parseBool(v)
+	}
+}
+
+// parseBool parses a boolean from common string values.
+func parseBool(v string) bool {
+	v = strings.ToLower(strings.TrimSpace(v))
+	return v == "true" || v == "1" || v == "yes" || v == "on"
 }
 
 func setDefaults(cfg *Config) {

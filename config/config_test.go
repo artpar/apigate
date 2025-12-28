@@ -200,6 +200,183 @@ endpoints:
 	}
 }
 
+func TestLoadFromEnv(t *testing.T) {
+	// Set env vars
+	os.Setenv("APIGATE_UPSTREAM_URL", "http://env-upstream:8000")
+	os.Setenv("APIGATE_SERVER_PORT", "9999")
+	os.Setenv("APIGATE_DATABASE_DSN", "/tmp/env-test.db")
+	os.Setenv("APIGATE_LOG_LEVEL", "debug")
+	os.Setenv("APIGATE_METRICS_ENABLED", "true")
+	defer func() {
+		os.Unsetenv("APIGATE_UPSTREAM_URL")
+		os.Unsetenv("APIGATE_SERVER_PORT")
+		os.Unsetenv("APIGATE_DATABASE_DSN")
+		os.Unsetenv("APIGATE_LOG_LEVEL")
+		os.Unsetenv("APIGATE_METRICS_ENABLED")
+	}()
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv error: %v", err)
+	}
+
+	if cfg.Upstream.URL != "http://env-upstream:8000" {
+		t.Errorf("Upstream.URL = %s, want http://env-upstream:8000", cfg.Upstream.URL)
+	}
+	if cfg.Server.Port != 9999 {
+		t.Errorf("Server.Port = %d, want 9999", cfg.Server.Port)
+	}
+	if cfg.Database.DSN != "/tmp/env-test.db" {
+		t.Errorf("Database.DSN = %s, want /tmp/env-test.db", cfg.Database.DSN)
+	}
+	if cfg.Logging.Level != "debug" {
+		t.Errorf("Logging.Level = %s, want debug", cfg.Logging.Level)
+	}
+	if !cfg.Metrics.Enabled {
+		t.Error("Metrics.Enabled = false, want true")
+	}
+}
+
+func TestLoadFromEnv_MissingRequired(t *testing.T) {
+	// Ensure APIGATE_UPSTREAM_URL is not set
+	os.Unsetenv("APIGATE_UPSTREAM_URL")
+
+	_, err := config.LoadFromEnv()
+	if err == nil {
+		t.Fatal("expected error for missing upstream URL")
+	}
+}
+
+func TestEnvOverridesFile(t *testing.T) {
+	// Set env var that should override file config
+	os.Setenv("APIGATE_SERVER_PORT", "7777")
+	os.Setenv("APIGATE_LOG_LEVEL", "error")
+	defer func() {
+		os.Unsetenv("APIGATE_SERVER_PORT")
+		os.Unsetenv("APIGATE_LOG_LEVEL")
+	}()
+
+	content := `
+upstream:
+  url: "http://localhost:3000"
+server:
+  port: 8080
+logging:
+  level: "info"
+`
+
+	cfg := writeAndLoad(t, content)
+
+	// Env should override file
+	if cfg.Server.Port != 7777 {
+		t.Errorf("Server.Port = %d, want 7777 (env override)", cfg.Server.Port)
+	}
+	if cfg.Logging.Level != "error" {
+		t.Errorf("Logging.Level = %s, want error (env override)", cfg.Logging.Level)
+	}
+	// File value should still be used for non-overridden
+	if cfg.Upstream.URL != "http://localhost:3000" {
+		t.Errorf("Upstream.URL = %s, want http://localhost:3000", cfg.Upstream.URL)
+	}
+}
+
+func TestLoadWithFallback_FileExists(t *testing.T) {
+	content := `
+upstream:
+  url: "http://file-config:3000"
+`
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := config.LoadWithFallback(path)
+	if err != nil {
+		t.Fatalf("LoadWithFallback error: %v", err)
+	}
+
+	if cfg.Upstream.URL != "http://file-config:3000" {
+		t.Errorf("Upstream.URL = %s, want http://file-config:3000", cfg.Upstream.URL)
+	}
+}
+
+func TestLoadWithFallback_EnvOnly(t *testing.T) {
+	os.Setenv("APIGATE_UPSTREAM_URL", "http://env-fallback:8000")
+	defer os.Unsetenv("APIGATE_UPSTREAM_URL")
+
+	cfg, err := config.LoadWithFallback("/nonexistent/config.yaml")
+	if err != nil {
+		t.Fatalf("LoadWithFallback error: %v", err)
+	}
+
+	if cfg.Upstream.URL != "http://env-fallback:8000" {
+		t.Errorf("Upstream.URL = %s, want http://env-fallback:8000", cfg.Upstream.URL)
+	}
+}
+
+func TestLoadWithFallback_NoConfig(t *testing.T) {
+	os.Unsetenv("APIGATE_UPSTREAM_URL")
+
+	_, err := config.LoadWithFallback("/nonexistent/config.yaml")
+	if err == nil {
+		t.Fatal("expected error when no config available")
+	}
+}
+
+func TestHasEnvConfig(t *testing.T) {
+	os.Unsetenv("APIGATE_UPSTREAM_URL")
+	if config.HasEnvConfig() {
+		t.Error("HasEnvConfig() = true, want false")
+	}
+
+	os.Setenv("APIGATE_UPSTREAM_URL", "http://test:8000")
+	defer os.Unsetenv("APIGATE_UPSTREAM_URL")
+	if !config.HasEnvConfig() {
+		t.Error("HasEnvConfig() = false, want true")
+	}
+}
+
+func TestParseBoolValues(t *testing.T) {
+	tests := []struct {
+		value    string
+		expected bool
+	}{
+		{"true", true},
+		{"TRUE", true},
+		{"True", true},
+		{"1", true},
+		{"yes", true},
+		{"YES", true},
+		{"on", true},
+		{"false", false},
+		{"FALSE", false},
+		{"0", false},
+		{"no", false},
+		{"off", false},
+		{"", false},
+		{"invalid", false},
+	}
+
+	for _, tt := range tests {
+		os.Setenv("APIGATE_UPSTREAM_URL", "http://test:8000")
+		os.Setenv("APIGATE_METRICS_ENABLED", tt.value)
+
+		cfg, err := config.LoadFromEnv()
+		if err != nil {
+			t.Fatalf("LoadFromEnv error: %v", err)
+		}
+
+		if cfg.Metrics.Enabled != tt.expected {
+			t.Errorf("value=%q: Metrics.Enabled = %v, want %v", tt.value, cfg.Metrics.Enabled, tt.expected)
+		}
+
+		os.Unsetenv("APIGATE_UPSTREAM_URL")
+		os.Unsetenv("APIGATE_METRICS_ENABLED")
+	}
+}
+
 // Helpers
 
 func writeAndLoad(t *testing.T, content string) *config.Config {

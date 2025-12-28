@@ -1,0 +1,14 @@
+{{define "content"}}
+<div class="page">
+    <div class="page-header">
+        <h1 class="page-title">Users</h1>
+        <a href="/users/new" class="btn btn-primary">Create User</a>
+    </div>
+
+    <div class="card">
+        <div class="card-body flush" id="users-table" hx-get="/partials/users" hx-trigger="load" hx-swap="innerHTML">
+            <div class="table-empty">Loading users...</div>
+        </div>
+    </div>
+</div>
+{{end}}

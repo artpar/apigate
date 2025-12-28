@@ -13,6 +13,8 @@ import (
 	"github.com/artpar/apigate/app"
 	_ "github.com/artpar/apigate/docs/swagger" // swagger docs
 	"github.com/artpar/apigate/domain/proxy"
+	"github.com/artpar/apigate/domain/streaming"
+	"github.com/artpar/apigate/ports"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -44,9 +46,10 @@ type HealthResponse struct {
 
 // ProxyHandler wraps the proxy service for HTTP handling.
 type ProxyHandler struct {
-	service *app.ProxyService
-	logger  zerolog.Logger
-	metrics *metrics.Collector
+	service           *app.ProxyService
+	streamingUpstream ports.StreamingUpstream
+	logger            zerolog.Logger
+	metrics           *metrics.Collector
 }
 
 // NewProxyHandler creates a new HTTP proxy handler.
@@ -64,6 +67,11 @@ func NewProxyHandlerWithMetrics(service *app.ProxyService, logger zerolog.Logger
 		logger:  logger,
 		metrics: m,
 	}
+}
+
+// SetStreamingUpstream sets the streaming upstream for SSE/streaming support.
+func (h *ProxyHandler) SetStreamingUpstream(upstream ports.StreamingUpstream) {
+	h.streamingUpstream = upstream
 }
 
 // ServeHTTP handles incoming proxy requests.
@@ -125,7 +133,13 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		TraceID:   middleware.GetReqID(ctx),
 	}
 
-	// Handle request
+	// Check if this should be a streaming request
+	if h.streamingUpstream != nil && h.service.ShouldStream(req) {
+		h.handleStreamingRequest(w, r, ctx, req)
+		return
+	}
+
+	// Handle request (buffered)
 	result := h.service.Handle(ctx, req)
 
 	// Log request
@@ -149,8 +163,161 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Write response
 	w.WriteHeader(result.Response.Status)
 	if len(result.Response.Body) > 0 {
-		w.Write(result.Response.Body)
+		if _, err := w.Write(result.Response.Body); err != nil {
+			h.logger.Error().Err(err).Msg("failed to write response body")
+		}
 	}
+}
+
+// handleStreamingRequest handles SSE/streaming requests.
+func (h *ProxyHandler) handleStreamingRequest(w http.ResponseWriter, r *http.Request, ctx context.Context, req proxy.Request) {
+	start := time.Now()
+
+	// Auth and rate limiting (reuse the streaming handle method)
+	result := h.service.HandleStreaming(ctx, req, nil)
+
+	if result.Error != nil {
+		// Add rate limit headers even on error
+		for k, v := range result.Headers {
+			w.Header().Set(k, v)
+		}
+		writeError(w, result.Error)
+		return
+	}
+
+	// Use modified request (with path rewrites, transforms applied)
+	streamingReq := req
+	if result.ModifiedRequest != nil {
+		streamingReq = *result.ModifiedRequest
+	}
+
+	// Forward to upstream with streaming (use route's upstream if available)
+	var streamResp ports.StreamingResponse
+	var err error
+	if result.RouteUpstream != nil {
+		streamResp, err = h.streamingUpstream.ForwardStreamingTo(ctx, streamingReq, result.RouteUpstream)
+	} else {
+		streamResp, err = h.streamingUpstream.ForwardStreaming(ctx, streamingReq)
+	}
+	if err != nil {
+		upstreamURL := ""
+		if result.RouteUpstream != nil {
+			upstreamURL = result.RouteUpstream.BaseURL
+		}
+		h.logger.Error().
+			Err(err).
+			Str("path", streamingReq.Path).
+			Bool("has_route_upstream", result.RouteUpstream != nil).
+			Str("upstream_url", upstreamURL).
+			Msg("streaming upstream error")
+		writeError(w, &proxy.ErrUpstreamError)
+		return
+	}
+
+	// Determine if we need to accumulate data for metering
+	// Only accumulate if there's a metering expression that might need the data
+	needsAccumulation := false
+	meteringExpr := ""
+	if result.StreamingResponse != nil && result.StreamingResponse.MatchedRoute != nil {
+		meteringExpr = result.StreamingResponse.MatchedRoute.MeteringExpr
+		// Accumulate if expression references allData, sseEvents, sseLastData, etc.
+		if meteringExpr != "" && meteringExpr != "1" && meteringExpr != "responseBytes" {
+			needsAccumulation = true
+		}
+	}
+
+	// Wrap the body to track bytes (accumulate if metering needs it)
+	streamReader := streaming.NewStreamReader(streamResp.Body, needsAccumulation)
+	defer func() {
+		if closeErr := streamReader.Close(); closeErr != nil {
+			h.logger.Error().Err(closeErr).Msg("failed to close stream reader")
+		}
+	}()
+
+	// Copy response headers
+	for k, v := range streamResp.Headers {
+		w.Header().Set(k, v)
+	}
+
+	// Add rate limit headers
+	for k, v := range result.Headers {
+		w.Header().Set(k, v)
+	}
+
+	// Set streaming headers if not already set
+	if w.Header().Get("Content-Type") == "" && streamResp.ContentType != "" {
+		w.Header().Set("Content-Type", streamResp.ContentType)
+	}
+
+	// Disable buffering for streaming
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.Header().Set("Cache-Control", "no-cache")
+
+	w.WriteHeader(streamResp.Status)
+
+	// Stream the response
+	flusher, canFlush := w.(http.Flusher)
+
+	buf := make([]byte, 4096)
+	for {
+		n, readErr := streamReader.Read(buf)
+		if n > 0 {
+			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
+				h.logger.Error().Err(writeErr).Msg("failed to write streaming response")
+				break
+			}
+			if canFlush {
+				flusher.Flush()
+			}
+		}
+		if readErr != nil {
+			if readErr != io.EOF {
+				h.logger.Error().Err(readErr).Msg("error reading stream")
+			}
+			break
+		}
+	}
+
+	latencyMs := time.Since(start).Milliseconds()
+
+	// Record usage with streaming metrics
+	streamMetrics := streamReader.GetMetrics()
+	meteringValue := 1.0 // Default metering
+
+	// Evaluate metering expression if configured
+	if meteringExpr != "" {
+		meteringValue = h.service.EvalStreamingMetering(
+			ctx,
+			meteringExpr,
+			streamResp.Status,
+			streamMetrics.TotalBytes,
+			streamMetrics.LastChunk,
+			streamMetrics.AllData,
+			result.Auth,
+		)
+	}
+
+	h.service.RecordStreamingUsage(
+		result.StreamingResponse,
+		streamResp.Status,
+		int64(len(req.Body)),
+		streamMetrics.TotalBytes,
+		latencyMs,
+		meteringValue,
+		req.RemoteIP,
+		req.UserAgent,
+	)
+
+	// Log streaming request
+	h.logger.Info().
+		Str("method", req.Method).
+		Str("path", req.Path).
+		Str("type", "streaming").
+		Int("status", streamResp.Status).
+		Int64("bytes", streamMetrics.TotalBytes).
+		Int64("latency_ms", latencyMs).
+		Float64("metering_value", meteringValue).
+		Msg("streaming request completed")
 }
 
 func (h *ProxyHandler) logRequest(ctx context.Context, req proxy.Request, result app.HandleResult) {
@@ -377,6 +544,8 @@ func Version(w http.ResponseWriter, r *http.Request) {
 type RouterConfig struct {
 	Metrics       *metrics.Collector
 	EnableOpenAPI bool
+	AdminHandler  http.Handler // Optional admin API handler
+	WebHandler    http.Handler // Optional web UI handler
 }
 
 // NewRouter creates the main HTTP router.
@@ -428,8 +597,46 @@ func NewRouterWithConfig(proxyHandler *ProxyHandler, healthHandler *HealthHandle
 	// Version endpoint
 	r.Get("/version", Version)
 
-	// Proxy all other requests
-	r.HandleFunc("/*", proxyHandler.ServeHTTP)
+	// Admin API (if enabled)
+	if cfg.AdminHandler != nil {
+		r.Mount("/admin", cfg.AdminHandler)
+	}
+
+	// Web UI (if enabled) - pass through specific paths to the web handler
+	if cfg.WebHandler != nil {
+		// Use a group that routes to the web handler
+		webHandler := cfg.WebHandler
+		r.Get("/", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Get("/login", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Post("/login", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Post("/logout", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Get("/setup", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Post("/setup", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Get("/setup/*", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Post("/setup/*", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Get("/dashboard", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Get("/users", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Get("/users/*", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Post("/users", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Post("/users/*", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Delete("/users/*", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Get("/keys", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Post("/keys", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Delete("/keys/*", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Get("/plans", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Get("/usage", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Get("/settings", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Get("/system", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Get("/partials/*", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Handle("/static/*", webHandler)
+	}
+
+	// Proxy handles /api/* and catch-all for unmatched routes
+	r.HandleFunc("/api/*", proxyHandler.ServeHTTP)
+
+	// Catch-all for proxy: routes not matched by web UI or other handlers
+	// This allows dynamic routes (from database) to work as a fallback
+	r.NotFound(proxyHandler.ServeHTTP)
 
 	return r
 }

@@ -1,0 +1,85 @@
+{{define "content"}}
+<div class="setup-container">
+    <div class="card setup-card">
+        <div class="setup-header">
+            <h1 class="setup-title">Welcome to APIGate</h1>
+            <p class="setup-subtitle">Let's get you set up in 2 minutes.</p>
+        </div>
+
+        <!-- Progress Steps -->
+        <div class="steps">
+            {{range $i, $step := .Steps}}
+            <div class="step-circle {{if eq $i $.CurrentStep}}active{{else if lt $i $.CurrentStep}}done{{end}}">
+                {{if lt $i $.CurrentStep}}&#10003;{{else}}{{add $i 1}}{{end}}
+            </div>
+            {{if lt $i (len $.Steps | add -1)}}<div class="step-line {{if lt $i $.CurrentStep}}done{{end}}"></div>{{end}}
+            {{end}}
+        </div>
+
+        <div class="setup-body">
+            <h2 class="setup-step-title">Step {{add .CurrentStep 1}} of {{len .Steps}}: {{index .Steps .CurrentStep}}</h2>
+
+            {{if eq .CurrentStep 0}}
+            <p class="setup-step-desc">What API are you monetizing?</p>
+            <form action="/setup/step/0" method="POST" class="form">
+                <div class="form-group">
+                    <input type="url" id="upstream_url" name="upstream_url" required class="form-input" placeholder="https://api.myservice.com" value="{{.UpstreamURL}}">
+                    <p class="form-hint">This is the API your customers will access through APIGate.</p>
+                </div>
+                {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
+                <button type="submit" class="btn btn-primary" style="width: 100%;">Test Connection & Continue</button>
+            </form>
+
+            {{else if eq .CurrentStep 1}}
+            <form action="/setup/step/1" method="POST" class="form">
+                <div class="form-group">
+                    <label for="admin_email" class="form-label">Admin Email</label>
+                    <input type="email" id="admin_email" name="admin_email" required class="form-input" value="{{.AdminEmail}}">
+                </div>
+                <div class="form-group">
+                    <label for="admin_password" class="form-label">Password</label>
+                    <input type="password" id="admin_password" name="admin_password" required class="form-input" minlength="8">
+                </div>
+                <div class="form-group">
+                    <label for="admin_password_confirm" class="form-label">Confirm Password</label>
+                    <input type="password" id="admin_password_confirm" name="admin_password_confirm" required class="form-input">
+                </div>
+                {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
+                <button type="submit" class="btn btn-primary" style="width: 100%;">Create Admin Account</button>
+            </form>
+
+            {{else if eq .CurrentStep 2}}
+            <p class="setup-step-desc">Create your first API plan. You can add more later.</p>
+            <form action="/setup/step/2" method="POST" class="form">
+                <div class="form-group">
+                    <label for="plan_name" class="form-label">Plan Name</label>
+                    <input type="text" id="plan_name" name="plan_name" required class="form-input" placeholder="Free" value="{{.PlanName}}">
+                </div>
+                <div class="form-group">
+                    <label for="rate_limit" class="form-label">Rate Limit (requests/minute)</label>
+                    <input type="number" id="rate_limit" name="rate_limit" required class="form-input" value="{{if .RateLimit}}{{.RateLimit}}{{else}}60{{end}}" min="1">
+                </div>
+                <div class="form-group">
+                    <label for="monthly_quota" class="form-label">Monthly Quota (requests)</label>
+                    <input type="number" id="monthly_quota" name="monthly_quota" required class="form-input" value="{{if .MonthlyQuota}}{{.MonthlyQuota}}{{else}}1000{{end}}" min="1">
+                </div>
+                {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
+                <button type="submit" class="btn btn-primary" style="width: 100%;">Create Plan & Finish</button>
+            </form>
+
+            {{else if eq .CurrentStep 3}}
+            <div class="setup-success">
+                <div class="setup-success-icon">&#10003;</div>
+                <h3>Setup Complete!</h3>
+                <p>Your APIGate instance is ready to use.</p>
+                <div class="setup-code">
+                    <strong>Quick Start:</strong><br>
+                    curl -H "X-API-Key: YOUR_KEY" {{.Config.UpstreamURL}}
+                </div>
+                <a href="/dashboard" class="btn btn-primary">Go to Dashboard</a>
+            </div>
+            {{end}}
+        </div>
+    </div>
+</div>
+{{end}}

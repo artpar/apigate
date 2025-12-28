@@ -117,6 +117,21 @@ func (s *UserStore) Count(ctx context.Context) (int, error) {
 	return len(s.users), nil
 }
 
+// Delete removes a user.
+func (s *UserStore) Delete(ctx context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	u, ok := s.users[id]
+	if !ok {
+		return ErrNotFound
+	}
+
+	delete(s.byEmail, u.Email)
+	delete(s.users, id)
+	return nil
+}
+
 // GetAll returns all users (for testing).
 func (s *UserStore) GetAll() []ports.User {
 	s.mu.RLock()

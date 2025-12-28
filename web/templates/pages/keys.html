@@ -1,0 +1,63 @@
+{{define "content"}}
+<div class="page">
+    <div class="page-header">
+        <h1 class="page-title">API Keys</h1>
+        <button onclick="document.getElementById('create-key-modal').classList.remove('hidden')" class="btn btn-primary">Create Key</button>
+    </div>
+
+    <div class="card">
+        <div class="card-body flush" id="keys-table" hx-get="/partials/keys" hx-trigger="load" hx-swap="innerHTML">
+            <div class="table-empty">Loading keys...</div>
+        </div>
+    </div>
+</div>
+
+<!-- Create Key Modal -->
+<div id="create-key-modal" class="modal hidden">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 class="modal-title">Create API Key</h3>
+        </div>
+        <div class="modal-body">
+            <form action="/keys" method="POST" class="form">
+                <div class="form-group">
+                    <label for="user_id" class="form-label">User</label>
+                    <select id="user_id" name="user_id" required class="form-input">
+                        {{range .Users}}
+                        <option value="{{.ID}}">{{.Email}}</option>
+                        {{end}}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="name" class="form-label">Key Name (optional)</label>
+                    <input type="text" id="name" name="name" class="form-input" placeholder="Production API Key">
+                </div>
+                <div class="form-actions">
+                    <button type="button" onclick="document.getElementById('create-key-modal').classList.add('hidden')" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create Key</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+{{if .NewKey}}
+<!-- New Key Display Modal -->
+<div id="new-key-modal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 class="modal-title">API Key Created</h3>
+        </div>
+        <div class="modal-body">
+            <div class="alert alert-warning mb-4">
+                Copy this key now. You won't be able to see it again!
+            </div>
+            <div class="setup-code">{{.NewKey}}</div>
+            <div class="form-actions">
+                <button onclick="document.getElementById('new-key-modal').classList.add('hidden')" class="btn btn-primary">Done</button>
+            </div>
+        </div>
+    </div>
+</div>
+{{end}}
+{{end}}

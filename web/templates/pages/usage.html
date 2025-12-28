@@ -1,0 +1,89 @@
+{{define "content"}}
+<div class="page">
+    <div class="page-header">
+        <h1 class="page-title">Usage Statistics</h1>
+    </div>
+
+    <!-- Filters -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <form action="/usage" method="GET" class="flex gap-4" style="flex-wrap: wrap; align-items: flex-end;">
+                <div class="form-group" style="margin: 0;">
+                    <label for="user_id" class="form-label">User</label>
+                    <select id="user_id" name="user_id" class="form-input">
+                        <option value="">All Users</option>
+                        {{range .Users}}
+                        <option value="{{.ID}}" {{if eq .ID $.SelectedUser}}selected{{end}}>{{.Email}}</option>
+                        {{end}}
+                    </select>
+                </div>
+                <div class="form-group" style="margin: 0;">
+                    <label for="period" class="form-label">Period</label>
+                    <select id="period" name="period" class="form-input">
+                        <option value="day" {{if eq .Period "day"}}selected{{end}}>Today</option>
+                        <option value="week" {{if eq .Period "week"}}selected{{end}}>This Week</option>
+                        <option value="month" {{if eq .Period "month"}}selected{{end}}>This Month</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-primary">Apply Filters</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="grid mb-4" style="grid-template-columns: repeat(4, 1fr);">
+        <div class="card">
+            <div class="stat">
+                <div class="stat-label">Total Requests</div>
+                <div class="stat-value">{{.Summary.TotalRequests}}</div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="stat">
+                <div class="stat-label">Successful</div>
+                <div class="stat-value" style="color: #16a34a;">{{.Summary.Successful}}</div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="stat">
+                <div class="stat-label">Rate Limited</div>
+                <div class="stat-value" style="color: #ca8a04;">{{.Summary.RateLimited}}</div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="stat">
+                <div class="stat-label">Errors</div>
+                <div class="stat-value" style="color: #dc2626;">{{.Summary.Errors}}</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Usage Table -->
+    <div class="card">
+        <div class="card-body flush">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>User</th>
+                        <th>Key</th>
+                        <th>Requests</th>
+                        <th>Last Used</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .UsageData}}
+                    <tr>
+                        <td class="cell-primary">{{.UserEmail}}</td>
+                        <td class="cell-mono text-muted">{{maskKey .KeyID}}</td>
+                        <td>{{.RequestCount}}</td>
+                        <td class="text-muted">{{timeAgo .LastUsed}}</td>
+                    </tr>
+                    {{else}}
+                    <tr><td colspan="4" class="table-empty">No usage data for this period.</td></tr>
+                    {{end}}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{{end}}

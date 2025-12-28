@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/artpar/apigate/adapters/clock"
+	"github.com/artpar/apigate/adapters/hasher"
 	apihttp "github.com/artpar/apigate/adapters/http"
+	"github.com/artpar/apigate/adapters/http/admin"
 	"github.com/artpar/apigate/adapters/idgen"
 	"github.com/artpar/apigate/adapters/memory"
 	"github.com/artpar/apigate/adapters/metrics"
@@ -21,6 +23,7 @@ import (
 	"github.com/artpar/apigate/config"
 	"github.com/artpar/apigate/domain/plan"
 	"github.com/artpar/apigate/ports"
+	"github.com/artpar/apigate/web"
 	"github.com/rs/zerolog"
 )
 
@@ -34,7 +37,9 @@ type App struct {
 	Metrics      *metrics.Collector
 
 	// Services (for hot reload)
-	proxyService *app.ProxyService
+	proxyService     *app.ProxyService
+	routeService     *app.RouteService
+	transformService *app.TransformService
 
 	// Adapters (for cleanup)
 	usageRecorder ports.UsageRecorder
@@ -213,6 +218,31 @@ func (a *App) initHTTPServer() error {
 	// Create proxy service
 	a.proxyService = app.NewProxyService(deps, proxyCfg)
 
+	// Create and wire route service for dynamic routing
+	routeStore := sqlite.NewRouteStore(a.DB)
+	upstreamStore := sqlite.NewUpstreamStore(a.DB)
+	a.routeService = app.NewRouteService(
+		routeStore,
+		upstreamStore,
+		deps.Clock,
+		a.Logger,
+		app.RouteServiceConfig{
+			RefreshInterval: 30 * time.Second,
+		},
+	)
+	a.proxyService.SetRouteService(a.routeService)
+
+	// Start route service to load initial routes and begin refresh loop
+	if err := a.routeService.Start(context.Background()); err != nil {
+		a.Logger.Warn().Err(err).Msg("failed to start route service, continuing with empty routes")
+	}
+
+	// Create and wire transform service for request/response transformations
+	a.transformService = app.NewTransformService()
+	a.proxyService.SetTransformService(a.transformService)
+
+	a.Logger.Info().Msg("route and transform services initialized")
+
 	// Initialize metrics if enabled
 	if a.Config.Metrics.Enabled {
 		a.Metrics = metrics.New()
@@ -226,12 +256,53 @@ func (a *App) initHTTPServer() error {
 	} else {
 		proxyHandler = apihttp.NewProxyHandler(a.proxyService, a.Logger)
 	}
+	// Enable streaming support by setting the streaming upstream
+	proxyHandler.SetStreamingUpstream(a.upstream)
 	healthHandler := apihttp.NewHealthHandler(a.upstream)
+
+	// Create shared stores for admin and web handlers
+	usageStore := sqlite.NewUsageStore(a.DB)
+	bcryptHasher := hasher.NewBcrypt(0) // 0 = default cost
+
+	// Create admin handler with route/upstream stores
+	adminHandler := admin.NewHandler(admin.Deps{
+		Users:     deps.Users,
+		Keys:      deps.Keys,
+		Usage:     usageStore,
+		Routes:    routeStore,
+		Upstreams: upstreamStore,
+		Config:    a.Config,
+		Logger:    a.Logger,
+		Hasher:    bcryptHasher,
+	})
+
+	// Create web UI handler
+	webHandler, err := web.NewHandler(web.Deps{
+		Users:     deps.Users,
+		Keys:      deps.Keys,
+		Usage:     usageStore,
+		Routes:    routeStore,
+		Upstreams: upstreamStore,
+		Config:    a.Config,
+		Logger:    a.Logger,
+		Hasher:    bcryptHasher,
+		JWTSecret: a.Config.Auth.JWTSecret,
+		IsSetup: func() bool {
+			// Check if admin user exists
+			users, err := deps.Users.List(context.Background(), 1, 0)
+			return err == nil && len(users) > 0
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("create web handler: %w", err)
+	}
 
 	// Create router with metrics and OpenAPI if enabled
 	routerCfg := apihttp.RouterConfig{
 		Metrics:       a.Metrics,
 		EnableOpenAPI: a.Config.OpenAPI.Enabled,
+		AdminHandler:  adminHandler.Router(),
+		WebHandler:    webHandler.Router(),
 	}
 	router := apihttp.NewRouterWithConfig(proxyHandler, healthHandler, a.Logger, routerCfg)
 
@@ -396,6 +467,11 @@ func (a *App) Shutdown() error {
 	// Stop config watcher
 	if a.ConfigHolder != nil {
 		a.ConfigHolder.Stop()
+	}
+
+	// Stop route service refresh loop
+	if a.routeService != nil {
+		a.routeService.Stop()
 	}
 
 	// Shutdown HTTP server
