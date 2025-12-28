@@ -24,10 +24,13 @@ rate_limit:
 
 plans:
   - id: "free"
-    name: "Free Plan - UPDATED"
-    rate_limit_per_minute: 3
+    name: "Free Plan"
+    rate_limit_per_minute: 60
     requests_per_month: 1000
   - id: "pro"
     name: "Pro Plan"
     rate_limit_per_minute: 600
     requests_per_month: 100000
+
+metrics:
+  enabled: true
