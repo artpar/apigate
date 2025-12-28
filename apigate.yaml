@@ -34,3 +34,6 @@ plans:
 
 metrics:
   enabled: true
+
+openapi:
+  enabled: true

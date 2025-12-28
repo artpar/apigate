@@ -129,3 +129,7 @@ logging:
 metrics:
   enabled: true                # Enable /metrics endpoint
   # path: /metrics             # Custom path (default: /metrics)
+
+# OpenAPI/Swagger documentation
+openapi:
+  enabled: true                # Enable /.well-known/openapi.json and /swagger/*

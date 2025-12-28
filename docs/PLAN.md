@@ -4,7 +4,7 @@ Self-hosted API monetization solution with authentication, rate limiting, usage 
 
 **Architecture:** Values-as-boundaries for 100% testability
 
-## Progress: 8/24 tasks (33%) - MVP + Observability COMPLETE
+## Progress: 9/24 tasks (38%) - MVP + Observability + OpenAPI COMPLETE
 
 ---
 
@@ -30,7 +30,7 @@ Make the system self-documenting and add management APIs.
 
 | Status | Task | Description | 3rd Party Libs |
 |--------|------|-------------|----------------|
-| ⬜ | 2.1 OpenAPI/Swagger | Auto-generate spec at `/.well-known/openapi.json` | `swaggo/swag` |
+| ✅ | 2.1 OpenAPI/Swagger | Auto-generate spec at `/.well-known/openapi.json` | `swaggo/swag` |
 | ⬜ | 2.2 Admin REST API | CRUD users, keys, plans; view usage | `go-playground/validator` |
 | ⬜ | 2.3 Portal REST API | Self-service: register, login, manage keys | `golang-jwt/jwt/v5` |
 | ✅ | 2.4 Prometheus Metrics | `/metrics` endpoint with request stats | `prometheus/client_golang` |
@@ -168,14 +168,15 @@ billing:
 
 | Level | Tests | Status |
 |-------|-------|--------|
-| Domain | 25 | ✅ All passing |
+| Domain | 17 | ✅ All passing |
+| App | 5 | ✅ All passing |
 | Adapters (SQLite) | 16 | ✅ All passing |
-| Adapters (HTTP) | 10 | ✅ All passing |
+| Adapters (HTTP) | 14 | ✅ All passing |
+| Adapters (Metrics) | 9 | ✅ All passing |
 | Config | 16 | ✅ All passing |
 | Bootstrap | 3 | ✅ All passing |
 | E2E | 7 | ✅ All passing |
-| Metrics | 9 | ✅ All passing |
-| **Total** | **86** | ✅ All passing |
+| **Total** | **87** | ✅ All passing |
 
 ---
 

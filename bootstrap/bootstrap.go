@@ -228,9 +228,10 @@ func (a *App) initHTTPServer() error {
 	}
 	healthHandler := apihttp.NewHealthHandler(a.upstream)
 
-	// Create router with metrics if enabled
+	// Create router with metrics and OpenAPI if enabled
 	routerCfg := apihttp.RouterConfig{
-		Metrics: a.Metrics,
+		Metrics:       a.Metrics,
+		EnableOpenAPI: a.Config.OpenAPI.Enabled,
 	}
 	router := apihttp.NewRouterWithConfig(proxyHandler, healthHandler, a.Logger, routerCfg)
 

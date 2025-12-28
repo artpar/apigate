@@ -1,0 +1,300 @@
+basePath: /
+definitions:
+  adapters_http.ErrorDetail:
+    properties:
+      code:
+        example: invalid_api_key
+        type: string
+      message:
+        example: The provided API key is invalid
+        type: string
+    type: object
+  adapters_http.ErrorResponseBody:
+    properties:
+      error:
+        $ref: '#/definitions/adapters_http.ErrorDetail'
+    type: object
+  adapters_http.VersionResponse:
+    properties:
+      service:
+        example: apigate
+        type: string
+      version:
+        example: 1.0.0
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact:
+    name: APIGate Support
+    url: https://github.com/artpar/apigate/issues
+  description: Self-hosted API monetization solution with authentication, rate limiting,
+    usage metering, and billing.
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: https://github.com/artpar/apigate
+  title: APIGate - API Monetization Proxy
+  version: "1.0"
+paths:
+  /{path}:
+    delete:
+      consumes:
+      - application/json
+      description: Authenticates the request, applies rate limiting, forwards to upstream,
+        and records usage
+      parameters:
+      - description: API Key
+        in: header
+        name: X-API-Key
+        type: string
+      - description: 'Bearer token (format: Bearer {api_key})'
+        in: header
+        name: Authorization
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Upstream response
+        "401":
+          description: Invalid or missing API key
+          schema:
+            $ref: '#/definitions/adapters_http.ErrorResponseBody'
+        "429":
+          description: Rate limit exceeded
+          schema:
+            $ref: '#/definitions/adapters_http.ErrorResponseBody'
+        "502":
+          description: Upstream error
+          schema:
+            $ref: '#/definitions/adapters_http.ErrorResponseBody'
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      summary: Proxy request to upstream
+      tags:
+      - Proxy
+    get:
+      consumes:
+      - application/json
+      description: Authenticates the request, applies rate limiting, forwards to upstream,
+        and records usage
+      parameters:
+      - description: API Key
+        in: header
+        name: X-API-Key
+        type: string
+      - description: 'Bearer token (format: Bearer {api_key})'
+        in: header
+        name: Authorization
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Upstream response
+        "401":
+          description: Invalid or missing API key
+          schema:
+            $ref: '#/definitions/adapters_http.ErrorResponseBody'
+        "429":
+          description: Rate limit exceeded
+          schema:
+            $ref: '#/definitions/adapters_http.ErrorResponseBody'
+        "502":
+          description: Upstream error
+          schema:
+            $ref: '#/definitions/adapters_http.ErrorResponseBody'
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      summary: Proxy request to upstream
+      tags:
+      - Proxy
+    patch:
+      consumes:
+      - application/json
+      description: Authenticates the request, applies rate limiting, forwards to upstream,
+        and records usage
+      parameters:
+      - description: API Key
+        in: header
+        name: X-API-Key
+        type: string
+      - description: 'Bearer token (format: Bearer {api_key})'
+        in: header
+        name: Authorization
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Upstream response
+        "401":
+          description: Invalid or missing API key
+          schema:
+            $ref: '#/definitions/adapters_http.ErrorResponseBody'
+        "429":
+          description: Rate limit exceeded
+          schema:
+            $ref: '#/definitions/adapters_http.ErrorResponseBody'
+        "502":
+          description: Upstream error
+          schema:
+            $ref: '#/definitions/adapters_http.ErrorResponseBody'
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      summary: Proxy request to upstream
+      tags:
+      - Proxy
+    post:
+      consumes:
+      - application/json
+      description: Authenticates the request, applies rate limiting, forwards to upstream,
+        and records usage
+      parameters:
+      - description: API Key
+        in: header
+        name: X-API-Key
+        type: string
+      - description: 'Bearer token (format: Bearer {api_key})'
+        in: header
+        name: Authorization
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Upstream response
+        "401":
+          description: Invalid or missing API key
+          schema:
+            $ref: '#/definitions/adapters_http.ErrorResponseBody'
+        "429":
+          description: Rate limit exceeded
+          schema:
+            $ref: '#/definitions/adapters_http.ErrorResponseBody'
+        "502":
+          description: Upstream error
+          schema:
+            $ref: '#/definitions/adapters_http.ErrorResponseBody'
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      summary: Proxy request to upstream
+      tags:
+      - Proxy
+    put:
+      consumes:
+      - application/json
+      description: Authenticates the request, applies rate limiting, forwards to upstream,
+        and records usage
+      parameters:
+      - description: API Key
+        in: header
+        name: X-API-Key
+        type: string
+      - description: 'Bearer token (format: Bearer {api_key})'
+        in: header
+        name: Authorization
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Upstream response
+        "401":
+          description: Invalid or missing API key
+          schema:
+            $ref: '#/definitions/adapters_http.ErrorResponseBody'
+        "429":
+          description: Rate limit exceeded
+          schema:
+            $ref: '#/definitions/adapters_http.ErrorResponseBody'
+        "502":
+          description: Upstream error
+          schema:
+            $ref: '#/definitions/adapters_http.ErrorResponseBody'
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      summary: Proxy request to upstream
+      tags:
+      - Proxy
+  /health:
+    get:
+      description: Returns OK if the service is running
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'status: ok'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Liveness check
+      tags:
+      - Health
+  /health/live:
+    get:
+      description: Returns OK if the service is running
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'status: ok'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Liveness check
+      tags:
+      - Health
+  /health/ready:
+    get:
+      description: Checks if the service and upstream are ready to handle traffic
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'status: ok'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: 'status: unhealthy, error: message'
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Readiness check
+      tags:
+      - Health
+  /version:
+    get:
+      description: Returns the version information for the APIGate service
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Version information
+          schema:
+            $ref: '#/definitions/adapters_http.VersionResponse'
+      summary: Get service version
+      tags:
+      - System
+securityDefinitions:
+  ApiKeyAuth:
+    description: API key for authentication
+    in: header
+    name: X-API-Key
+    type: apiKey
+  BearerAuth:
+    description: 'Bearer token authentication (format: "Bearer {api_key}")'
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

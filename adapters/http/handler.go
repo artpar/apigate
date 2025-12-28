@@ -11,12 +11,36 @@ import (
 
 	"github.com/artpar/apigate/adapters/metrics"
 	"github.com/artpar/apigate/app"
+	_ "github.com/artpar/apigate/docs/swagger" // swagger docs
 	"github.com/artpar/apigate/domain/proxy"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
+	httpSwagger "github.com/swaggo/http-swagger"
 )
+
+// ErrorResponseBody represents an error response body for swagger docs.
+type ErrorResponseBody struct {
+	Error ErrorDetail `json:"error"`
+}
+
+// ErrorDetail represents error details for swagger docs.
+type ErrorDetail struct {
+	Code    string `json:"code" example:"invalid_api_key"`
+	Message string `json:"message" example:"The provided API key is invalid"`
+}
+
+// VersionResponse represents the version endpoint response.
+type VersionResponse struct {
+	Version string `json:"version" example:"1.0.0"`
+	Service string `json:"service" example:"apigate"`
+}
+
+// HealthResponse represents a health check response.
+type HealthResponse struct {
+	Status string `json:"status" example:"ok"`
+}
 
 // ProxyHandler wraps the proxy service for HTTP handling.
 type ProxyHandler struct {
@@ -43,6 +67,25 @@ func NewProxyHandlerWithMetrics(service *app.ProxyService, logger zerolog.Logger
 }
 
 // ServeHTTP handles incoming proxy requests.
+//
+//	@Summary		Proxy request to upstream
+//	@Description	Authenticates the request, applies rate limiting, forwards to upstream, and records usage
+//	@Tags			Proxy
+//	@Accept			json
+//	@Produce		json
+//	@Param			X-API-Key		header	string	false	"API Key"
+//	@Param			Authorization	header	string	false	"Bearer token (format: Bearer {api_key})"
+//	@Success		200				"Upstream response"
+//	@Failure		401				{object}	ErrorResponseBody	"Invalid or missing API key"
+//	@Failure		429				{object}	ErrorResponseBody	"Rate limit exceeded"
+//	@Failure		502				{object}	ErrorResponseBody	"Upstream error"
+//	@Security		ApiKeyAuth
+//	@Security		BearerAuth
+//	@Router			/{path} [get]
+//	@Router			/{path} [post]
+//	@Router			/{path} [put]
+//	@Router			/{path} [delete]
+//	@Router			/{path} [patch]
 func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -272,12 +315,28 @@ func NewHealthHandler(upstream HealthChecker) *HealthHandler {
 }
 
 // Liveness returns a simple liveness check.
+//
+//	@Summary		Liveness check
+//	@Description	Returns OK if the service is running
+//	@Tags			Health
+//	@Produce		json
+//	@Success		200	{object}	map[string]string	"status: ok"
+//	@Router			/health [get]
+//	@Router			/health/live [get]
 func (h *HealthHandler) Liveness(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 // Readiness checks if the service is ready to handle traffic.
+//
+//	@Summary		Readiness check
+//	@Description	Checks if the service and upstream are ready to handle traffic
+//	@Tags			Health
+//	@Produce		json
+//	@Success		200	{object}	map[string]string		"status: ok"
+//	@Failure		503	{object}	map[string]interface{}	"status: unhealthy, error: message"
+//	@Router			/health/ready [get]
 func (h *HealthHandler) Readiness(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
@@ -298,9 +357,26 @@ func (h *HealthHandler) Readiness(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
+// Version returns the service version.
+//
+//	@Summary		Get service version
+//	@Description	Returns the version information for the APIGate service
+//	@Tags			System
+//	@Produce		json
+//	@Success		200	{object}	VersionResponse	"Version information"
+//	@Router			/version [get]
+func Version(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(VersionResponse{
+		Version: "dev",
+		Service: "apigate",
+	})
+}
+
 // RouterConfig holds optional configuration for the router.
 type RouterConfig struct {
-	Metrics *metrics.Collector
+	Metrics       *metrics.Collector
+	EnableOpenAPI bool
 }
 
 // NewRouter creates the main HTTP router.
@@ -334,14 +410,23 @@ func NewRouterWithConfig(proxyHandler *ProxyHandler, healthHandler *HealthHandle
 		r.Handle("/metrics", promhttp.Handler())
 	}
 
-	// Version endpoint
-	r.Get("/version", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
-			"version": "dev",
-			"service": "apigate",
+	// OpenAPI/Swagger endpoints (if enabled)
+	if cfg.EnableOpenAPI {
+		// Serve OpenAPI spec at well-known location
+		r.Get("/.well-known/openapi.json", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			http.ServeFile(w, r, "docs/swagger/swagger.json")
 		})
-	})
+
+		// Swagger UI
+		r.Get("/swagger/*", httpSwagger.Handler(
+			httpSwagger.URL("/.well-known/openapi.json"),
+		))
+	}
+
+	// Version endpoint
+	r.Get("/version", Version)
 
 	// Proxy all other requests
 	r.HandleFunc("/*", proxyHandler.ServeHTTP)
@@ -354,7 +439,8 @@ func NewMetricsMiddleware(m *metrics.Collector) func(next http.Handler) http.Han
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Skip metrics for internal endpoints
-			if strings.HasPrefix(r.URL.Path, "/health") || r.URL.Path == "/metrics" {
+			if strings.HasPrefix(r.URL.Path, "/health") || r.URL.Path == "/metrics" ||
+				strings.HasPrefix(r.URL.Path, "/swagger") || strings.HasPrefix(r.URL.Path, "/.well-known") {
 				next.ServeHTTP(w, r)
 				return
 			}

@@ -22,6 +22,7 @@ type Config struct {
 	Endpoints []EndpointConfig `yaml:"endpoints"`
 	Logging   LoggingConfig    `yaml:"logging"`
 	Metrics   MetricsConfig    `yaml:"metrics"`
+	OpenAPI   OpenAPIConfig    `yaml:"openapi"`
 }
 
 // ServerConfig configures the HTTP server.
@@ -116,6 +117,11 @@ type LoggingConfig struct {
 type MetricsConfig struct {
 	Enabled bool   `yaml:"enabled"` // Enable /metrics endpoint
 	Path    string `yaml:"path"`    // Custom path (default: /metrics)
+}
+
+// OpenAPIConfig configures OpenAPI/Swagger documentation.
+type OpenAPIConfig struct {
+	Enabled bool `yaml:"enabled"` // Enable OpenAPI endpoints
 }
 
 // Load reads configuration from a YAML file.
