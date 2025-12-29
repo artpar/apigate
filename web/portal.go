@@ -8,6 +8,7 @@ import (
 
 	"github.com/artpar/apigate/adapters/auth"
 	domainAuth "github.com/artpar/apigate/domain/auth"
+	"github.com/artpar/apigate/domain/key"
 	"github.com/artpar/apigate/ports"
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog"
@@ -696,8 +697,32 @@ func (h *PortalHandler) APIKeysPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PortalHandler) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
-	// Placeholder - implement key creation
-	http.Redirect(w, r, "/portal/api-keys", http.StatusFound)
+	ctx := r.Context()
+	user := getPortalUser(ctx)
+
+	if err := r.ParseForm(); err != nil {
+		h.renderError(w, http.StatusBadRequest, "Invalid form data")
+		return
+	}
+
+	keyName := r.FormValue("name")
+
+	// Generate API key
+	rawKey, keyData := key.Generate("ak_")
+	keyData = keyData.WithUserID(user.ID)
+	if keyName != "" {
+		keyData.Name = keyName
+	}
+
+	// Store the key
+	if err := h.keys.Create(ctx, keyData); err != nil {
+		h.logger.Error().Err(err).Msg("failed to create API key")
+		h.renderError(w, http.StatusInternalServerError, "Failed to create API key")
+		return
+	}
+
+	// Show the key to the user (only shown once)
+	h.renderKeyCreatedPage(w, user, rawKey, keyName)
 }
 
 func (h *PortalHandler) RevokeAPIKey(w http.ResponseWriter, r *http.Request) {

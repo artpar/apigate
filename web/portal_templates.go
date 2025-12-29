@@ -2,6 +2,7 @@ package web
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/artpar/apigate/domain/key"
@@ -310,8 +311,74 @@ func (h *PortalHandler) renderAPIKeysPage(user *PortalUser, keys []key.Key) stri
             </table>
         </div>
     </main>
+
+    <!-- Create Key Modal -->
+    <div id="create-modal" class="modal-overlay" style="display:none">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3>Create API Key</h3>
+                <button onclick="document.getElementById('create-modal').style.display='none'" class="modal-close">&times;</button>
+            </div>
+            <form action="/portal/api-keys" method="POST">
+                <div class="form-group">
+                    <label for="key-name">Key Name (optional)</label>
+                    <input type="text" id="key-name" name="name" placeholder="e.g., Production API Key">
+                    <small>A friendly name to identify this key</small>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" onclick="document.getElementById('create-modal').style.display='none'" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create Key</button>
+                </div>
+            </form>
+        </div>
+    </div>
 </body>
 </html>`, h.appName, portalCSS, h.renderPortalNav(user), keyRows)
+}
+
+func (h *PortalHandler) renderKeyCreatedPage(w http.ResponseWriter, user *PortalUser, rawKey, keyName string) {
+	displayName := keyName
+	if displayName == "" {
+		displayName = "API Key"
+	}
+
+	html := fmt.Sprintf(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Key Created - %s</title>
+    <style>%s</style>
+</head>
+<body>
+    %s
+    <main class="main-content">
+        <div class="card">
+            <div class="alert alert-success">
+                <strong>Success!</strong> Your API key has been created.
+            </div>
+            <h2>%s</h2>
+            <p>Copy your API key now. You won't be able to see it again!</p>
+            <div class="key-display">
+                <code id="api-key">%s</code>
+            </div>
+            <button class="btn btn-primary" onclick="navigator.clipboard.writeText(document.getElementById('api-key').textContent)">
+                Copy to Clipboard
+            </button>
+            <p class="key-warning">
+                ⚠️ Store this key securely. It provides access to your API and cannot be recovered if lost.
+            </p>
+            <div style="margin-top: 20px;">
+                <a href="/portal/api-keys" class="btn btn-secondary">Back to API Keys</a>
+            </div>
+        </div>
+    </main>
+</body>
+</html>`, h.appName, portalCSS, h.renderPortalNav(user), displayName, rawKey)
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(html))
 }
 
 func (h *PortalHandler) renderUsagePage(user *PortalUser, summary usage.Summary) string {
@@ -548,4 +615,18 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .status-revoked { color: #dc3545; }
 
 code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-family: monospace; }
+
+.modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.modal-box { background: white; padding: 30px; border-radius: 8px; width: 100%; max-width: 450px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); }
+.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+.modal-header h3 { font-size: 20px; }
+.modal-close { background: none; border: none; font-size: 24px; cursor: pointer; color: #666; }
+.modal-close:hover { color: #333; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+.btn-secondary { background: #6c757d; color: white; }
+.btn-secondary:hover { background: #545b62; }
+
+.key-display { background: #f8f9fa; border: 1px solid #dee2e6; padding: 15px; border-radius: 4px; margin: 15px 0; }
+.key-display code { background: none; padding: 0; font-size: 14px; word-break: break-all; }
+.key-warning { color: #856404; font-size: 13px; margin-top: 10px; }
 `
