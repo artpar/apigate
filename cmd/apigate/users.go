@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
+	"github.com/artpar/apigate/adapters/hasher"
 	"github.com/artpar/apigate/adapters/sqlite"
 	"github.com/artpar/apigate/config"
 	"github.com/artpar/apigate/ports"
@@ -45,9 +47,39 @@ var usersDeleteCmd = &cobra.Command{
 	RunE:  runUsersDelete,
 }
 
+var usersGetCmd = &cobra.Command{
+	Use:   "get <user-id-or-email>",
+	Short: "Get user details",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runUsersGet,
+}
+
+var usersActivateCmd = &cobra.Command{
+	Use:   "activate <user-id-or-email>",
+	Short: "Activate a user",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runUsersActivate,
+}
+
+var usersDeactivateCmd = &cobra.Command{
+	Use:   "deactivate <user-id-or-email>",
+	Short: "Deactivate a user",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runUsersDeactivate,
+}
+
+var usersSetPasswordCmd = &cobra.Command{
+	Use:   "set-password <user-id-or-email>",
+	Short: "Set or reset a user's password",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runUsersSetPassword,
+}
+
 var (
-	userEmail  string
-	userPlan   string
+	userEmail    string
+	userPlan     string
+	userPassword string
+	userName     string
 )
 
 func init() {
@@ -56,10 +88,18 @@ func init() {
 	usersCmd.AddCommand(usersListCmd)
 	usersCmd.AddCommand(usersCreateCmd)
 	usersCmd.AddCommand(usersDeleteCmd)
+	usersCmd.AddCommand(usersGetCmd)
+	usersCmd.AddCommand(usersActivateCmd)
+	usersCmd.AddCommand(usersDeactivateCmd)
+	usersCmd.AddCommand(usersSetPasswordCmd)
 
 	usersCreateCmd.Flags().StringVar(&userEmail, "email", "", "user email (required)")
+	usersCreateCmd.Flags().StringVar(&userName, "name", "", "user name")
 	usersCreateCmd.Flags().StringVar(&userPlan, "plan", "free", "plan ID")
+	usersCreateCmd.Flags().StringVar(&userPassword, "password", "", "user password (optional, will prompt if not provided)")
 	usersCreateCmd.MarkFlagRequired("email")
+
+	usersSetPasswordCmd.Flags().StringVar(&userPassword, "password", "", "new password (will prompt if not provided)")
 }
 
 func runUsersList(cmd *cobra.Command, args []string) error {
@@ -106,8 +146,19 @@ func runUsersCreate(cmd *cobra.Command, args []string) error {
 	user := ports.User{
 		ID:     fmt.Sprintf("user_%d", os.Getpid()),
 		Email:  userEmail,
+		Name:   userName,
 		PlanID: userPlan,
 		Status: "active",
+	}
+
+	// Handle password if provided or prompt for it
+	if userPassword != "" {
+		h := hasher.NewBcrypt(10)
+		hash, err := h.Hash(userPassword)
+		if err != nil {
+			return fmt.Errorf("failed to hash password: %w", err)
+		}
+		user.PasswordHash = hash
 	}
 
 	if err := userStore.Create(context.Background(), user); err != nil {
@@ -116,6 +167,9 @@ func runUsersCreate(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("%s Created user: %s\n", checkMark, user.ID)
 	fmt.Printf("   Email: %s\n", user.Email)
+	if user.Name != "" {
+		fmt.Printf("   Name:  %s\n", user.Name)
+	}
 	fmt.Printf("   Plan:  %s\n", user.PlanID)
 	fmt.Println()
 	fmt.Println("Create an API key with: apigate keys create --user=" + user.ID)
@@ -167,4 +221,144 @@ func openDatabase() (*sqlite.DB, error) {
 	}
 
 	return db, nil
+}
+
+// getUserByIDOrEmail retrieves a user by ID or email address
+func getUserByIDOrEmail(userStore *sqlite.UserStore, identifier string) (ports.User, error) {
+	ctx := context.Background()
+
+	// If it contains @, treat as email
+	if strings.Contains(identifier, "@") {
+		return userStore.GetByEmail(ctx, identifier)
+	}
+
+	// Otherwise treat as ID
+	return userStore.Get(ctx, identifier)
+}
+
+func runUsersGet(cmd *cobra.Command, args []string) error {
+	db, err := openDatabase()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	userStore := sqlite.NewUserStore(db)
+	user, err := getUserByIDOrEmail(userStore, args[0])
+	if err != nil {
+		return fmt.Errorf("user not found: %s", args[0])
+	}
+
+	fmt.Printf("ID:      %s\n", user.ID)
+	fmt.Printf("Email:   %s\n", user.Email)
+	if user.Name != "" {
+		fmt.Printf("Name:    %s\n", user.Name)
+	}
+	fmt.Printf("Plan:    %s\n", user.PlanID)
+	fmt.Printf("Status:  %s\n", user.Status)
+	fmt.Printf("Created: %s\n", user.CreatedAt.Format("2006-01-02 15:04:05"))
+	if !user.UpdatedAt.IsZero() {
+		fmt.Printf("Updated: %s\n", user.UpdatedAt.Format("2006-01-02 15:04:05"))
+	}
+	if user.StripeID != "" {
+		fmt.Printf("Stripe:  %s\n", user.StripeID)
+	}
+	hasPassword := len(user.PasswordHash) > 0
+	fmt.Printf("Password: %v\n", hasPassword)
+
+	return nil
+}
+
+func runUsersActivate(cmd *cobra.Command, args []string) error {
+	db, err := openDatabase()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	userStore := sqlite.NewUserStore(db)
+	user, err := getUserByIDOrEmail(userStore, args[0])
+	if err != nil {
+		return fmt.Errorf("user not found: %s", args[0])
+	}
+
+	if user.Status == "active" {
+		fmt.Printf("User %s is already active\n", user.Email)
+		return nil
+	}
+
+	user.Status = "active"
+	if err := userStore.Update(context.Background(), user); err != nil {
+		return fmt.Errorf("failed to activate user: %w", err)
+	}
+
+	fmt.Printf("%s Activated user: %s (%s)\n", checkMark, user.Email, user.ID)
+	return nil
+}
+
+func runUsersDeactivate(cmd *cobra.Command, args []string) error {
+	db, err := openDatabase()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	userStore := sqlite.NewUserStore(db)
+	user, err := getUserByIDOrEmail(userStore, args[0])
+	if err != nil {
+		return fmt.Errorf("user not found: %s", args[0])
+	}
+
+	if user.Status == "suspended" {
+		fmt.Printf("User %s is already deactivated\n", user.Email)
+		return nil
+	}
+
+	user.Status = "suspended"
+	if err := userStore.Update(context.Background(), user); err != nil {
+		return fmt.Errorf("failed to deactivate user: %w", err)
+	}
+
+	fmt.Printf("%s Deactivated user: %s (%s)\n", checkMark, user.Email, user.ID)
+	return nil
+}
+
+func runUsersSetPassword(cmd *cobra.Command, args []string) error {
+	db, err := openDatabase()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	userStore := sqlite.NewUserStore(db)
+	user, err := getUserByIDOrEmail(userStore, args[0])
+	if err != nil {
+		return fmt.Errorf("user not found: %s", args[0])
+	}
+
+	password := userPassword
+	if password == "" {
+		var err error
+		password, err = promptPassword("New password: ")
+		if err != nil {
+			return fmt.Errorf("failed to read password: %w", err)
+		}
+		if password == "" {
+			return fmt.Errorf("password cannot be empty")
+		}
+	}
+
+	h := hasher.NewBcrypt(10)
+	hash, err := h.Hash(password)
+	if err != nil {
+		return fmt.Errorf("failed to hash password: %w", err)
+	}
+
+	user.PasswordHash = hash
+	if err := userStore.Update(context.Background(), user); err != nil {
+		return fmt.Errorf("failed to update password: %w", err)
+	}
+
+	fmt.Printf("%s Password updated for user: %s (%s)\n", checkMark, user.Email, user.ID)
+	return nil
 }
