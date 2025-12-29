@@ -26,3 +26,8 @@ Thumbs.db
 *.local.yaml
 bin/
 e2e.test
+
+# Generated files
+apigate.yaml
+apigate.db
+coverage.out
