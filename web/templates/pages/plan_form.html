@@ -1,0 +1,183 @@
+{{define "content"}}
+<div class="page" style="max-width: 700px;">
+    <div class="mb-4">
+        <a href="/plans" class="link text-sm">&larr; Back to Plans</a>
+    </div>
+    <div class="page-header">
+        <h1 class="page-title">{{if .IsEdit}}Edit Plan{{else}}Create Plan{{end}}</h1>
+    </div>
+
+    <div class="card">
+        <div class="card-body">
+            {{if .Error}}
+            <div class="alert alert-error mb-4">{{.Error}}</div>
+            {{end}}
+
+            <form action="{{if .IsEdit}}/plans/{{.FormPlan.ID}}{{else}}/plans{{end}}" method="POST" class="form">
+                <!-- Basic Info -->
+                <div class="form-section">
+                    <h3 class="form-section-title">Basic Information</h3>
+
+                    <div class="form-group">
+                        <label for="id" class="form-label">Plan ID</label>
+                        <input type="text" id="id" name="id" required class="form-input"
+                               placeholder="e.g., starter, pro, enterprise"
+                               value="{{.FormPlan.ID}}"
+                               {{if .IsEdit}}readonly style="background: #f9fafb;"{{end}}
+                               pattern="[a-z0-9_-]+" title="Lowercase letters, numbers, underscores, and hyphens only">
+                        <p class="form-hint">Unique identifier (lowercase, no spaces)</p>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="name" class="form-label">Name</label>
+                        <input type="text" id="name" name="name" required class="form-input"
+                               placeholder="e.g., Starter Plan"
+                               value="{{.FormPlan.Name}}">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="description" class="form-label">Description</label>
+                        <textarea id="description" name="description" class="form-input" rows="2"
+                                  placeholder="Brief description of the plan">{{.FormPlan.Description}}</textarea>
+                    </div>
+                </div>
+
+                <!-- Limits -->
+                <div class="form-section">
+                    <h3 class="form-section-title">Rate Limits & Quotas</h3>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="rate_limit" class="form-label">Rate Limit (req/min)</label>
+                            <input type="number" id="rate_limit" name="rate_limit" class="form-input"
+                                   min="1" value="{{.FormPlan.RateLimit}}" placeholder="60">
+                            <p class="form-hint">Maximum requests per minute</p>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="monthly_quota" class="form-label">Monthly Quota</label>
+                            <input type="number" id="monthly_quota" name="monthly_quota" class="form-input"
+                                   min="0" value="{{.FormPlan.MonthlyQuota}}" placeholder="1000">
+                            <p class="form-hint">Total requests per month (0 = unlimited)</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Pricing -->
+                <div class="form-section">
+                    <h3 class="form-section-title">Pricing</h3>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="price_monthly" class="form-label">Monthly Price ($)</label>
+                            <input type="number" id="price_monthly" name="price_monthly" class="form-input"
+                                   min="0" step="0.01" value="{{printf "%.2f" .FormPlan.PriceMonthly}}" placeholder="0.00">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="overage_price" class="form-label">Overage Price ($)</label>
+                            <input type="number" id="overage_price" name="overage_price" class="form-input"
+                                   min="0" step="0.001" value="{{printf "%.3f" .FormPlan.OveragePrice}}" placeholder="0.000">
+                            <p class="form-hint">Cost per request over quota</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Payment Provider IDs -->
+                <div class="form-section">
+                    <h3 class="form-section-title">Payment Provider Integration</h3>
+                    <p class="form-section-hint">Optional: Link this plan to payment provider products</p>
+
+                    <div class="form-group">
+                        <label for="stripe_price_id" class="form-label">Stripe Price ID</label>
+                        <input type="text" id="stripe_price_id" name="stripe_price_id" class="form-input"
+                               placeholder="price_..." value="{{.FormPlan.StripePriceID}}">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="paddle_price_id" class="form-label">Paddle Price ID</label>
+                        <input type="text" id="paddle_price_id" name="paddle_price_id" class="form-input"
+                               placeholder="pri_..." value="{{.FormPlan.PaddlePriceID}}">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="lemon_variant_id" class="form-label">LemonSqueezy Variant ID</label>
+                        <input type="text" id="lemon_variant_id" name="lemon_variant_id" class="form-input"
+                               placeholder="..." value="{{.FormPlan.LemonVariantID}}">
+                    </div>
+                </div>
+
+                <!-- Status -->
+                <div class="form-section">
+                    <h3 class="form-section-title">Status</h3>
+
+                    <div class="form-row">
+                        <div class="form-group form-checkbox">
+                            <label>
+                                <input type="checkbox" name="enabled" {{if .FormPlan.Enabled}}checked{{end}}>
+                                <span>Enabled</span>
+                            </label>
+                            <p class="form-hint">Only enabled plans are available for selection</p>
+                        </div>
+
+                        <div class="form-group form-checkbox">
+                            <label>
+                                <input type="checkbox" name="is_default" {{if .FormPlan.IsDefault}}checked{{end}}>
+                                <span>Default Plan</span>
+                            </label>
+                            <p class="form-hint">Assign to new users automatically</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <a href="/plans" class="btn btn-secondary">Cancel</a>
+                    <button type="submit" class="btn btn-primary">{{if .IsEdit}}Update Plan{{else}}Create Plan{{end}}</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<style>
+.form-section {
+    margin-bottom: 24px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid #e5e7eb;
+}
+.form-section:last-of-type {
+    border-bottom: none;
+}
+.form-section-title {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 16px;
+    color: #374151;
+}
+.form-section-hint {
+    font-size: 0.875rem;
+    color: #6b7280;
+    margin-bottom: 16px;
+}
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+.form-hint {
+    font-size: 0.75rem;
+    color: #6b7280;
+    margin-top: 4px;
+}
+.form-checkbox label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+}
+.form-checkbox input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+}
+</style>
+{{end}}

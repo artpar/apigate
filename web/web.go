@@ -14,7 +14,6 @@ import (
 
 	"github.com/artpar/apigate/adapters/auth"
 	"github.com/artpar/apigate/app"
-	"github.com/artpar/apigate/config"
 	"github.com/artpar/apigate/ports"
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog"
@@ -33,6 +32,15 @@ type RouteTester interface {
 	TestRoute(req app.RouteTestRequest) app.RouteTestResult
 }
 
+// AppSettings holds application settings for display.
+type AppSettings struct {
+	UpstreamURL     string
+	UpstreamTimeout string
+	AuthMode        string
+	AuthHeader      string
+	DatabaseDSN     string
+}
+
 // Handler provides the web UI endpoints.
 type Handler struct {
 	templates     map[string]*template.Template // One template per page
@@ -42,7 +50,8 @@ type Handler struct {
 	usage         ports.UsageStore
 	routes        ports.RouteStore
 	upstreams     ports.UpstreamStore
-	config        *config.Config
+	plans         ports.PlanStore
+	appSettings   AppSettings
 	logger        zerolog.Logger
 	hasher        ports.Hasher
 	isSetup       func() bool // Returns true if initial setup is complete
@@ -57,7 +66,8 @@ type Deps struct {
 	Usage         ports.UsageStore
 	Routes        ports.RouteStore
 	Upstreams     ports.UpstreamStore
-	Config        *config.Config
+	Plans         ports.PlanStore
+	AppSettings   AppSettings
 	Logger        zerolog.Logger
 	Hasher        ports.Hasher
 	JWTSecret     string
@@ -82,7 +92,8 @@ func NewHandler(deps Deps) (*Handler, error) {
 		usage:         deps.Usage,
 		routes:        deps.Routes,
 		upstreams:     deps.Upstreams,
-		config:        deps.Config,
+		plans:         deps.Plans,
+		appSettings:   deps.AppSettings,
 		logger:        deps.Logger,
 		hasher:        deps.Hasher,
 		isSetup:       deps.IsSetup,
@@ -133,6 +144,11 @@ func (h *Handler) Router() chi.Router {
 
 		// Plans
 		r.Get("/plans", h.PlansPage)
+		r.Get("/plans/new", h.PlanNewPage)
+		r.Post("/plans", h.PlanCreate)
+		r.Get("/plans/{id}", h.PlanEditPage)
+		r.Post("/plans/{id}", h.PlanUpdate)
+		r.Delete("/plans/{id}", h.PlanDelete)
 
 		// Routes
 		r.Get("/routes", h.RoutesPage)
@@ -166,6 +182,7 @@ func (h *Handler) Router() chi.Router {
 		r.Get("/partials/activity", h.PartialActivity)
 		r.Get("/partials/routes", h.PartialRoutes)
 		r.Get("/partials/upstreams", h.PartialUpstreams)
+		r.Get("/partials/plans", h.PartialPlans)
 
 		// API endpoints for dynamic UI features
 		r.Post("/api/expr/validate", h.ValidateExpr)

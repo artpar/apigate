@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"runtime"
@@ -176,26 +177,54 @@ func (h *Handler) UserNewPage(w http.ResponseWriter, r *http.Request) {
 
 // PlanInfo represents a plan for templates.
 type PlanInfo struct {
-	ID           string
-	Name         string
-	RateLimit    int
-	MonthlyQuota int64
-	PriceMonthly float64
+	ID             string
+	Name           string
+	Description    string
+	RateLimit      int
+	MonthlyQuota   int64
+	PriceMonthly   float64
+	OveragePrice   float64
+	StripePriceID  string
+	PaddlePriceID  string
+	LemonVariantID string
+	IsDefault      bool
+	Enabled        bool
 }
 
-// getPlans returns plans from config.
+// getPlans returns plans from database.
 func (h *Handler) getPlans() []PlanInfo {
-	plans := make([]PlanInfo, len(h.config.Plans))
-	for i, p := range h.config.Plans {
-		plans[i] = PlanInfo{
-			ID:           p.ID,
-			Name:         p.Name,
-			RateLimit:    p.RateLimitPerMinute,
-			MonthlyQuota: p.RequestsPerMonth,
-			PriceMonthly: float64(p.PriceMonthly) / 100,
-		}
+	if h.plans == nil {
+		return []PlanInfo{}
 	}
-	return plans
+
+	plans, err := h.plans.List(context.Background())
+	if err != nil {
+		return []PlanInfo{}
+	}
+
+	result := make([]PlanInfo, len(plans))
+	for i, p := range plans {
+		result[i] = planToInfo(p)
+	}
+	return result
+}
+
+// planToInfo converts a ports.Plan to PlanInfo.
+func planToInfo(p ports.Plan) PlanInfo {
+	return PlanInfo{
+		ID:             p.ID,
+		Name:           p.Name,
+		Description:    p.Description,
+		RateLimit:      p.RateLimitPerMinute,
+		MonthlyQuota:   p.RequestsPerMonth,
+		PriceMonthly:   float64(p.PriceMonthly) / 100,
+		OveragePrice:   float64(p.OveragePrice) / 100,
+		StripePriceID:  p.StripePriceID,
+		PaddlePriceID:  p.PaddlePriceID,
+		LemonVariantID: p.LemonVariantID,
+		IsDefault:      p.IsDefault,
+		Enabled:        p.Enabled,
+	}
 }
 
 // UserCreate handles user creation.
@@ -451,6 +480,215 @@ func (h *Handler) PlansPage(w http.ResponseWriter, r *http.Request) {
 	h.render(w, "plans", data)
 }
 
+// PlanNewPage renders the create plan form.
+func (h *Handler) PlanNewPage(w http.ResponseWriter, r *http.Request) {
+	data := struct {
+		PageData
+		IsEdit   bool
+		FormPlan PlanInfo
+		Error    string
+	}{
+		PageData: h.newPageData(r.Context(), "Create Plan"),
+	}
+	data.CurrentPath = "/plans"
+	data.FormPlan.Enabled = true
+	data.FormPlan.RateLimit = 60
+	data.FormPlan.MonthlyQuota = 1000
+
+	h.render(w, "plan_form", data)
+}
+
+// PlanCreate handles plan creation.
+func (h *Handler) PlanCreate(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	id := r.FormValue("id")
+	name := r.FormValue("name")
+
+	if id == "" || name == "" {
+		h.renderPlanFormError(w, r, "ID and name are required", "", PlanInfo{
+			ID:   id,
+			Name: name,
+		})
+		return
+	}
+
+	rateLimit, _ := strconv.Atoi(r.FormValue("rate_limit"))
+	monthlyQuota, _ := strconv.ParseInt(r.FormValue("monthly_quota"), 10, 64)
+	priceMonthly, _ := strconv.ParseFloat(r.FormValue("price_monthly"), 64)
+	overagePrice, _ := strconv.ParseFloat(r.FormValue("overage_price"), 64)
+
+	plan := ports.Plan{
+		ID:                 id,
+		Name:               name,
+		Description:        r.FormValue("description"),
+		RateLimitPerMinute: rateLimit,
+		RequestsPerMonth:   monthlyQuota,
+		PriceMonthly:       int64(priceMonthly * 100), // Convert to cents
+		OveragePrice:       int64(overagePrice * 100),
+		StripePriceID:      r.FormValue("stripe_price_id"),
+		PaddlePriceID:      r.FormValue("paddle_price_id"),
+		LemonVariantID:     r.FormValue("lemon_variant_id"),
+		IsDefault:          r.FormValue("is_default") == "on",
+		Enabled:            r.FormValue("enabled") == "on",
+	}
+
+	if err := h.plans.Create(ctx, plan); err != nil {
+		h.renderPlanFormError(w, r, "Failed to create plan: "+err.Error(), "", planToInfo(plan))
+		return
+	}
+
+	http.Redirect(w, r, "/plans", http.StatusFound)
+}
+
+// PlanEditPage renders the edit plan form.
+func (h *Handler) PlanEditPage(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id := chi.URLParam(r, "id")
+
+	plan, err := h.plans.Get(ctx, id)
+	if err != nil {
+		http.Error(w, "Plan not found", http.StatusNotFound)
+		return
+	}
+
+	data := struct {
+		PageData
+		IsEdit   bool
+		FormPlan PlanInfo
+		Error    string
+	}{
+		PageData: h.newPageData(ctx, "Edit Plan"),
+		IsEdit:   true,
+		FormPlan: planToInfo(plan),
+	}
+	data.CurrentPath = "/plans"
+
+	h.render(w, "plan_form", data)
+}
+
+// PlanUpdate handles plan updates.
+func (h *Handler) PlanUpdate(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id := chi.URLParam(r, "id")
+
+	plan, err := h.plans.Get(ctx, id)
+	if err != nil {
+		http.Error(w, "Plan not found", http.StatusNotFound)
+		return
+	}
+
+	rateLimit, _ := strconv.Atoi(r.FormValue("rate_limit"))
+	monthlyQuota, _ := strconv.ParseInt(r.FormValue("monthly_quota"), 10, 64)
+	priceMonthly, _ := strconv.ParseFloat(r.FormValue("price_monthly"), 64)
+	overagePrice, _ := strconv.ParseFloat(r.FormValue("overage_price"), 64)
+
+	plan.Name = r.FormValue("name")
+	plan.Description = r.FormValue("description")
+	plan.RateLimitPerMinute = rateLimit
+	plan.RequestsPerMonth = monthlyQuota
+	plan.PriceMonthly = int64(priceMonthly * 100)
+	plan.OveragePrice = int64(overagePrice * 100)
+	plan.StripePriceID = r.FormValue("stripe_price_id")
+	plan.PaddlePriceID = r.FormValue("paddle_price_id")
+	plan.LemonVariantID = r.FormValue("lemon_variant_id")
+	plan.IsDefault = r.FormValue("is_default") == "on"
+	plan.Enabled = r.FormValue("enabled") == "on"
+
+	if err := h.plans.Update(ctx, plan); err != nil {
+		h.renderPlanFormError(w, r, "Failed to update plan: "+err.Error(), id, planToInfo(plan))
+		return
+	}
+
+	http.Redirect(w, r, "/plans", http.StatusFound)
+}
+
+// PlanDelete handles plan deletion.
+func (h *Handler) PlanDelete(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id := chi.URLParam(r, "id")
+
+	// Check if any users are on this plan
+	users, _ := h.users.List(ctx, 1000, 0)
+	for _, u := range users {
+		if u.PlanID == id {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error": "Cannot delete plan: users are assigned to this plan",
+			})
+			return
+		}
+	}
+
+	if err := h.plans.Delete(ctx, id); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Failed to delete plan",
+		})
+		return
+	}
+
+	// For HTMX, return updated plans list
+	if r.Header.Get("HX-Request") == "true" {
+		h.PartialPlans(w, r)
+		return
+	}
+
+	http.Redirect(w, r, "/plans", http.StatusFound)
+}
+
+// PartialPlans returns the plans table partial for HTMX.
+func (h *Handler) PartialPlans(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	type PlanWithCount struct {
+		PlanInfo
+		UserCount int
+	}
+
+	plans := h.getPlans()
+	users, _ := h.users.List(ctx, 1000, 0)
+
+	planCounts := make(map[string]int)
+	for _, u := range users {
+		planCounts[u.PlanID]++
+	}
+
+	plansWithCount := make([]PlanWithCount, len(plans))
+	for i, p := range plans {
+		plansWithCount[i] = PlanWithCount{
+			PlanInfo:  p,
+			UserCount: planCounts[p.ID],
+		}
+	}
+
+	data := struct {
+		Plans []PlanWithCount
+	}{
+		Plans: plansWithCount,
+	}
+
+	h.renderPartial(w, "partial_plans", data)
+}
+
+func (h *Handler) renderPlanFormError(w http.ResponseWriter, r *http.Request, errMsg, id string, plan PlanInfo) {
+	data := struct {
+		PageData
+		IsEdit   bool
+		FormPlan PlanInfo
+		Error    string
+	}{
+		PageData: h.newPageData(r.Context(), "Plan"),
+		IsEdit:   id != "",
+		FormPlan: plan,
+		Error:    errMsg,
+	}
+	data.CurrentPath = "/plans"
+	h.render(w, "plan_form", data)
+}
+
 // UsagePage shows usage statistics.
 func (h *Handler) UsagePage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -503,11 +741,11 @@ func (h *Handler) SettingsPage(w http.ResponseWriter, r *http.Request) {
 		PageData: h.newPageData(r.Context(), "Settings"),
 	}
 	data.CurrentPath = "/settings"
-	data.Settings.UpstreamURL = h.config.Upstream.URL
-	data.Settings.UpstreamTimeout = h.config.Upstream.Timeout.String()
-	data.Settings.AuthMode = h.config.Auth.Mode
-	data.Settings.AuthHeader = h.config.Auth.Header
-	data.Settings.DatabaseDSN = h.config.Database.DSN
+	data.Settings.UpstreamURL = h.appSettings.UpstreamURL
+	data.Settings.UpstreamTimeout = h.appSettings.UpstreamTimeout
+	data.Settings.AuthMode = h.appSettings.AuthMode
+	data.Settings.AuthHeader = h.appSettings.AuthHeader
+	data.Settings.DatabaseDSN = h.appSettings.DatabaseDSN
 
 	h.render(w, "settings", data)
 }
@@ -558,7 +796,7 @@ func (h *Handler) HealthPage(w http.ResponseWriter, r *http.Request) {
 		Latency string
 	}{
 		{Name: "Database", Status: "pass", Message: "Database connection healthy"},
-		{Name: "Upstream", Status: "pass", Message: "Upstream: " + h.config.Upstream.URL},
+		{Name: "Upstream", Status: "pass", Message: "Upstream: " + h.appSettings.UpstreamURL},
 		{Name: "Config", Status: "pass", Message: "Configuration valid"},
 	}
 	data.Health.System.GoVersion = runtime.Version()

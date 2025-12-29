@@ -171,3 +171,43 @@
     </tbody>
 </table>
 {{end}}
+
+{{define "partial_plans"}}
+<table class="table">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Rate Limit</th>
+            <th>Monthly Quota</th>
+            <th>Price</th>
+            <th>Users</th>
+            <th>Status</th>
+            <th class="cell-actions">Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .Plans}}
+        <tr>
+            <td>
+                <div class="cell-primary">{{.Name}}</div>
+                <div class="cell-secondary">{{.ID}}</div>
+            </td>
+            <td class="text-muted">{{.RateLimit}} req/min</td>
+            <td class="text-muted">{{if eq .MonthlyQuota 0}}Unlimited{{else}}{{.MonthlyQuota}}{{end}}</td>
+            <td class="text-muted">${{printf "%.2f" .PriceMonthly}}/mo</td>
+            <td class="text-muted">{{.UserCount}}</td>
+            <td>
+                {{if .IsDefault}}<span class="badge badge-info" style="margin-right: 4px;">default</span>{{end}}
+                <span class="badge {{if .Enabled}}badge-success{{else}}badge-error{{end}}">{{if .Enabled}}enabled{{else}}disabled{{end}}</span>
+            </td>
+            <td class="cell-actions">
+                <a href="/plans/{{.ID}}" class="link">Edit</a>
+                <button hx-delete="/plans/{{.ID}}" hx-confirm="Delete this plan?" hx-target="#plans-table" class="link link-danger" style="margin-left: 12px;">Delete</button>
+            </td>
+        </tr>
+        {{else}}
+        <tr><td colspan="7" class="table-empty">No plans found. <a href="/plans/new" class="link">Create one</a></td></tr>
+        {{end}}
+    </tbody>
+</table>
+{{end}}
