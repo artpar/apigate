@@ -3,20 +3,74 @@ package billing
 
 import "time"
 
+// SubscriptionStatus represents subscription state.
+type SubscriptionStatus string
+
+const (
+	SubscriptionStatusActive    SubscriptionStatus = "active"
+	SubscriptionStatusPastDue   SubscriptionStatus = "past_due"
+	SubscriptionStatusCancelled SubscriptionStatus = "cancelled"
+	SubscriptionStatusPaused    SubscriptionStatus = "paused"
+	SubscriptionStatusTrialing  SubscriptionStatus = "trialing"
+	SubscriptionStatusUnpaid    SubscriptionStatus = "unpaid"
+)
+
+// Subscription represents a billing subscription (value type).
+type Subscription struct {
+	ID                 string
+	UserID             string
+	PlanID             string
+	ProviderID         string             // External ID (Stripe, Paddle, LemonSqueezy)
+	Provider           string             // "stripe", "paddle", "lemonsqueezy"
+	ProviderItemID     string             // For usage reporting (Stripe subscription item ID)
+	Status             SubscriptionStatus
+	CurrentPeriodStart time.Time
+	CurrentPeriodEnd   time.Time
+	CancelAtPeriodEnd  bool
+	CancelledAt        *time.Time
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+// IsActive returns true if the subscription is in an active state.
+func (s Subscription) IsActive() bool {
+	return s.Status == SubscriptionStatusActive || s.Status == SubscriptionStatusTrialing
+}
+
+// IsCancelling returns true if subscription will cancel at period end.
+func (s Subscription) IsCancelling() bool {
+	return s.CancelAtPeriodEnd
+}
+
+// InvoiceStatus represents the state of an invoice.
+type InvoiceStatus string
+
+const (
+	InvoiceStatusDraft        InvoiceStatus = "draft"
+	InvoiceStatusOpen         InvoiceStatus = "open"
+	InvoiceStatusPaid         InvoiceStatus = "paid"
+	InvoiceStatusVoid         InvoiceStatus = "void"
+	InvoiceStatusUncollectible InvoiceStatus = "uncollectible"
+)
+
 // Invoice represents a billing invoice (value type).
 type Invoice struct {
-	ID              string
-	UserID          string
-	StripeInvoiceID string
-	PeriodStart     time.Time
-	PeriodEnd       time.Time
-	Items           []InvoiceItem
-	Subtotal        int64 // cents
-	Tax             int64 // cents
-	Total           int64 // cents
-	Status          InvoiceStatus
-	PaidAt          *time.Time
-	CreatedAt       time.Time
+	ID          string
+	UserID      string
+	ProviderID  string // External ID (Stripe, Paddle, LemonSqueezy)
+	Provider    string // "stripe", "paddle", "lemonsqueezy"
+	PeriodStart time.Time
+	PeriodEnd   time.Time
+	Items       []InvoiceItem
+	Subtotal    int64 // cents
+	Tax         int64 // cents
+	Total       int64 // cents
+	Currency    string
+	Status      InvoiceStatus
+	DueDate     *time.Time
+	PaidAt      *time.Time
+	InvoiceURL  string // URL to view/download invoice
+	CreatedAt   time.Time
 }
 
 // InvoiceItem represents a line item on an invoice (value type).
@@ -27,40 +81,24 @@ type InvoiceItem struct {
 	Amount      int64 // cents
 }
 
-// InvoiceStatus represents the state of an invoice.
-type InvoiceStatus string
-
-const (
-	InvoiceStatusDraft     InvoiceStatus = "draft"
-	InvoiceStatusOpen      InvoiceStatus = "open"
-	InvoiceStatusPaid      InvoiceStatus = "paid"
-	InvoiceStatusVoid      InvoiceStatus = "void"
-	InvoiceStatusUncollect InvoiceStatus = "uncollectible"
-)
-
-// Subscription represents a billing subscription (value type).
-type Subscription struct {
-	ID                   string
-	UserID               string
-	PlanID               string
-	StripeSubscriptionID string
-	StripeItemID         string // For usage reporting
-	Status               SubscriptionStatus
-	CurrentPeriodStart   time.Time
-	CurrentPeriodEnd     time.Time
-	CancelledAt          *time.Time
-	CreatedAt            time.Time
+// Plan represents a subscription plan (value type).
+type Plan struct {
+	ID                 string
+	Name               string
+	Description        string
+	RateLimitPerMinute int
+	RequestsPerMonth   int64
+	PriceMonthly       int64    // In cents
+	OveragePrice       int64    // In cents per request over limit
+	Features           []string // Feature list for display
+	StripePriceID      string
+	PaddlePriceID      string
+	LemonVariantID     string
+	IsDefault          bool
+	Enabled            bool
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
-
-// SubscriptionStatus represents subscription state.
-type SubscriptionStatus string
-
-const (
-	SubStatusActive   SubscriptionStatus = "active"
-	SubStatusPastDue  SubscriptionStatus = "past_due"
-	SubStatusCanceled SubscriptionStatus = "canceled"
-	SubStatusTrialing SubscriptionStatus = "trialing"
-)
 
 // CalculateInvoice creates an invoice from usage and plan.
 // This is a PURE function.

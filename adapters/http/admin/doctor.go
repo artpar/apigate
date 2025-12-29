@@ -74,7 +74,7 @@ func (h *Handler) Doctor(w http.ResponseWriter, r *http.Request) {
 	response.Checks = append(response.Checks, upstreamCheck)
 
 	// 3. Config validation
-	configCheck := h.checkConfig()
+	configCheck := h.checkConfig(ctx)
 	response.Checks = append(response.Checks, configCheck)
 
 	// 4. Memory check
@@ -166,18 +166,28 @@ func (h *Handler) checkUpstream(ctx context.Context) HealthCheck {
 		Status: "pass",
 	}
 
-	// We don't have direct access to upstream here, so just report config
-	if h.config.Upstream.URL == "" {
-		check.Status = "fail"
-		check.Message = "No upstream URL configured"
+	// Check if upstreams are configured
+	if h.upstreams == nil {
+		check.Status = "warn"
+		check.Message = "Upstream store not configured"
+		return check
+	}
+
+	upstreams, err := h.upstreams.List(ctx)
+	if err != nil {
+		check.Status = "warn"
+		check.Message = fmt.Sprintf("Failed to list upstreams: %v", err)
+	} else if len(upstreams) == 0 {
+		check.Status = "warn"
+		check.Message = "No upstreams configured"
 	} else {
-		check.Message = fmt.Sprintf("Upstream configured: %s", h.config.Upstream.URL)
+		check.Message = fmt.Sprintf("%d upstream(s) configured", len(upstreams))
 	}
 
 	return check
 }
 
-func (h *Handler) checkConfig() HealthCheck {
+func (h *Handler) checkConfig(ctx context.Context) HealthCheck {
 	check := HealthCheck{
 		Name:   "config",
 		Status: "pass",
@@ -186,16 +196,18 @@ func (h *Handler) checkConfig() HealthCheck {
 	issues := []string{}
 
 	// Check for common config issues
-	if h.config.Upstream.URL == "" {
-		issues = append(issues, "upstream.url not set")
+	if h.upstreams != nil {
+		upstreams, err := h.upstreams.List(ctx)
+		if err != nil || len(upstreams) == 0 {
+			issues = append(issues, "no upstreams configured")
+		}
 	}
 
-	if len(h.config.Plans) == 0 {
-		issues = append(issues, "no plans configured")
-	}
-
-	if !h.config.RateLimit.Enabled {
-		issues = append(issues, "rate limiting disabled")
+	if h.plans != nil {
+		plans, err := h.plans.List(ctx)
+		if err != nil || len(plans) == 0 {
+			issues = append(issues, "no plans configured")
+		}
 	}
 
 	if len(issues) > 0 {

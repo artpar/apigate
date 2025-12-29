@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/artpar/apigate/config"
 	"github.com/artpar/apigate/domain/key"
 	"github.com/artpar/apigate/ports"
 	"github.com/go-chi/chi/v5"
@@ -25,7 +24,7 @@ type Handler struct {
 	usage         ports.UsageStore
 	routes        ports.RouteStore
 	upstreams     ports.UpstreamStore
-	config        *config.Config
+	plans         ports.PlanStore
 	logger        zerolog.Logger
 	hasher        ports.Hasher
 	sessions      *SessionStore
@@ -39,7 +38,7 @@ type Deps struct {
 	Usage     ports.UsageStore
 	Routes    ports.RouteStore
 	Upstreams ports.UpstreamStore
-	Config    *config.Config
+	Plans     ports.PlanStore
 	Logger    zerolog.Logger
 	Hasher    ports.Hasher
 }
@@ -52,7 +51,7 @@ func NewHandler(deps Deps) *Handler {
 		usage:     deps.Usage,
 		routes:    deps.Routes,
 		upstreams: deps.Upstreams,
-		config:    deps.Config,
+		plans:     deps.Plans,
 		logger:    deps.Logger,
 		hasher:    deps.Hasher,
 		sessions:  NewSessionStore(),
@@ -94,7 +93,9 @@ func (h *Handler) Router() chi.Router {
 		// Plans
 		r.Get("/plans", h.ListPlans)
 		r.Post("/plans", h.CreatePlan)
+		r.Get("/plans/{id}", h.GetPlan)
 		r.Put("/plans/{id}", h.UpdatePlan)
+		r.Delete("/plans/{id}", h.DeletePlan)
 
 		// Usage
 		r.Get("/usage", h.GetUsage)

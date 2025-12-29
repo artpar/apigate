@@ -2,15 +2,9 @@ package main
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/artpar/apigate/bootstrap"
-	"github.com/artpar/apigate/config"
 	"github.com/spf13/cobra"
-)
-
-var (
-	hotReload bool
 )
 
 var serveCmd = &cobra.Command{
@@ -18,78 +12,38 @@ var serveCmd = &cobra.Command{
 	Short: "Start the API proxy server",
 	Long: `Start the APIGate proxy server.
 
-The server will:
-  - Load configuration from apigate.yaml (or --config)
-  - Or load configuration from APIGATE_* environment variables
-  - Connect to the database
-  - Start proxying requests to the upstream API
-  - Apply authentication, rate limiting, and usage metering
+All configuration is loaded from the database after connection.
+Only minimal bootstrap settings come from environment variables:
 
-Environment variables (for Docker deployments):
-  APIGATE_UPSTREAM_URL      - Upstream API URL (required)
-  APIGATE_DATABASE_DSN      - Database path (default: apigate.db)
-  APIGATE_SERVER_PORT       - Server port (default: 8080)
-  APIGATE_AUTH_MODE         - Auth mode: local or remote
-  APIGATE_LOG_LEVEL         - Log level: debug, info, warn, error
-  APIGATE_ADMIN_EMAIL       - Admin email for first-run bootstrap
+Environment variables:
+  APIGATE_DATABASE_DSN  - Database path (default: apigate.db)
+  APIGATE_SERVER_HOST   - Server host (default: from settings or 0.0.0.0)
+  APIGATE_SERVER_PORT   - Server port (default: from settings or 8080)
+  APIGATE_LOG_LEVEL     - Log level: debug, info, warn, error
+  APIGATE_LOG_FORMAT    - Log format: json or console
+
+All other settings are stored in the database and can be configured
+via the admin UI or API:
+  - Email provider settings (SMTP, etc.)
+  - Payment provider settings (Stripe, Paddle, LemonSqueezy)
+  - Portal settings
+  - Rate limit settings
+  - Upstream settings
 
 Examples:
   apigate serve
-  apigate serve --config /etc/apigate/config.yaml
-  apigate serve --hot-reload=false
-
-  # Docker (env vars only):
-  APIGATE_UPSTREAM_URL=https://api.example.com apigate serve`,
+  APIGATE_DATABASE_DSN=/data/apigate.db apigate serve
+  APIGATE_LOG_LEVEL=debug APIGATE_LOG_FORMAT=console apigate serve`,
 	RunE: runServe,
 }
 
 func init() {
 	rootCmd.AddCommand(serveCmd)
-
-	serveCmd.Flags().BoolVar(&hotReload, "hot-reload", true, "enable hot reload of configuration")
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
-	hasConfigFile := false
-	if _, err := os.Stat(cfgFile); err == nil {
-		hasConfigFile = true
-	}
-
-	hasEnvConfig := config.HasEnvConfig()
-
-	// No configuration at all
-	if !hasConfigFile && !hasEnvConfig {
-		fmt.Println("No configuration found.")
-		fmt.Println()
-		fmt.Printf("Option 1: Run 'apigate init' to create %s\n", cfgFile)
-		fmt.Println("Option 2: Set APIGATE_UPSTREAM_URL environment variable")
-		fmt.Println()
-		fmt.Println("Example (env vars):")
-		fmt.Println("  APIGATE_UPSTREAM_URL=https://api.example.com apigate serve")
-		return nil
-	}
-
-	// Create application
-	var app *bootstrap.App
-	var err error
-
-	if hasConfigFile && hotReload {
-		// Hot reload only works with config file
-		app, err = bootstrap.NewWithHotReload(cfgFile)
-	} else {
-		// Load config (file with env overrides, or env-only)
-		cfg, loadErr := config.LoadWithFallback(cfgFile)
-		if loadErr != nil {
-			return fmt.Errorf("error loading config: %w", loadErr)
-		}
-
-		if !hasConfigFile {
-			fmt.Println("Running with environment variables (no config file)")
-		}
-
-		app, err = bootstrap.New(cfg)
-	}
-
+	// Create application (config loaded from database)
+	app, err := bootstrap.New()
 	if err != nil {
 		return fmt.Errorf("error initializing: %w", err)
 	}

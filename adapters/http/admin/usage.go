@@ -153,10 +153,9 @@ func (h *Handler) GetUsage(w http.ResponseWriter, r *http.Request) {
 					// Aggregate by plan
 					if _, ok := planStats[u.PlanID]; !ok {
 						planName := u.PlanID
-						for _, p := range h.config.Plans {
-							if p.ID == u.PlanID {
-								planName = p.Name
-								break
+						if h.plans != nil {
+							if plan, err := h.plans.Get(r.Context(), u.PlanID); err == nil {
+								planName = plan.Name
 							}
 						}
 						planStats[u.PlanID] = &PlanUsageSummary{

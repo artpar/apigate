@@ -1,4 +1,6 @@
 // Package bootstrap wires all dependencies and starts the application.
+// Configuration is loaded from the database, with minimal environment variables
+// only for bootstrap (database connection and server port).
 package bootstrap
 
 import (
@@ -7,109 +9,87 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/artpar/apigate/adapters/clock"
+	"github.com/artpar/apigate/adapters/email"
 	"github.com/artpar/apigate/adapters/hasher"
 	apihttp "github.com/artpar/apigate/adapters/http"
 	"github.com/artpar/apigate/adapters/http/admin"
 	"github.com/artpar/apigate/adapters/idgen"
 	"github.com/artpar/apigate/adapters/memory"
 	"github.com/artpar/apigate/adapters/metrics"
-	"github.com/artpar/apigate/adapters/remote"
+	"github.com/artpar/apigate/adapters/payment"
 	"github.com/artpar/apigate/adapters/sqlite"
 	"github.com/artpar/apigate/app"
-	"github.com/artpar/apigate/config"
 	"github.com/artpar/apigate/domain/plan"
+	"github.com/artpar/apigate/domain/settings"
 	"github.com/artpar/apigate/ports"
 	"github.com/artpar/apigate/web"
 	"github.com/rs/zerolog"
 )
 
+// Environment variable names for bootstrap configuration.
+// These are the ONLY config values that come from environment.
+const (
+	EnvDatabaseDSN = "APIGATE_DATABASE_DSN"
+	EnvServerPort  = "APIGATE_SERVER_PORT"
+	EnvServerHost  = "APIGATE_SERVER_HOST"
+	EnvLogLevel    = "APIGATE_LOG_LEVEL"
+	EnvLogFormat   = "APIGATE_LOG_FORMAT"
+)
+
 // App represents the running application.
 type App struct {
-	Config       *config.Config
-	ConfigHolder *config.Holder
-	Logger       zerolog.Logger
-	DB           *sqlite.DB
-	HTTPServer   *http.Server
-	Metrics      *metrics.Collector
+	Logger     zerolog.Logger
+	DB         *sqlite.DB
+	HTTPServer *http.Server
+	Metrics    *metrics.Collector
+	Settings   *app.SettingsService
 
-	// Services (for hot reload)
+	// Services
 	proxyService     *app.ProxyService
 	routeService     *app.RouteService
 	transformService *app.TransformService
 
 	// Adapters (for cleanup)
-	usageRecorder ports.UsageRecorder
-	upstream      *apihttp.UpstreamClient
+	usageRecorder   ports.UsageRecorder
+	upstream        *apihttp.UpstreamClient
+	paymentProvider ports.PaymentProvider
+	emailSender     ports.EmailSender
 }
 
-// New creates and initializes the application from a config file path.
-func New(cfg *config.Config) (*App, error) {
-	// Setup logger
-	logger := setupLogger(cfg.Logging)
+// New creates and initializes the application.
+// Configuration is loaded from the database after connection.
+func New() (*App, error) {
+	// Setup logger from env (only bootstrap config from env)
+	logger := setupLoggerFromEnv()
 
-	logger.Info().
-		Str("upstream", cfg.Upstream.URL).
-		Str("auth_mode", cfg.Auth.Mode).
-		Str("usage_mode", cfg.Usage.Mode).
-		Str("billing_mode", cfg.Billing.Mode).
-		Msg("initializing apigate")
+	logger.Info().Msg("initializing apigate")
 
-	app := &App{
-		Config: cfg,
+	a := &App{
 		Logger: logger,
 	}
 
-	// Initialize database
-	if err := app.initDatabase(); err != nil {
-		return nil, fmt.Errorf("init database: %w", err)
-	}
-
-	// Initialize HTTP server
-	if err := app.initHTTPServer(); err != nil {
-		return nil, fmt.Errorf("init http server: %w", err)
-	}
-
-	return app, nil
-}
-
-// NewWithHotReload creates the application with hot reload support.
-func NewWithHotReload(configPath string) (*App, error) {
-	// Create initial logger for bootstrap
-	initLogger := zerolog.New(os.Stdout).With().Timestamp().Logger()
-
-	// Create config holder
-	holder, err := config.NewHolder(configPath, initLogger)
-	if err != nil {
-		return nil, fmt.Errorf("create config holder: %w", err)
-	}
-
-	cfg := holder.Get()
-
-	// Setup proper logger
-	logger := setupLogger(cfg.Logging)
-	holder = replaceHolderLogger(holder, configPath, logger)
-
-	logger.Info().
-		Str("upstream", cfg.Upstream.URL).
-		Str("auth_mode", cfg.Auth.Mode).
-		Str("usage_mode", cfg.Usage.Mode).
-		Str("billing_mode", cfg.Billing.Mode).
-		Bool("hot_reload", true).
-		Msg("initializing apigate")
-
-	a := &App{
-		Config:       cfg,
-		ConfigHolder: holder,
-		Logger:       logger,
-	}
-
-	// Initialize database
+	// Initialize database (DSN from env with default)
 	if err := a.initDatabase(); err != nil {
 		return nil, fmt.Errorf("init database: %w", err)
+	}
+
+	// Load settings from database
+	settingsStore := sqlite.NewSettingsStore(a.DB)
+	a.Settings = app.NewSettingsService(settingsStore, logger)
+	if err := a.Settings.Load(context.Background()); err != nil {
+		logger.Warn().Err(err).Msg("failed to load settings, using defaults")
+	}
+
+	// Initialize metrics if enabled
+	s := a.Settings.Get()
+	if s.GetBool("metrics.enabled") {
+		a.Metrics = metrics.New()
+		logger.Info().Msg("prometheus metrics enabled")
 	}
 
 	// Initialize HTTP server
@@ -117,74 +97,16 @@ func NewWithHotReload(configPath string) (*App, error) {
 		return nil, fmt.Errorf("init http server: %w", err)
 	}
 
-	// Wire up hot reload callback
-	holder.OnChange(a.onConfigChange)
-
-	// Start watching for changes
-	if err := holder.WatchFile(); err != nil {
-		logger.Warn().Err(err).Msg("failed to watch config file, hot reload disabled")
-	}
-
-	// Start listening for SIGHUP
-	holder.WatchSignals()
-
 	return a, nil
 }
 
-// replaceHolderLogger creates a new holder with the proper logger
-func replaceHolderLogger(old *config.Holder, path string, logger zerolog.Logger) *config.Holder {
-	old.Stop()
-	holder, _ := config.NewHolder(path, logger)
-	return holder
-}
-
-// onConfigChange is called when configuration changes.
-func (a *App) onConfigChange(cfg *config.Config) {
-	a.Logger.Info().Msg("applying configuration changes")
-
-	// Update proxy service with new dynamic config
-	if a.proxyService != nil {
-		a.proxyService.UpdateConfig(
-			convertPlans(cfg.Plans),
-			convertEndpoints(cfg.Endpoints),
-			cfg.RateLimit.BurstTokens,
-			cfg.RateLimit.WindowSecs,
-		)
-	}
-
-	// Update log level if changed
-	if cfg.Logging.Level != a.Config.Logging.Level {
-		level, err := zerolog.ParseLevel(cfg.Logging.Level)
-		if err == nil {
-			zerolog.SetGlobalLevel(level)
-			a.Logger.Info().Str("level", cfg.Logging.Level).Msg("log level updated")
-		}
-	}
-
-	// Record config reload in metrics
-	if a.Metrics != nil {
-		a.Metrics.ConfigReloads.Inc()
-		a.Metrics.ConfigLastReload.SetToCurrentTime()
-	}
-
-	// Store new config
-	a.Config = cfg
-}
-
-// Reload manually triggers a configuration reload.
-func (a *App) Reload() error {
-	if a.ConfigHolder == nil {
-		return fmt.Errorf("hot reload not enabled")
-	}
-	return a.ConfigHolder.Reload()
-}
-
 func (a *App) initDatabase() error {
-	if a.Config.Database.Driver != "sqlite" {
-		return fmt.Errorf("unsupported database driver: %s", a.Config.Database.Driver)
+	dsn := os.Getenv(EnvDatabaseDSN)
+	if dsn == "" {
+		dsn = "apigate.db"
 	}
 
-	db, err := sqlite.Open(a.Config.Database.DSN)
+	db, err := sqlite.Open(dsn)
 	if err != nil {
 		return err
 	}
@@ -195,24 +117,28 @@ func (a *App) initDatabase() error {
 	}
 
 	a.DB = db
-	a.Logger.Info().Str("dsn", a.Config.Database.DSN).Msg("database initialized")
+	a.Logger.Info().Str("dsn", dsn).Msg("database initialized")
 	return nil
 }
 
 func (a *App) initHTTPServer() error {
+	s := a.Settings.Get()
+	ctx := context.Background()
+
 	// Build dependencies
-	deps, err := a.buildDependencies()
+	deps, err := a.buildDependencies(s)
 	if err != nil {
 		return err
 	}
 
-	// Build proxy config
+	// Build proxy config from settings and database plans
+	plans := a.loadPlans(ctx)
 	proxyCfg := app.ProxyConfig{
-		KeyPrefix:  a.Config.Auth.KeyPrefix,
-		Plans:      convertPlans(a.Config.Plans),
-		Endpoints:  convertEndpoints(a.Config.Endpoints),
-		RateBurst:  a.Config.RateLimit.BurstTokens,
-		RateWindow: a.Config.RateLimit.WindowSecs,
+		KeyPrefix:  s.GetOrDefault(settings.KeyAuthKeyPrefix, "ak_"),
+		Plans:      plans,
+		Endpoints:  nil, // Load from database if needed
+		RateBurst:  s.GetInt(settings.KeyRateLimitBurstTokens, 5),
+		RateWindow: s.GetInt(settings.KeyRateLimitWindowSecs, 60),
 	}
 
 	// Create proxy service
@@ -232,22 +158,16 @@ func (a *App) initHTTPServer() error {
 	)
 	a.proxyService.SetRouteService(a.routeService)
 
-	// Start route service to load initial routes and begin refresh loop
-	if err := a.routeService.Start(context.Background()); err != nil {
+	// Start route service to load initial routes
+	if err := a.routeService.Start(ctx); err != nil {
 		a.Logger.Warn().Err(err).Msg("failed to start route service, continuing with empty routes")
 	}
 
-	// Create and wire transform service for request/response transformations
+	// Create and wire transform service
 	a.transformService = app.NewTransformService()
 	a.proxyService.SetTransformService(a.transformService)
 
 	a.Logger.Info().Msg("route and transform services initialized")
-
-	// Initialize metrics if enabled
-	if a.Config.Metrics.Enabled {
-		a.Metrics = metrics.New()
-		a.Logger.Info().Msg("prometheus metrics enabled")
-	}
 
 	// Create HTTP handlers
 	var proxyHandler *apihttp.ProxyHandler
@@ -256,41 +176,47 @@ func (a *App) initHTTPServer() error {
 	} else {
 		proxyHandler = apihttp.NewProxyHandler(a.proxyService, a.Logger)
 	}
-	// Enable streaming support by setting the streaming upstream
 	proxyHandler.SetStreamingUpstream(a.upstream)
 	healthHandler := apihttp.NewHealthHandler(a.upstream)
 
 	// Create shared stores for admin and web handlers
 	usageStore := sqlite.NewUsageStore(a.DB)
-	bcryptHasher := hasher.NewBcrypt(0) // 0 = default cost
+	planStore := sqlite.NewPlanStore(a.DB)
+	bcryptHasher := hasher.NewBcrypt(0)
 
-	// Create admin handler with route/upstream stores
+	// Create admin handler
 	adminHandler := admin.NewHandler(admin.Deps{
 		Users:     deps.Users,
 		Keys:      deps.Keys,
 		Usage:     usageStore,
 		Routes:    routeStore,
 		Upstreams: upstreamStore,
-		Config:    a.Config,
+		Plans:     planStore,
 		Logger:    a.Logger,
 		Hasher:    bcryptHasher,
 	})
 
 	// Create web UI handler
 	webHandler, err := web.NewHandler(web.Deps{
-		Users:         deps.Users,
-		Keys:          deps.Keys,
-		Usage:         usageStore,
-		Routes:        routeStore,
-		Upstreams:     upstreamStore,
-		Config:        a.Config,
+		Users:     deps.Users,
+		Keys:      deps.Keys,
+		Usage:     usageStore,
+		Routes:    routeStore,
+		Upstreams: upstreamStore,
+		Plans:     planStore,
+		AppSettings: web.AppSettings{
+			UpstreamURL:     s.Get(settings.KeyUpstreamURL),
+			UpstreamTimeout: s.GetOrDefault(settings.KeyUpstreamTimeout, "30s"),
+			AuthMode:        s.GetOrDefault(settings.KeyAuthMode, "local"),
+			AuthHeader:      s.GetOrDefault(settings.KeyAuthHeader, "X-API-Key"),
+			DatabaseDSN:     os.Getenv(EnvDatabaseDSN),
+		},
 		Logger:        a.Logger,
 		Hasher:        bcryptHasher,
-		JWTSecret:     a.Config.Auth.JWTSecret,
+		JWTSecret:     s.Get(settings.KeyAuthJWTSecret),
 		ExprValidator: a.transformService,
 		RouteTester:   a.routeService,
 		IsSetup: func() bool {
-			// Check if admin user exists
 			users, err := deps.Users.List(context.Background(), 1, 0)
 			return err == nil && len(users) > 0
 		},
@@ -299,58 +225,118 @@ func (a *App) initHTTPServer() error {
 		return fmt.Errorf("create web handler: %w", err)
 	}
 
-	// Create router with metrics and OpenAPI if enabled
+	// Create user portal handler (if enabled)
+	var portalRouter http.Handler
+	if s.GetBool(settings.KeyPortalEnabled) {
+		// Create email sender
+		emailSender, err := email.NewSender(s)
+		if err != nil {
+			a.Logger.Warn().Err(err).Msg("failed to create email sender, portal email features disabled")
+			emailSender = email.NewNoopSender()
+		}
+		a.emailSender = emailSender
+
+		// Create session and token stores
+		sessionStore := sqlite.NewSessionStore(a.DB)
+		tokenStore := sqlite.NewTokenStore(a.DB)
+
+		portalHandler, err := web.NewPortalHandler(web.PortalDeps{
+			Users:       deps.Users,
+			Keys:        deps.Keys,
+			Usage:       usageStore,
+			Sessions:    sessionStore,
+			AuthTokens:  tokenStore,
+			EmailSender: emailSender,
+			Logger:      a.Logger,
+			Hasher:      bcryptHasher,
+			IDGen:       deps.IDGen,
+			JWTSecret:   s.Get(settings.KeyAuthJWTSecret),
+			BaseURL:     s.Get(settings.KeyPortalBaseURL),
+			AppName:     s.GetOrDefault(settings.KeyPortalAppName, "APIGate"),
+		})
+		if err != nil {
+			return fmt.Errorf("create portal handler: %w", err)
+		}
+		portalRouter = portalHandler.Router()
+		a.Logger.Info().Msg("user portal enabled at /portal")
+	}
+
+	// Create payment provider (if configured)
+	paymentProvider, err := payment.NewProvider(s)
+	if err != nil {
+		a.Logger.Warn().Err(err).Msg("failed to create payment provider")
+		paymentProvider = payment.NewNoopProvider()
+	}
+	a.paymentProvider = paymentProvider
+
+	// Create router
 	routerCfg := apihttp.RouterConfig{
 		Metrics:       a.Metrics,
-		EnableOpenAPI: a.Config.OpenAPI.Enabled,
+		EnableOpenAPI: s.GetBool("openapi.enabled"),
 		AdminHandler:  adminHandler.Router(),
 		WebHandler:    webHandler.Router(),
+		PortalHandler: portalRouter,
 	}
 	router := apihttp.NewRouterWithConfig(proxyHandler, healthHandler, a.Logger, routerCfg)
 
-	// Create HTTP server
-	addr := fmt.Sprintf("%s:%d", a.Config.Server.Host, a.Config.Server.Port)
+	// Get server config from env (bootstrap) or settings
+	host := os.Getenv(EnvServerHost)
+	if host == "" {
+		host = s.GetOrDefault(settings.KeyServerHost, "0.0.0.0")
+	}
+	port := os.Getenv(EnvServerPort)
+	if port == "" {
+		port = s.GetOrDefault(settings.KeyServerPort, "8080")
+	}
+
+	addr := fmt.Sprintf("%s:%s", host, port)
+	readTimeout := s.GetDuration(settings.KeyServerReadTimeout, 30*time.Second)
+	writeTimeout := s.GetDuration(settings.KeyServerWriteTimeout, 60*time.Second)
+
 	a.HTTPServer = &http.Server{
 		Addr:         addr,
 		Handler:      router,
-		ReadTimeout:  a.Config.Server.ReadTimeout,
-		WriteTimeout: a.Config.Server.WriteTimeout,
+		ReadTimeout:  readTimeout,
+		WriteTimeout: writeTimeout,
 	}
 
 	a.Logger.Info().Str("addr", addr).Msg("http server configured")
 	return nil
 }
 
-func (a *App) buildDependencies() (app.ProxyDeps, error) {
+func (a *App) buildDependencies(s settings.Settings) (app.ProxyDeps, error) {
 	var deps app.ProxyDeps
 
 	// Clock and ID generator (always local)
 	deps.Clock = clock.Real{}
 	deps.IDGen = idgen.UUID{}
 
-	// Key store
-	keyStore, err := a.buildKeyStore()
-	if err != nil {
-		return deps, fmt.Errorf("build key store: %w", err)
-	}
-	deps.Keys = keyStore
+	// Key store (always local for now)
+	deps.Keys = sqlite.NewKeyStore(a.DB)
 
-	// User store (always local for now)
+	// User store
 	deps.Users = sqlite.NewUserStore(a.DB)
 
 	// Rate limit store (always local - ephemeral)
 	deps.RateLimit = memory.NewRateLimitStore()
 
 	// Usage recorder
-	usageRecorder, err := a.buildUsageRecorder()
-	if err != nil {
-		return deps, fmt.Errorf("build usage recorder: %w", err)
-	}
-	deps.Usage = usageRecorder
-	a.usageRecorder = usageRecorder
+	usageStore := sqlite.NewUsageStore(a.DB)
+	deps.Usage = NewLocalUsageRecorder(usageStore, 100, 10*time.Second)
+	a.usageRecorder = deps.Usage
 
 	// Upstream client
-	upstream, err := a.buildUpstream()
+	upstreamURL := s.Get(settings.KeyUpstreamURL)
+	if upstreamURL == "" {
+		upstreamURL = "http://localhost:8081" // Default fallback
+	}
+
+	upstream, err := apihttp.NewUpstreamClient(apihttp.UpstreamConfig{
+		BaseURL:         upstreamURL,
+		Timeout:         s.GetDuration(settings.KeyUpstreamTimeout, 30*time.Second),
+		MaxIdleConns:    s.GetInt(settings.KeyUpstreamMaxIdleConns, 100),
+		IdleConnTimeout: s.GetDuration(settings.KeyUpstreamIdleConnTimeout, 90*time.Second),
+	})
 	if err != nil {
 		return deps, fmt.Errorf("build upstream: %w", err)
 	}
@@ -360,78 +346,41 @@ func (a *App) buildDependencies() (app.ProxyDeps, error) {
 	return deps, nil
 }
 
-func (a *App) buildKeyStore() (ports.KeyStore, error) {
-	switch a.Config.Auth.Mode {
-	case "local":
-		return sqlite.NewKeyStore(a.DB), nil
-	case "remote":
-		client := remote.NewClient(remote.ClientConfig{
-			BaseURL: a.Config.Auth.Remote.URL,
-			APIKey:  a.Config.Auth.Remote.APIKey,
-			Timeout: a.Config.Auth.Remote.Timeout,
-			Headers: a.Config.Auth.Remote.Headers,
-		})
-		return remote.NewKeyStore(client), nil
-	default:
-		return nil, fmt.Errorf("unknown auth mode: %s", a.Config.Auth.Mode)
+func (a *App) loadPlans(ctx context.Context) []plan.Plan {
+	// Load plans from database
+	rows, err := a.DB.DB.QueryContext(ctx, `
+		SELECT id, name, rate_limit_per_minute, requests_per_month, price_monthly, overage_price
+		FROM plans WHERE enabled = 1
+	`)
+	if err != nil {
+		a.Logger.Warn().Err(err).Msg("failed to load plans, using default")
+		return []plan.Plan{{
+			ID:                 "free",
+			Name:               "Free",
+			RateLimitPerMinute: 60,
+			RequestsPerMonth:   1000,
+		}}
 	}
-}
+	defer rows.Close()
 
-func (a *App) buildUsageRecorder() (ports.UsageRecorder, error) {
-	switch a.Config.Usage.Mode {
-	case "local":
-		usageStore := sqlite.NewUsageStore(a.DB)
-		return NewLocalUsageRecorder(usageStore, a.Config.Usage.BatchSize, a.Config.Usage.FlushInterval), nil
-	case "remote":
-		client := remote.NewClient(remote.ClientConfig{
-			BaseURL: a.Config.Usage.Remote.URL,
-			APIKey:  a.Config.Usage.Remote.APIKey,
-			Timeout: a.Config.Usage.Remote.Timeout,
-			Headers: a.Config.Usage.Remote.Headers,
-		})
-		return remote.NewUsageRecorder(client, remote.UsageRecorderConfig{
-			BatchSize:     a.Config.Usage.BatchSize,
-			FlushInterval: a.Config.Usage.FlushInterval,
-		}), nil
-	default:
-		return nil, fmt.Errorf("unknown usage mode: %s", a.Config.Usage.Mode)
-	}
-}
-
-func (a *App) buildUpstream() (*apihttp.UpstreamClient, error) {
-	return apihttp.NewUpstreamClient(apihttp.UpstreamConfig{
-		BaseURL:         a.Config.Upstream.URL,
-		Timeout:         a.Config.Upstream.Timeout,
-		MaxIdleConns:    a.Config.Upstream.MaxIdleConns,
-		IdleConnTimeout: a.Config.Upstream.IdleConnTimeout,
-	})
-}
-
-func convertPlans(cfgPlans []config.PlanConfig) []plan.Plan {
-	plans := make([]plan.Plan, len(cfgPlans))
-	for i, p := range cfgPlans {
-		plans[i] = plan.Plan{
-			ID:                 p.ID,
-			Name:               p.Name,
-			RateLimitPerMinute: p.RateLimitPerMinute,
-			RequestsPerMonth:   p.RequestsPerMonth,
-			PriceMonthly:       p.PriceMonthly,
-			OveragePrice:       p.OveragePrice,
+	var plans []plan.Plan
+	for rows.Next() {
+		var p plan.Plan
+		if err := rows.Scan(&p.ID, &p.Name, &p.RateLimitPerMinute, &p.RequestsPerMonth, &p.PriceMonthly, &p.OveragePrice); err != nil {
+			continue
 		}
+		plans = append(plans, p)
+	}
+
+	if len(plans) == 0 {
+		return []plan.Plan{{
+			ID:                 "free",
+			Name:               "Free",
+			RateLimitPerMinute: 60,
+			RequestsPerMonth:   1000,
+		}}
 	}
 	return plans
-}
-
-func convertEndpoints(cfgEndpoints []config.EndpointConfig) []plan.Endpoint {
-	endpoints := make([]plan.Endpoint, len(cfgEndpoints))
-	for i, e := range cfgEndpoints {
-		endpoints[i] = plan.Endpoint{
-			Method:         e.Method,
-			Path:           e.Path,
-			CostMultiplier: e.CostMultiplier,
-		}
-	}
-	return endpoints
 }
 
 // Run starts the HTTP server and blocks until shutdown.
@@ -465,11 +414,6 @@ func (a *App) Run() error {
 func (a *App) Shutdown() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-
-	// Stop config watcher
-	if a.ConfigHolder != nil {
-		a.ConfigHolder.Stop()
-	}
 
 	// Stop route service refresh loop
 	if a.routeService != nil {
@@ -506,20 +450,79 @@ func (a *App) Shutdown() error {
 	return nil
 }
 
-func setupLogger(cfg config.LoggingConfig) zerolog.Logger {
-	// Set log level
-	level, err := zerolog.ParseLevel(cfg.Level)
+// Reload reloads settings from the database.
+func (a *App) Reload() error {
+	ctx := context.Background()
+	if err := a.Settings.Load(ctx); err != nil {
+		return err
+	}
+
+	s := a.Settings.Get()
+
+	// Update proxy service with new config
+	if a.proxyService != nil {
+		plans := a.loadPlans(ctx)
+		a.proxyService.UpdateConfig(
+			plans,
+			nil, // endpoints
+			s.GetInt(settings.KeyRateLimitBurstTokens, 5),
+			s.GetInt(settings.KeyRateLimitWindowSecs, 60),
+		)
+	}
+
+	a.Logger.Info().Msg("settings reloaded from database")
+	return nil
+}
+
+func setupLoggerFromEnv() zerolog.Logger {
+	levelStr := os.Getenv(EnvLogLevel)
+	if levelStr == "" {
+		levelStr = "info"
+	}
+
+	level, err := zerolog.ParseLevel(levelStr)
 	if err != nil {
 		level = zerolog.InfoLevel
 	}
 	zerolog.SetGlobalLevel(level)
 
-	// Set output format
-	var output zerolog.ConsoleWriter
-	if cfg.Format == "console" {
-		output = zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
+	format := os.Getenv(EnvLogFormat)
+	if format == "console" {
+		output := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
 		return zerolog.New(output).With().Timestamp().Logger()
 	}
 
 	return zerolog.New(os.Stdout).With().Timestamp().Logger()
+}
+
+// GetEnvInt returns an integer from env or default.
+func GetEnvInt(key string, defaultVal int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultVal
+	}
+	i, err := strconv.Atoi(v)
+	if err != nil {
+		return defaultVal
+	}
+	return i
+}
+
+// noopEmailSender is a no-op email sender used when email is disabled.
+type noopEmailSender struct{}
+
+func (n *noopEmailSender) Send(ctx context.Context, msg ports.EmailMessage) error {
+	return nil
+}
+
+func (n *noopEmailSender) SendVerification(ctx context.Context, to, name, token string) error {
+	return nil
+}
+
+func (n *noopEmailSender) SendPasswordReset(ctx context.Context, to, name, token string) error {
+	return nil
+}
+
+func (n *noopEmailSender) SendWelcome(ctx context.Context, to, name string) error {
+	return nil
 }

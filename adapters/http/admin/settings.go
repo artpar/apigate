@@ -83,46 +83,46 @@ type OpenAPISettings struct {
 //	@Security		AdminAuth
 //	@Router			/admin/settings [get]
 func (h *Handler) GetSettings(w http.ResponseWriter, r *http.Request) {
-	cfg := h.config
-
+	// Settings are now stored in the database via the settings domain.
+	// This endpoint returns placeholder values. Use the web UI for settings management.
 	response := SettingsResponse{
 		Server: ServerSettings{
-			Host:         cfg.Server.Host,
-			Port:         cfg.Server.Port,
-			ReadTimeout:  cfg.Server.ReadTimeout.String(),
-			WriteTimeout: cfg.Server.WriteTimeout.String(),
+			Host:         "0.0.0.0",
+			Port:         8080,
+			ReadTimeout:  "30s",
+			WriteTimeout: "60s",
 		},
 		Upstream: UpstreamSettings{
-			URL:     cfg.Upstream.URL,
-			Timeout: cfg.Upstream.Timeout.String(),
+			URL:     "(configured via database)",
+			Timeout: "30s",
 		},
 		Auth: AuthSettings{
-			Mode:      cfg.Auth.Mode,
-			KeyPrefix: cfg.Auth.KeyPrefix,
+			Mode:      "local",
+			KeyPrefix: "ak_",
 		},
 		RateLimit: RateLimitSettings{
-			Enabled:     cfg.RateLimit.Enabled,
-			BurstTokens: cfg.RateLimit.BurstTokens,
-			WindowSecs:  cfg.RateLimit.WindowSecs,
+			Enabled:     true,
+			BurstTokens: 5,
+			WindowSecs:  60,
 		},
 		Usage: UsageSettings{
-			Mode:          cfg.Usage.Mode,
-			BatchSize:     cfg.Usage.BatchSize,
-			FlushInterval: cfg.Usage.FlushInterval.String(),
+			Mode:          "async",
+			BatchSize:     100,
+			FlushInterval: "1s",
 		},
 		Billing: BillingSettings{
-			Mode: cfg.Billing.Mode,
+			Mode: "none",
 		},
 		Logging: LoggingSettings{
-			Level:  cfg.Logging.Level,
-			Format: cfg.Logging.Format,
+			Level:  "info",
+			Format: "json",
 		},
 		Metrics: MetricsSettings{
-			Enabled: cfg.Metrics.Enabled,
-			Path:    cfg.Metrics.Path,
+			Enabled: false,
+			Path:    "/metrics",
 		},
 		OpenAPI: OpenAPISettings{
-			Enabled: cfg.OpenAPI.Enabled,
+			Enabled: false,
 		},
 	}
 
@@ -141,8 +141,8 @@ func (h *Handler) GetSettings(w http.ResponseWriter, r *http.Request) {
 //	@Security		AdminAuth
 //	@Router			/admin/settings [put]
 func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
-	// Settings updates require config file changes and reload
-	// This will be implemented with the web UI in Phase 3
+	// Settings are now managed via the database settings domain.
+	// Use the web UI settings page for configuration changes.
 	writeError(w, http.StatusNotImplemented, "not_implemented",
-		"Settings updates via API not yet available. Edit apigate.yaml and send SIGHUP to reload.")
+		"Settings updates via API not yet available. Use the web UI settings page.")
 }

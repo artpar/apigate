@@ -5,19 +5,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/artpar/apigate/adapters/sqlite"
 	"github.com/artpar/apigate/bootstrap"
-	"github.com/artpar/apigate/config"
 	"github.com/artpar/apigate/domain/key"
 	"github.com/artpar/apigate/ports"
 	"golang.org/x/crypto/bcrypt"
@@ -342,52 +339,39 @@ func setupTestAppWithPlan(t *testing.T, upstreamURL string, rateLimit int) (*boo
 	t.Helper()
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.yaml")
-	dbPath := filepath.Join(dir, "test.db")
+	dbPath := dir + "/test.db"
 
-	configContent := fmt.Sprintf(`
-upstream:
-  url: "%s"
-  timeout: 5s
-
-database:
-  driver: sqlite
-  dsn: "%s"
-
-server:
-  host: "127.0.0.1"
-  port: 0
-
-auth:
-  mode: local
-  key_prefix: "ak_"
-
-rate_limit:
-  enabled: true
-  burst_tokens: 2
-  window_secs: 60
-
-plans:
-  - id: "test"
-    name: "Test Plan"
-    rate_limit_per_minute: %d
-    requests_per_month: 10000
-
-logging:
-  level: error
-  format: json
-`, upstreamURL, dbPath, rateLimit)
-
-	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	cfg, err := config.Load(configPath)
+	// Pre-create database and insert settings BEFORE bootstrap
+	db, err := sqlite.Open(dbPath)
 	if err != nil {
-		t.Fatalf("load config: %v", err)
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
 	}
 
-	app, err := bootstrap.New(cfg)
+	ctx := context.Background()
+	// Insert settings for upstream and rate limit
+	db.DB.ExecContext(ctx, "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", "upstream.url", upstreamURL)
+	db.DB.ExecContext(ctx, "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", "ratelimit.burst_tokens", "2")
+	db.DB.ExecContext(ctx, "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", "ratelimit.window_secs", "60")
+
+	// Create test plan in database
+	_, err = db.DB.ExecContext(ctx,
+		"INSERT OR REPLACE INTO plans (id, name, rate_limit_per_minute, requests_per_month, enabled) VALUES (?, ?, ?, ?, ?)",
+		"test", "Test Plan", rateLimit, 10000, 1)
+	if err != nil {
+		t.Fatalf("create test plan: %v", err)
+	}
+
+	db.Close()
+
+	// Set environment variables for bootstrap
+	os.Setenv(bootstrap.EnvDatabaseDSN, dbPath)
+	os.Setenv(bootstrap.EnvLogLevel, "error")
+	os.Setenv(bootstrap.EnvLogFormat, "json")
+
+	app, err := bootstrap.New()
 	if err != nil {
 		t.Fatalf("create app: %v", err)
 	}
@@ -397,6 +381,9 @@ logging:
 
 	cleanup := func() {
 		app.Shutdown()
+		os.Unsetenv(bootstrap.EnvDatabaseDSN)
+		os.Unsetenv(bootstrap.EnvLogLevel)
+		os.Unsetenv(bootstrap.EnvLogFormat)
 	}
 
 	return app, apiKey, cleanup
@@ -406,41 +393,27 @@ func setupTestAppWithExpiredKey(t *testing.T, upstreamURL string) (*bootstrap.Ap
 	t.Helper()
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.yaml")
-	dbPath := filepath.Join(dir, "test.db")
+	dbPath := dir + "/test.db"
 
-	configContent := fmt.Sprintf(`
-upstream:
-  url: "%s"
-  timeout: 5s
-
-database:
-  driver: sqlite
-  dsn: "%s"
-
-server:
-  host: "127.0.0.1"
-  port: 0
-
-auth:
-  mode: local
-  key_prefix: "ak_"
-
-logging:
-  level: error
-  format: json
-`, upstreamURL, dbPath)
-
-	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	cfg, err := config.Load(configPath)
+	// Pre-create database and insert settings BEFORE bootstrap
+	db, err := sqlite.Open(dbPath)
 	if err != nil {
-		t.Fatalf("load config: %v", err)
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
 	}
 
-	app, err := bootstrap.New(cfg)
+	ctx := context.Background()
+	db.DB.ExecContext(ctx, "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", "upstream.url", upstreamURL)
+	db.Close()
+
+	// Set environment variables for bootstrap
+	os.Setenv(bootstrap.EnvDatabaseDSN, dbPath)
+	os.Setenv(bootstrap.EnvLogLevel, "error")
+	os.Setenv(bootstrap.EnvLogFormat, "json")
+
+	app, err := bootstrap.New()
 	if err != nil {
 		t.Fatalf("create app: %v", err)
 	}
@@ -450,6 +423,9 @@ logging:
 
 	cleanup := func() {
 		app.Shutdown()
+		os.Unsetenv(bootstrap.EnvDatabaseDSN)
+		os.Unsetenv(bootstrap.EnvLogLevel)
+		os.Unsetenv(bootstrap.EnvLogFormat)
 	}
 
 	return app, apiKey, cleanup

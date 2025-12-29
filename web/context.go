@@ -57,7 +57,7 @@ func (h *Handler) newPageData(ctx context.Context, title string) PageData {
 	data := PageData{
 		Title: title,
 		Config: &ConfigInfo{
-			UpstreamURL: h.config.Upstream.URL,
+			UpstreamURL: h.appSettings.UpstreamURL,
 			Version:     "dev",
 		},
 	}

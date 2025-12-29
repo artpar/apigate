@@ -25,6 +25,8 @@ type Config struct {
 	Logging   LoggingConfig    `yaml:"logging"`
 	Metrics   MetricsConfig    `yaml:"metrics"`
 	OpenAPI   OpenAPIConfig    `yaml:"openapi"`
+	Portal    PortalConfig     `yaml:"portal"`
+	Email     EmailConfig      `yaml:"email"`
 }
 
 // ServerConfig configures the HTTP server.
@@ -126,6 +128,33 @@ type MetricsConfig struct {
 // OpenAPIConfig configures OpenAPI/Swagger documentation.
 type OpenAPIConfig struct {
 	Enabled bool `yaml:"enabled"` // Enable OpenAPI endpoints
+}
+
+// PortalConfig configures the user self-service portal.
+type PortalConfig struct {
+	Enabled bool   `yaml:"enabled"` // Enable user portal
+	BaseURL string `yaml:"base_url"` // Base URL for email links (e.g., https://api.example.com)
+	AppName string `yaml:"app_name"` // Application name shown in portal
+}
+
+// EmailConfig configures email sending.
+type EmailConfig struct {
+	Provider   string          `yaml:"provider"` // "smtp", "mock", or "none"
+	SMTP       SMTPConfig      `yaml:"smtp,omitempty"`
+}
+
+// SMTPConfig configures SMTP email sending.
+type SMTPConfig struct {
+	Host        string        `yaml:"host"`
+	Port        int           `yaml:"port"`
+	Username    string        `yaml:"username"`
+	Password    string        `yaml:"password"`
+	From        string        `yaml:"from"`         // Sender email
+	FromName    string        `yaml:"from_name"`    // Sender display name
+	UseTLS      bool          `yaml:"use_tls"`
+	UseImplicit bool          `yaml:"use_implicit"` // Implicit TLS (port 465)
+	SkipVerify  bool          `yaml:"skip_verify"`  // Skip TLS cert verification
+	Timeout     time.Duration `yaml:"timeout"`
 }
 
 // Load reads configuration from a YAML file.
@@ -312,6 +341,45 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("APIGATE_OPENAPI_ENABLED"); v != "" {
 		cfg.OpenAPI.Enabled = parseBool(v)
 	}
+
+	// Portal configuration
+	if v := os.Getenv("APIGATE_PORTAL_ENABLED"); v != "" {
+		cfg.Portal.Enabled = parseBool(v)
+	}
+	if v := os.Getenv("APIGATE_PORTAL_BASE_URL"); v != "" {
+		cfg.Portal.BaseURL = v
+	}
+	if v := os.Getenv("APIGATE_PORTAL_APP_NAME"); v != "" {
+		cfg.Portal.AppName = v
+	}
+
+	// Email configuration
+	if v := os.Getenv("APIGATE_EMAIL_PROVIDER"); v != "" {
+		cfg.Email.Provider = v
+	}
+	if v := os.Getenv("APIGATE_SMTP_HOST"); v != "" {
+		cfg.Email.SMTP.Host = v
+	}
+	if v := os.Getenv("APIGATE_SMTP_PORT"); v != "" {
+		if port, err := strconv.Atoi(v); err == nil {
+			cfg.Email.SMTP.Port = port
+		}
+	}
+	if v := os.Getenv("APIGATE_SMTP_USERNAME"); v != "" {
+		cfg.Email.SMTP.Username = v
+	}
+	if v := os.Getenv("APIGATE_SMTP_PASSWORD"); v != "" {
+		cfg.Email.SMTP.Password = v
+	}
+	if v := os.Getenv("APIGATE_SMTP_FROM"); v != "" {
+		cfg.Email.SMTP.From = v
+	}
+	if v := os.Getenv("APIGATE_SMTP_FROM_NAME"); v != "" {
+		cfg.Email.SMTP.FromName = v
+	}
+	if v := os.Getenv("APIGATE_SMTP_USE_TLS"); v != "" {
+		cfg.Email.SMTP.UseTLS = parseBool(v)
+	}
 }
 
 // parseBool parses a boolean from common string values.
@@ -386,6 +454,25 @@ func setDefaults(cfg *Config) {
 				RequestsPerMonth:   1000,
 			},
 		}
+	}
+
+	// Portal defaults
+	if cfg.Portal.AppName == "" {
+		cfg.Portal.AppName = "APIGate"
+	}
+
+	// Email defaults
+	if cfg.Email.Provider == "" {
+		cfg.Email.Provider = "none"
+	}
+	if cfg.Email.SMTP.Port == 0 {
+		cfg.Email.SMTP.Port = 587
+	}
+	if cfg.Email.SMTP.Timeout == 0 {
+		cfg.Email.SMTP.Timeout = 30 * time.Second
+	}
+	if cfg.Email.SMTP.FromName == "" {
+		cfg.Email.SMTP.FromName = cfg.Portal.AppName
 	}
 }
 
