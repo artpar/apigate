@@ -1,0 +1,18 @@
+{
+  "_vendor-BPCW4cx3.js": {
+    "file": "assets/vendor-BPCW4cx3.js",
+    "name": "vendor"
+  },
+  "index.html": {
+    "file": "assets/index-Daq3ckRD.js",
+    "name": "index",
+    "src": "index.html",
+    "isEntry": true,
+    "imports": [
+      "_vendor-BPCW4cx3.js"
+    ],
+    "css": [
+      "assets/index-Cg0FP_W_.css"
+    ]
+  }
+}

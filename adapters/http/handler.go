@@ -542,11 +542,13 @@ func Version(w http.ResponseWriter, r *http.Request) {
 
 // RouterConfig holds optional configuration for the router.
 type RouterConfig struct {
-	Metrics       *metrics.Collector
-	EnableOpenAPI bool
-	AdminHandler  http.Handler // Optional admin API handler
-	WebHandler    http.Handler // Optional web UI handler
-	PortalHandler http.Handler // Optional user portal handler
+	Metrics        *metrics.Collector
+	MetricsHandler http.Handler // Optional metrics exporter handler (for /metrics endpoint)
+	EnableOpenAPI  bool
+	AdminHandler   http.Handler // Optional admin API handler
+	WebHandler     http.Handler // Optional web UI handler
+	PortalHandler  http.Handler // Optional user portal handler
+	ModuleHandler  http.Handler // Optional declarative module handler (mounted at /api/v2)
 }
 
 // NewRouter creates the main HTTP router.
@@ -575,8 +577,10 @@ func NewRouterWithConfig(proxyHandler *ProxyHandler, healthHandler *HealthHandle
 	r.Get("/health/live", healthHandler.Liveness)
 	r.Get("/health/ready", healthHandler.Readiness)
 
-	// Metrics endpoint (if enabled)
-	if cfg.Metrics != nil {
+	// Metrics endpoint (prefer new exporter handler, fall back to promhttp)
+	if cfg.MetricsHandler != nil {
+		r.Handle("/metrics", cfg.MetricsHandler)
+	} else if cfg.Metrics != nil {
 		r.Handle("/metrics", promhttp.Handler())
 	}
 
@@ -606,6 +610,12 @@ func NewRouterWithConfig(proxyHandler *ProxyHandler, healthHandler *HealthHandle
 	// User portal (if enabled)
 	if cfg.PortalHandler != nil {
 		r.Mount("/portal", cfg.PortalHandler)
+	}
+
+	// Module API (declarative modules, if enabled)
+	// Mounted at root since modules define their own base paths (e.g., /api/users)
+	if cfg.ModuleHandler != nil {
+		r.Mount("/mod", cfg.ModuleHandler)
 	}
 
 	// Web UI (if enabled) - pass through specific paths to the web handler

@@ -12,8 +12,9 @@ import (
 )
 
 var plansCmd = &cobra.Command{
-	Use:   "plans",
-	Short: "Manage subscription plans",
+	Use:        "plans",
+	Short:      "Manage subscription plans",
+	Deprecated: "use 'apigate mod plans' instead. Run 'apigate migration-guide' for details.",
 	Long: `Manage API subscription plans.
 
 Plans define rate limits, quotas, and pricing for API access.
@@ -22,7 +23,9 @@ Examples:
   apigate plans list
   apigate plans get <plan-id>
   apigate plans create --id=pro --name="Pro" --rate-limit=600 --requests=100000
-  apigate plans delete <plan-id>`,
+  apigate plans delete <plan-id>
+
+NOTE: This command is deprecated. Use 'apigate mod plans' instead.`,
 }
 
 var plansListCmd = &cobra.Command{

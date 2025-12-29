@@ -29,6 +29,7 @@ import (
 	"github.com/artpar/apigate/ports"
 	"github.com/artpar/apigate/web"
 	"github.com/rs/zerolog"
+	"github.com/spf13/cobra"
 )
 
 // Environment variable names for bootstrap configuration.
@@ -54,6 +55,9 @@ type App struct {
 	routeService     *app.RouteService
 	transformService *app.TransformService
 
+	// Module runtime (declarative modules)
+	ModuleRuntime *ModuleRuntime
+
 	// Adapters (for cleanup)
 	usageRecorder   ports.UsageRecorder
 	upstream        *apihttp.UpstreamClient
@@ -61,9 +65,21 @@ type App struct {
 	emailSender     ports.EmailSender
 }
 
+// Config provides optional configuration for application initialization.
+type Config struct {
+	// RootCmd is the cobra root command for CLI module integration.
+	// If provided, module CLI commands will be registered.
+	RootCmd *cobra.Command
+}
+
 // New creates and initializes the application.
 // Configuration is loaded from the database after connection.
 func New() (*App, error) {
+	return NewWithConfig(Config{})
+}
+
+// NewWithConfig creates and initializes the application with custom configuration.
+func NewWithConfig(cfg Config) (*App, error) {
 	// Setup logger from env (only bootstrap config from env)
 	logger := setupLoggerFromEnv()
 
@@ -92,12 +108,60 @@ func New() (*App, error) {
 		logger.Info().Msg("prometheus metrics enabled")
 	}
 
-	// Initialize HTTP server
+	// Initialize module runtime if root command provided
+	if cfg.RootCmd != nil {
+		if err := a.InitModuleRuntime(cfg.RootCmd); err != nil {
+			logger.Warn().Err(err).Msg("failed to initialize module runtime")
+		}
+	}
+
+	// Initialize HTTP server (after module runtime so handlers are available)
 	if err := a.initHTTPServer(); err != nil {
 		return nil, fmt.Errorf("init http server: %w", err)
 	}
 
 	return a, nil
+}
+
+// InitModuleRuntime initializes the declarative module runtime.
+// This must be called after New() and before Run() if you want module support.
+// The rootCmd is the cobra root command for CLI integration.
+func (a *App) InitModuleRuntime(rootCmd interface{}) error {
+	// Type assert to cobra command if provided
+	var cobraCmd *cobra.Command
+	if rootCmd != nil {
+		if cmd, ok := rootCmd.(*cobra.Command); ok {
+			cobraCmd = cmd
+		}
+	}
+
+	// Create module runtime
+	mr, err := NewModuleRuntime(a.DB.DB, cobraCmd, a.Logger, ModuleConfig{})
+	if err != nil {
+		return fmt.Errorf("create module runtime: %w", err)
+	}
+
+	// Load core modules (embedded definitions)
+	ctx := context.Background()
+	if err := mr.LoadModules(ctx, ModuleConfig{
+		EmbeddedModules: CoreModules(),
+		ModulesDir:      CoreModulesDir(),
+	}); err != nil {
+		a.Logger.Warn().Err(err).Msg("failed to load some modules")
+	}
+
+	a.ModuleRuntime = mr
+
+	// Log loaded modules
+	for _, mod := range mr.Modules() {
+		a.Logger.Info().Str("module", mod.Name).Msg("loaded declarative module")
+	}
+
+	// Log HTTP paths
+	paths := mr.GetHTTPPaths()
+	a.Logger.Info().Int("count", len(paths)).Msg("module HTTP endpoints registered")
+
+	return nil
 }
 
 func (a *App) initDatabase() error {
@@ -277,6 +341,19 @@ func (a *App) initHTTPServer() error {
 		WebHandler:    webHandler.Router(),
 		PortalHandler: portalRouter,
 	}
+
+	// Add module handler if runtime is initialized
+	if a.ModuleRuntime != nil {
+		routerCfg.ModuleHandler = a.ModuleRuntime.Handler()
+		a.Logger.Info().Msg("module handler mounted at /mod")
+
+		// Add metrics handler from exporter
+		if metricsHandler := a.ModuleRuntime.MetricsHandler(); metricsHandler != nil {
+			routerCfg.MetricsHandler = metricsHandler
+			a.Logger.Info().Msg("prometheus metrics handler mounted at /metrics")
+		}
+	}
+
 	router := apihttp.NewRouterWithConfig(proxyHandler, healthHandler, a.Logger, routerCfg)
 
 	// Get server config from env (bootstrap) or settings
@@ -317,11 +394,21 @@ func (a *App) buildDependencies(s settings.Settings) (app.ProxyDeps, error) {
 	// User store
 	deps.Users = sqlite.NewUserStore(a.DB)
 
-	// Rate limit store (always local - ephemeral)
-	deps.RateLimit = memory.NewRateLimitStore()
+	// Rate limit store (sharded for high throughput)
+	deps.RateLimit = memory.NewShardedRateLimitStore(memory.ShardedRateLimitConfig{
+		NumShards:       32,
+		CleanupInterval: 5 * time.Minute,
+	})
 
 	// Usage recorder
 	usageStore := sqlite.NewUsageStore(a.DB)
+
+	// Quota store (sharded, syncs with usage store)
+	deps.Quota = memory.NewQuotaStore(memory.QuotaStoreConfig{
+		NumShards:       32,
+		CleanupInterval: time.Hour,
+		UsageStore:      usageStore,
+	})
 	deps.Usage = NewLocalUsageRecorder(usageStore, 100, 10*time.Second)
 	a.usageRecorder = deps.Usage
 
@@ -347,9 +434,11 @@ func (a *App) buildDependencies(s settings.Settings) (app.ProxyDeps, error) {
 }
 
 func (a *App) loadPlans(ctx context.Context) []plan.Plan {
-	// Load plans from database
+	// Load plans from database (with quota fields using COALESCE for backwards compatibility)
 	rows, err := a.DB.DB.QueryContext(ctx, `
-		SELECT id, name, rate_limit_per_minute, requests_per_month, price_monthly, overage_price
+		SELECT id, name, rate_limit_per_minute, requests_per_month, price_monthly, overage_price,
+		       COALESCE(quota_enforce_mode, 'hard') as quota_enforce_mode,
+		       COALESCE(quota_grace_pct, 0.05) as quota_grace_pct
 		FROM plans WHERE enabled = 1
 	`)
 	if err != nil {
@@ -359,6 +448,8 @@ func (a *App) loadPlans(ctx context.Context) []plan.Plan {
 			Name:               "Free",
 			RateLimitPerMinute: 60,
 			RequestsPerMonth:   1000,
+			QuotaEnforceMode:   plan.QuotaEnforceHard,
+			QuotaGracePct:      0.05,
 		}}
 	}
 	defer rows.Close()
@@ -366,8 +457,18 @@ func (a *App) loadPlans(ctx context.Context) []plan.Plan {
 	var plans []plan.Plan
 	for rows.Next() {
 		var p plan.Plan
-		if err := rows.Scan(&p.ID, &p.Name, &p.RateLimitPerMinute, &p.RequestsPerMonth, &p.PriceMonthly, &p.OveragePrice); err != nil {
+		var enforceMode string
+		if err := rows.Scan(&p.ID, &p.Name, &p.RateLimitPerMinute, &p.RequestsPerMonth, &p.PriceMonthly, &p.OveragePrice, &enforceMode, &p.QuotaGracePct); err != nil {
 			continue
+		}
+		// Convert enforce mode string to type
+		switch enforceMode {
+		case "warn":
+			p.QuotaEnforceMode = plan.QuotaEnforceWarn
+		case "soft":
+			p.QuotaEnforceMode = plan.QuotaEnforceSoft
+		default:
+			p.QuotaEnforceMode = plan.QuotaEnforceHard
 		}
 		plans = append(plans, p)
 	}
@@ -378,6 +479,8 @@ func (a *App) loadPlans(ctx context.Context) []plan.Plan {
 			Name:               "Free",
 			RateLimitPerMinute: 60,
 			RequestsPerMonth:   1000,
+			QuotaEnforceMode:   plan.QuotaEnforceHard,
+			QuotaGracePct:      0.05,
 		}}
 	}
 	return plans
@@ -385,6 +488,15 @@ func (a *App) loadPlans(ctx context.Context) []plan.Plan {
 
 // Run starts the HTTP server and blocks until shutdown.
 func (a *App) Run() error {
+	ctx := context.Background()
+
+	// Start module runtime if initialized
+	if a.ModuleRuntime != nil {
+		if err := a.ModuleRuntime.Start(ctx); err != nil {
+			a.Logger.Warn().Err(err).Msg("failed to start module runtime")
+		}
+	}
+
 	// Start server in goroutine
 	errCh := make(chan error, 1)
 	go func() {
@@ -414,6 +526,13 @@ func (a *App) Run() error {
 func (a *App) Shutdown() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	// Stop module runtime
+	if a.ModuleRuntime != nil {
+		if err := a.ModuleRuntime.Stop(ctx); err != nil {
+			a.Logger.Error().Err(err).Msg("module runtime stop error")
+		}
+	}
 
 	// Stop route service refresh loop
 	if a.routeService != nil {

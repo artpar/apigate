@@ -15,8 +15,9 @@ import (
 )
 
 var usersCmd = &cobra.Command{
-	Use:   "users",
-	Short: "Manage users",
+	Use:        "users",
+	Short:      "Manage users",
+	Deprecated: "use 'apigate mod users' instead. Run 'apigate migration-guide' for details.",
 	Long: `Manage APIGate users.
 
 Users are the developers who consume your API. Each user can have
@@ -25,7 +26,9 @@ multiple API keys and is assigned to a plan.
 Examples:
   apigate users list
   apigate users create --email=dev@example.com --plan=free
-  apigate users delete user_123`,
+  apigate users delete user_123
+
+NOTE: This command is deprecated. Use 'apigate mod users' instead.`,
 }
 
 var usersListCmd = &cobra.Command{

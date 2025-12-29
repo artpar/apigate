@@ -13,8 +13,9 @@ import (
 )
 
 var keysCmd = &cobra.Command{
-	Use:   "keys",
-	Short: "Manage API keys",
+	Use:        "keys",
+	Short:      "Manage API keys",
+	Deprecated: "use 'apigate mod keys' instead. Run 'apigate migration-guide' for details.",
 	Long: `Manage APIGate API keys.
 
 Each user can have multiple API keys. Keys are used to authenticate
@@ -24,7 +25,9 @@ Examples:
   apigate keys list
   apigate keys list --user=user_123
   apigate keys create --user=user_123
-  apigate keys revoke key_abc123`,
+  apigate keys revoke key_abc123
+
+NOTE: This command is deprecated. Use 'apigate mod keys' instead.`,
 }
 
 var keysListCmd = &cobra.Command{

@@ -1,0 +1,78 @@
+# Setting module - manages application configuration
+module: setting
+
+schema:
+  # Key-value storage
+  key:        { type: string, unique: true, lookup: true, required: true }
+  value:      { type: string, required: true }
+  encrypted:  { type: int, default: 0 }  # SQLite stores as INTEGER
+
+actions:
+  # Get by prefix (for grouped settings)
+  list_by_prefix:
+    input:
+      - { name: prefix, type: string, required: true }
+    description: List all settings with a given prefix
+
+  # Bulk update settings
+  set_batch:
+    input:
+      - { name: settings, type: json, required: true }
+    description: Update multiple settings at once
+
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /api/settings
+      endpoints:
+        - { action: list, method: GET, path: "/", auth: admin }
+        - { action: get, method: GET, path: "/{key}", auth: admin }
+        - { action: list_by_prefix, method: GET, path: "/prefix/{prefix}", auth: admin }
+        - { action: create, method: POST, path: "/", auth: admin }
+        - { action: update, method: PUT, path: "/{key}", auth: admin }
+        - { action: delete, method: DELETE, path: "/{key}", auth: admin }
+        - { action: set_batch, method: POST, path: "/batch", auth: admin }
+
+  cli:
+    serve:
+      enabled: true
+      command: settings
+      commands:
+        - action: list
+          columns: [key, value, encrypted, updated_at]
+        - action: get
+          args:
+            - { name: key, required: true }
+        - action: create
+          name: set
+          flags:
+            - { param: key, short: k, required: true }
+            - { param: value, short: v, required: true }
+            - { param: encrypted, short: e, type: bool, default: "false" }
+        - action: update
+          args:
+            - { name: key, required: true }
+          flags:
+            - { param: value, short: v, required: true }
+        - action: delete
+          args:
+            - { name: key, required: true }
+          confirm: "Are you sure you want to delete this setting?"
+
+hooks:
+  # Emit events when settings change (for live reload)
+  after_create:
+    - emit: setting.changed
+
+  after_update:
+    - emit: setting.changed
+
+  after_delete:
+    - emit: setting.changed
+
+meta:
+  description: Application configuration settings
+  icon: settings
+  display_name: Settings
+  plural: Settings

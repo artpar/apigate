@@ -74,6 +74,11 @@ var (
 		Code:    "rate_limit_exceeded",
 		Message: "Rate limit exceeded",
 	}
+	ErrQuotaExceeded = ErrorResponse{
+		Status:  402,
+		Code:    "quota_exceeded",
+		Message: "Monthly request quota exceeded",
+	}
 	ErrUpstreamError = ErrorResponse{
 		Status:  502,
 		Code:    "upstream_error",

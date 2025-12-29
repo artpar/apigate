@@ -1,6 +1,15 @@
 // Package plan provides plan value types and pure functions.
 package plan
 
+// QuotaEnforceMode determines how quota limits are enforced.
+type QuotaEnforceMode string
+
+const (
+	QuotaEnforceHard QuotaEnforceMode = "hard" // Reject requests when quota exceeded
+	QuotaEnforceWarn QuotaEnforceMode = "warn" // Allow but add warning headers
+	QuotaEnforceSoft QuotaEnforceMode = "soft" // Allow and bill overage
+)
+
 // Plan represents a pricing tier (immutable value type).
 type Plan struct {
 	ID                 string
@@ -10,6 +19,8 @@ type Plan struct {
 	PriceMonthly       int64 // cents
 	OveragePrice       int64 // cents per request
 	StripePriceID      string
+	QuotaEnforceMode   QuotaEnforceMode // "hard", "warn", "soft" - defaults to "hard"
+	QuotaGracePct      float64          // Grace percentage before hard block (e.g., 0.05 = 5%)
 }
 
 // Endpoint represents endpoint-specific pricing (value type).

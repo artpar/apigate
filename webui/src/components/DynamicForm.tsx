@@ -1,0 +1,246 @@
+/**
+ * Dynamic Form Component
+ *
+ * Renders a form based on module schema.
+ * Supports create and edit modes with validation.
+ */
+
+import React, { useState, useMemo, useCallback } from 'react';
+import type { ModuleSchema, FieldSchema, Record } from '@/types/schema';
+import { FieldRenderer } from '@/components/fields/FieldRenderer';
+import { useDocumentation } from '@/context/DocumentationContext';
+
+interface DynamicFormProps {
+  module: ModuleSchema;
+  initialData?: Record;
+  mode: 'create' | 'edit';
+  onSubmit: (data: Record) => Promise<void>;
+  onCancel?: () => void;
+  isLoading?: boolean;
+}
+
+interface FieldError {
+  [key: string]: string;
+}
+
+export function DynamicForm({
+  module,
+  initialData = {},
+  mode,
+  onSubmit,
+  onCancel,
+  isLoading,
+}: DynamicFormProps) {
+  const { focusModule } = useDocumentation();
+  const [formData, setFormData] = useState<Record>(initialData);
+  const [errors, setErrors] = useState<FieldError>({});
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // Filter fields based on mode
+  const fields = useMemo(() => {
+    return module.fields.filter((field) => {
+      // Skip internal and computed fields
+      if (field.internal || field.computed) return false;
+      // Skip immutable fields in edit mode
+      if (mode === 'edit' && field.immutable) return false;
+      return true;
+    });
+  }, [module.fields, mode]);
+
+  // Handle field change
+  const handleChange = useCallback((name: string, value: unknown) => {
+    setFormData((prev) => ({ ...prev, [name]: value }));
+    // Clear field error on change
+    if (errors[name]) {
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next[name];
+        return next;
+      });
+    }
+  }, [errors]);
+
+  // Validate form
+  const validate = useCallback((): boolean => {
+    const newErrors: FieldError = {};
+
+    for (const field of fields) {
+      const value = formData[field.name];
+
+      // Required validation
+      if (field.required && (value === undefined || value === null || value === '')) {
+        newErrors[field.name] = `${formatLabel(field.name)} is required`;
+        continue;
+      }
+
+      // Type-specific validation
+      if (value !== undefined && value !== null && value !== '') {
+        const error = validateField(field, value);
+        if (error) {
+          newErrors[field.name] = error;
+        }
+      }
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  }, [fields, formData]);
+
+  // Handle submit
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitError(null);
+
+    if (!validate()) return;
+
+    try {
+      await onSubmit(formData);
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : 'An error occurred');
+    }
+  };
+
+  // Focus module on mount
+  React.useEffect(() => {
+    focusModule(module);
+  }, [module, focusModule]);
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-6">
+      {/* Form fields */}
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-6">
+          {mode === 'create' ? `Create ${module.module}` : `Edit ${module.module}`}
+        </h2>
+
+        {fields.map((field) => (
+          <FieldRenderer
+            key={field.name}
+            field={field}
+            module={module}
+            value={formData[field.name]}
+            onChange={(value) => handleChange(field.name, value)}
+            error={errors[field.name]}
+            disabled={isLoading}
+          />
+        ))}
+      </div>
+
+      {/* Error message */}
+      {submitError && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <p className="text-sm text-red-700">{submitError}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Actions */}
+      <div className="flex items-center justify-end gap-3">
+        {onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={isLoading}
+            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+        )}
+        <button
+          type="submit"
+          disabled={isLoading}
+          className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 flex items-center gap-2"
+        >
+          {isLoading && (
+            <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+          )}
+          {mode === 'create' ? 'Create' : 'Save Changes'}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// Helper functions
+
+function formatLabel(name: string): string {
+  return name
+    .split('_')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+function validateField(field: FieldSchema, value: unknown): string | null {
+  switch (field.type) {
+    case 'email':
+      if (typeof value === 'string' && !isValidEmail(value)) {
+        return 'Please enter a valid email address';
+      }
+      break;
+    case 'url':
+      if (typeof value === 'string' && !isValidUrl(value)) {
+        return 'Please enter a valid URL';
+      }
+      break;
+    case 'enum':
+      if (field.values && !field.values.includes(String(value))) {
+        return `Must be one of: ${field.values.join(', ')}`;
+      }
+      break;
+  }
+
+  // Constraint validation
+  if (field.constraints) {
+    for (const constraint of field.constraints) {
+      switch (constraint.type) {
+        case 'min_length':
+          if (typeof value === 'string' && value.length < Number(constraint.value)) {
+            return constraint.message || `Must be at least ${constraint.value} characters`;
+          }
+          break;
+        case 'max_length':
+          if (typeof value === 'string' && value.length > Number(constraint.value)) {
+            return constraint.message || `Must be at most ${constraint.value} characters`;
+          }
+          break;
+        case 'min':
+          if (typeof value === 'number' && value < Number(constraint.value)) {
+            return constraint.message || `Must be at least ${constraint.value}`;
+          }
+          break;
+        case 'max':
+          if (typeof value === 'number' && value > Number(constraint.value)) {
+            return constraint.message || `Must be at most ${constraint.value}`;
+          }
+          break;
+        case 'pattern':
+          if (typeof value === 'string' && !new RegExp(String(constraint.value)).test(value)) {
+            return constraint.message || `Invalid format`;
+          }
+          break;
+      }
+    }
+  }
+
+  return null;
+}
+
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function isValidUrl(url: string): boolean {
+  try {
+    new URL(url);
+    return true;
+  } catch {
+    return false;
+  }
+}

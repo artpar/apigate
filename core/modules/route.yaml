@@ -1,0 +1,119 @@
+# Route module - manages API routing rules
+module: route
+
+schema:
+  # Identity
+  name:           { type: string, required: true, lookup: true }
+  description:    { type: string, default: "" }
+
+  # Matching criteria
+  path_pattern:   { type: string, required: true }
+  match_type:     { type: enum, values: [exact, prefix, regex], default: prefix }
+  methods:        { type: json }        # Array of HTTP methods, empty = all
+  headers:        { type: json }        # Array of header match conditions
+
+  # Target configuration
+  upstream_id:    { type: ref, to: upstream, required: true }
+  path_rewrite:   { type: string }      # Expr expression for path rewriting
+  method_override: { type: string }     # Override request method
+
+  # Transformations (JSON objects)
+  request_transform:  { type: json }    # Request transformation rules
+  response_transform: { type: json }    # Response transformation rules
+
+  # Metering
+  metering_expr:  { type: string, default: "1" }
+  metering_mode:  { type: enum, values: [request, response_field, bytes, custom], default: request }
+
+  # Protocol behavior
+  protocol:       { type: enum, values: [http, http_stream, sse, websocket], default: http }
+
+  # Priority and state
+  priority:       { type: int, default: 0 }
+  enabled:        { type: bool, default: true }
+
+actions:
+  enable:
+    set: { enabled: true }
+    description: Enable a route
+
+  disable:
+    set: { enabled: false }
+    description: Disable a route
+
+  set_priority:
+    input:
+      - { name: priority, type: int, required: true }
+    description: Set route priority
+
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /api/routes
+      endpoints:
+        - { action: list, method: GET, path: "/" }
+        - { action: get, method: GET, path: "/{id}" }
+        - { action: create, method: POST, path: "/", auth: admin }
+        - { action: update, method: PATCH, path: "/{id}", auth: admin }
+        - { action: delete, method: DELETE, path: "/{id}", auth: admin }
+        - { action: enable, method: POST, path: "/{id}/enable", auth: admin }
+        - { action: disable, method: POST, path: "/{id}/disable", auth: admin }
+
+  cli:
+    serve:
+      enabled: true
+      command: routes
+      commands:
+        - action: list
+          columns: [id, name, path_pattern, match_type, upstream_id, priority, enabled]
+        - action: get
+          args:
+            - { name: id, required: true }
+        - action: create
+          flags:
+            - { param: name, required: true }
+            - { param: path_pattern, name: path, short: p, required: true }
+            - { param: upstream_id, name: upstream, short: u, required: true }
+            - { param: match_type, name: match, default: prefix }
+            - { param: methods, description: "Comma-separated list of methods" }
+            - { param: protocol, default: http }
+            - { param: priority, type: int, default: "0" }
+        - action: update
+          args:
+            - { name: id, required: true }
+          flags:
+            - { param: name }
+            - { param: path_pattern, name: path }
+            - { param: upstream_id, name: upstream }
+            - { param: priority, type: int }
+        - action: delete
+          args:
+            - { name: id, required: true }
+          confirm: "Are you sure you want to delete this route?"
+        - action: enable
+          args:
+            - { name: id, required: true }
+        - action: disable
+          args:
+            - { name: id, required: true }
+
+hooks:
+  # Notify router to reload after changes
+  after_create:
+    - emit: route.created
+    - call: reload_router
+
+  after_update:
+    - emit: route.updated
+    - call: reload_router
+
+  after_delete:
+    - emit: route.deleted
+    - call: reload_router
+
+meta:
+  description: API routing rules mapping paths to upstreams
+  icon: git-branch
+  display_name: Routes
+  plural: Routes

@@ -42,8 +42,10 @@ func init() {
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
-	// Create application (config loaded from database)
-	app, err := bootstrap.New()
+	// Create application with root command for module CLI integration
+	app, err := bootstrap.NewWithConfig(bootstrap.Config{
+		RootCmd: rootCmd,
+	})
 	if err != nil {
 		return fmt.Errorf("error initializing: %w", err)
 	}

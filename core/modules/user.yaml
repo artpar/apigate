@@ -1,0 +1,121 @@
+# User module - manages user accounts
+module: user
+
+schema:
+  # Core identity
+  email:         { type: email, unique: true, lookup: true, required: true }
+  password_hash: { type: secret, internal: true }
+  name:          { type: string, default: "" }
+
+  # Billing integration
+  stripe_id:     { type: string }
+  plan_id:       { type: ref, to: plan, default: "free" }
+
+  # Account state
+  status:        { type: enum, values: [pending, active, suspended, cancelled], default: active }
+
+actions:
+  # Account lifecycle
+  activate:
+    set: { status: active }
+    description: Activate a user account
+
+  suspend:
+    set: { status: suspended }
+    description: Suspend a user account
+    confirm: true
+
+  cancel:
+    set: { status: cancelled }
+    description: Cancel a user account
+    confirm: true
+
+  # Password management (handled by auth service, not direct field update)
+  set_password:
+    input:
+      - { name: password, type: secret, required: true, prompt: true }
+    description: Set user password
+    auth: self_or_admin
+
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /api/users
+      endpoints:
+        - { action: list, method: GET, path: "/" }
+        - { action: get, method: GET, path: "/{id}" }
+        - { action: create, method: POST, path: "/" }
+        - { action: update, method: PATCH, path: "/{id}" }
+        - { action: delete, method: DELETE, path: "/{id}" }
+        - { action: activate, method: POST, path: "/{id}/activate" }
+        - { action: suspend, method: POST, path: "/{id}/suspend" }
+        - { action: cancel, method: POST, path: "/{id}/cancel" }
+
+    consume:
+      # Stripe customer management
+      stripe:
+        base: https://api.stripe.com/v1
+        auth:
+          type: bearer
+          bearer: ${STRIPE_SECRET_KEY}
+        methods:
+          create_customer:
+            method: POST
+            path: /customers
+            map:
+              email: email
+              name: name
+              metadata[user_id]: id
+            response:
+              set:
+                stripe_id: id
+
+  cli:
+    serve:
+      enabled: true
+      command: users
+      commands:
+        - action: list
+          columns: [id, email, name, status, plan_id, created_at]
+        - action: get
+          args:
+            - { name: identifier, required: true, description: "User ID or email" }
+        - action: create
+          flags:
+            - { param: email, required: true }
+            - { param: name }
+            - { param: password, type: string, prompt: true }
+            - { param: plan_id, default: free }
+        - action: delete
+          args:
+            - { name: id, required: true }
+          confirm: "Are you sure you want to delete this user?"
+        - action: activate
+          args:
+            - { name: id, required: true }
+        - action: suspend
+          args:
+            - { name: id, required: true }
+
+  websocket:
+    serve:
+      enabled: true
+      path: /ws/users
+      events: [created, updated, deleted, activated, suspended, cancelled]
+
+hooks:
+  # After user creation, send verification email
+  after_create:
+    - emit: user.created
+    - call: send_verification_email
+
+  # After status change, notify via websocket
+  after_update:
+    - emit: user.updated
+
+meta:
+  description: User accounts for API access and billing
+  icon: user
+  display_name: Users
+  plural: Users

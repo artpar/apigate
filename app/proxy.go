@@ -4,12 +4,14 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"sync/atomic"
 	"time"
 
 	"github.com/artpar/apigate/domain/key"
 	"github.com/artpar/apigate/domain/plan"
 	"github.com/artpar/apigate/domain/proxy"
+	"github.com/artpar/apigate/domain/quota"
 	"github.com/artpar/apigate/domain/ratelimit"
 	"github.com/artpar/apigate/domain/route"
 	"github.com/artpar/apigate/domain/usage"
@@ -22,6 +24,7 @@ type ProxyService struct {
 	keys      ports.KeyStore
 	users     ports.UserStore
 	rateLimit ports.RateLimitStore
+	quota     ports.QuotaStore
 	usage     ports.UsageRecorder
 	upstream  ports.Upstream
 	clock     ports.Clock
@@ -51,6 +54,7 @@ type ProxyDeps struct {
 	Keys      ports.KeyStore
 	Users     ports.UserStore
 	RateLimit ports.RateLimitStore
+	Quota     ports.QuotaStore
 	Usage     ports.UsageRecorder
 	Upstream  ports.Upstream
 	Clock     ports.Clock
@@ -72,6 +76,7 @@ func NewProxyService(deps ProxyDeps, cfg ProxyConfig) *ProxyService {
 		keys:      deps.Keys,
 		users:     deps.Users,
 		rateLimit: deps.RateLimit,
+		quota:     deps.Quota,
 		usage:     deps.Usage,
 		upstream:  deps.Upstream,
 		clock:     deps.Clock,
@@ -186,6 +191,45 @@ func (s *ProxyService) Handle(ctx context.Context, req proxy.Request) HandleResu
 	}
 	if rlConfig.Limit == 0 {
 		rlConfig.Limit = 60 // default
+	}
+
+	// 6.5. Check quota (PURE + I/O for state)
+	periodStart, periodEnd := quota.PeriodBounds(now)
+	var quotaResult quota.CheckResult
+	if s.quota != nil && userPlan.RequestsPerMonth >= 0 { // Not unlimited
+		// Build quota config from plan
+		enforceMode := quota.EnforceHard
+		switch userPlan.QuotaEnforceMode {
+		case plan.QuotaEnforceWarn:
+			enforceMode = quota.EnforceWarn
+		case plan.QuotaEnforceSoft:
+			enforceMode = quota.EnforceSoft
+		}
+		gracePct := userPlan.QuotaGracePct
+		if gracePct == 0 {
+			gracePct = 0.05 // Default 5% grace
+		}
+		quotaCfg := quota.Config{
+			RequestsPerMonth: userPlan.RequestsPerMonth,
+			EnforceMode:      enforceMode,
+			GracePct:         gracePct,
+		}
+		quotaState, _ := s.quota.Get(ctx, matchedKey.UserID, periodStart)
+		quotaResult = quota.Check(quotaState, quotaCfg, 1)
+
+		if !quotaResult.Allowed {
+			return HandleResult{
+				Error: &proxy.ErrQuotaExceeded,
+				Response: proxy.Response{
+					Headers: map[string]string{
+						"X-Quota-Used":  strconv.FormatInt(quotaResult.CurrentUsage, 10),
+						"X-Quota-Limit": strconv.FormatInt(quotaResult.Limit, 10),
+						"X-Quota-Reset": periodEnd.Format(time.RFC3339),
+						"Retry-After":   strconv.FormatInt(int64(periodEnd.Sub(now).Seconds()), 10),
+					},
+				},
+			}
+		}
 	}
 
 	// 7. Check rate limit (PURE + I/O for state)
@@ -318,6 +362,7 @@ func (s *ProxyService) Handle(ctx context.Context, req proxy.Request) HandleResu
 	}
 
 	// 16. Record usage event (async I/O)
+	bytesTotal := int64(len(req.Body)) + int64(len(resp.Body))
 	event := usage.Event{
 		ID:             s.idGen.New(),
 		KeyID:          matchedKey.ID,
@@ -335,15 +380,27 @@ func (s *ProxyService) Handle(ctx context.Context, req proxy.Request) HandleResu
 	}
 	s.usage.Record(event)
 
+	// 16.5. Increment quota counter (I/O)
+	if s.quota != nil {
+		s.quota.Increment(ctx, matchedKey.UserID, periodStart, 1, costMult, bytesTotal)
+	}
+
 	// 17. Update last used (async I/O)
 	go s.keys.UpdateLastUsed(ctx, matchedKey.ID, now)
 
-	// 18. Add rate limit headers to response (PURE)
+	// 18. Add rate limit and quota headers to response (PURE)
 	if resp.Headers == nil {
 		resp.Headers = make(map[string]string)
 	}
 	resp.Headers["X-RateLimit-Remaining"] = itoa(rlResult.Remaining)
 	resp.Headers["X-RateLimit-Reset"] = rlResult.ResetAt.Format("2006-01-02T15:04:05Z")
+
+	// Add quota headers if quota is being tracked
+	if quotaResult.Limit > 0 {
+		resp.Headers["X-Quota-Used"] = strconv.FormatInt(quotaResult.CurrentUsage, 10)
+		resp.Headers["X-Quota-Limit"] = strconv.FormatInt(quotaResult.Limit, 10)
+		resp.Headers["X-Quota-Reset"] = periodEnd.Format(time.RFC3339)
+	}
 
 	return HandleResult{
 		Response: resp,

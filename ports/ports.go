@@ -117,6 +117,15 @@ type PlanStore interface {
 	Delete(ctx context.Context, id string) error
 }
 
+// QuotaEnforceMode determines how quota limits are enforced.
+type QuotaEnforceMode string
+
+const (
+	QuotaEnforceHard QuotaEnforceMode = "hard" // Reject requests when quota exceeded
+	QuotaEnforceWarn QuotaEnforceMode = "warn" // Allow but add warning headers
+	QuotaEnforceSoft QuotaEnforceMode = "soft" // Allow and bill overage
+)
+
 // Plan represents a pricing tier.
 type Plan struct {
 	ID                 string
@@ -131,6 +140,8 @@ type Plan struct {
 	LemonVariantID     string
 	IsDefault          bool
 	Enabled            bool
+	QuotaEnforceMode   QuotaEnforceMode // "hard", "warn", "soft" - defaults to "hard"
+	QuotaGracePct      float64          // Grace percentage before hard block (e.g., 0.05 = 5%)
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 }
@@ -157,6 +168,29 @@ type RateLimitStore interface {
 
 	// Set updates rate limit state for a key.
 	Set(ctx context.Context, keyID string, state ratelimit.WindowState) error
+}
+
+// QuotaState represents current period usage for fast quota checks.
+type QuotaState struct {
+	UserID       string
+	PeriodStart  time.Time
+	RequestCount int64
+	ComputeUnits float64
+	BytesUsed    int64
+	LastUpdated  time.Time
+}
+
+// QuotaStore persists quota state for synchronous enforcement.
+type QuotaStore interface {
+	// Get retrieves current quota state for a user's billing period.
+	Get(ctx context.Context, userID string, periodStart time.Time) (QuotaState, error)
+
+	// Increment atomically adds to quota counters, returns new state.
+	Increment(ctx context.Context, userID string, periodStart time.Time,
+		requests int64, computeUnits float64, bytes int64) (QuotaState, error)
+
+	// Sync reconciles quota state from usage store (background job).
+	Sync(ctx context.Context, userID string, periodStart time.Time, summary usage.Summary) error
 }
 
 // SubscriptionStore persists billing subscriptions.

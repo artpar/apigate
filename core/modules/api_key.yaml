@@ -1,0 +1,93 @@
+# API Key module - manages API authentication keys
+module: api_key
+
+schema:
+  # Ownership
+  user_id:    { type: ref, to: user, required: true }
+
+  # Key data
+  hash:       { type: secret, internal: true }
+  prefix:     { type: string, lookup: true }
+  name:       { type: string, default: "" }
+  scopes:     { type: json }
+
+  # Lifecycle
+  expires_at: { type: timestamp }
+  revoked_at: { type: timestamp }
+  last_used:  { type: timestamp }
+
+actions:
+  # List keys for a user
+  list_by_user:
+    input:
+      - { name: user_id, type: ref, to: user, required: true }
+    description: List all API keys for a user
+
+  # Revoke a key
+  revoke:
+    set: { revoked_at: "${NOW}" }
+    description: Revoke an API key
+    confirm: true
+
+  # Refresh last used timestamp
+  touch:
+    set: { last_used: "${NOW}" }
+    description: Update last used timestamp
+    internal: true
+
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /api/keys
+      endpoints:
+        - { action: list, method: GET, path: "/", auth: admin }
+        - { action: list_by_user, method: GET, path: "/user/{user_id}" }
+        - { action: get, method: GET, path: "/{id}" }
+        - { action: create, method: POST, path: "/" }
+        - { action: delete, method: DELETE, path: "/{id}" }
+        - { action: revoke, method: POST, path: "/{id}/revoke" }
+
+  cli:
+    serve:
+      enabled: true
+      command: keys
+      commands:
+        - action: list
+          columns: [id, user_id, prefix, name, expires_at, revoked_at, last_used, created_at]
+        - action: list_by_user
+          name: list-user
+          flags:
+            - { param: user_id, name: user, short: u, required: true }
+          columns: [id, prefix, name, expires_at, revoked_at, last_used]
+        - action: get
+          args:
+            - { name: id, required: true }
+        - action: create
+          flags:
+            - { param: user_id, name: user, short: u, required: true }
+            - { param: name, short: n }
+            - { param: scopes, description: "Comma-separated list of scopes" }
+            - { param: expires_at, name: expires, description: "Expiration time (RFC3339)" }
+        - action: delete
+          args:
+            - { name: id, required: true }
+          confirm: "Are you sure you want to delete this API key?"
+        - action: revoke
+          args:
+            - { name: id, required: true }
+
+hooks:
+  # After key creation, return the raw key (only time it's visible)
+  after_create:
+    - emit: key.created
+
+  # After revocation, notify
+  after_revoke:
+    - emit: key.revoked
+
+meta:
+  description: API keys for authenticating API requests
+  icon: key
+  display_name: API Keys
+  plural: API Keys

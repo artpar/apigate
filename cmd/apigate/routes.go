@@ -14,8 +14,9 @@ import (
 )
 
 var routesCmd = &cobra.Command{
-	Use:   "routes",
-	Short: "Manage routes",
+	Use:        "routes",
+	Short:      "Manage routes",
+	Deprecated: "use 'apigate mod routes' instead. Run 'apigate migration-guide' for details.",
 	Long: `Manage API routes for proxying requests.
 
 Routes define how incoming requests are matched and forwarded to upstreams.
@@ -26,7 +27,9 @@ Examples:
   apigate routes create --name="API v1" --path="/api/v1/*" --upstream=default
   apigate routes delete <route-id>
   apigate routes enable <route-id>
-  apigate routes disable <route-id>`,
+  apigate routes disable <route-id>
+
+NOTE: This command is deprecated. Use 'apigate mod routes' instead.`,
 }
 
 var routesListCmd = &cobra.Command{
