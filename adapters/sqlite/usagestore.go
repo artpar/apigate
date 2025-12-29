@@ -43,9 +43,10 @@ func (s *UsageStore) RecordBatch(ctx context.Context, events []usage.Event) erro
 	defer stmt.Close()
 
 	for _, e := range events {
+		// Store timestamp in UTC for consistent querying
 		_, err := stmt.ExecContext(ctx,
 			e.ID, e.KeyID, e.UserID, e.Method, e.Path, e.StatusCode, e.LatencyMs,
-			e.RequestBytes, e.ResponseBytes, e.CostMultiplier, e.IPAddress, e.UserAgent, e.Timestamp,
+			e.RequestBytes, e.ResponseBytes, e.CostMultiplier, e.IPAddress, e.UserAgent, e.Timestamp.UTC(),
 		)
 		if err != nil {
 			return err
@@ -64,7 +65,7 @@ func (s *UsageStore) GetSummary(ctx context.Context, userID string, start, end t
 			COALESCE(SUM(request_bytes), 0) as bytes_in,
 			COALESCE(SUM(response_bytes), 0) as bytes_out,
 			COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END), 0) as error_count,
-			COALESCE(AVG(latency_ms), 0) as avg_latency
+			CAST(COALESCE(AVG(latency_ms), 0) AS INTEGER) as avg_latency
 		FROM usage_events
 		WHERE user_id = ? AND timestamp >= ? AND timestamp < ?
 	`, userID, start, end)
@@ -100,7 +101,7 @@ func (s *UsageStore) GetHistory(ctx context.Context, userID string, periods int)
 			COALESCE(SUM(request_bytes), 0) as bytes_in,
 			COALESCE(SUM(response_bytes), 0) as bytes_out,
 			COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END), 0) as error_count,
-			COALESCE(AVG(latency_ms), 0) as avg_latency
+			CAST(COALESCE(AVG(latency_ms), 0) AS INTEGER) as avg_latency
 		FROM usage_events
 		WHERE user_id = ?
 		GROUP BY strftime('%Y-%m', timestamp)
