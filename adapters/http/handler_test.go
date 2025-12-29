@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -410,3 +411,166 @@ func setupTestHandler() (*apihttp.ProxyHandler, *testStores) {
 
 	return handler, stores
 }
+
+func TestVersion(t *testing.T) {
+	req := httptest.NewRequest("GET", "/version", nil)
+	rec := httptest.NewRecorder()
+
+	apihttp.Version(rec, req)
+
+	resp := rec.Result()
+	if resp.StatusCode != 200 {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var body map[string]string
+	json.NewDecoder(resp.Body).Decode(&body)
+
+	if body["service"] != "apigate" {
+		t.Errorf("service = %s, want apigate", body["service"])
+	}
+	if body["version"] == "" {
+		t.Error("version should not be empty")
+	}
+}
+
+func TestHealthHandler_NilUpstream(t *testing.T) {
+	healthHandler := apihttp.NewHealthHandler(nil)
+
+	req := httptest.NewRequest("GET", "/health/ready", nil)
+	rec := httptest.NewRecorder()
+	healthHandler.Readiness(rec, req)
+
+	resp := rec.Result()
+	if resp.StatusCode != 200 {
+		t.Errorf("status = %d, want 200 (nil upstream = skip check)", resp.StatusCode)
+	}
+}
+
+func TestNewRouter_BasicEndpoints(t *testing.T) {
+	handler, _ := setupTestHandler()
+	upstream := &testUpstream{healthy: true}
+	healthHandler := apihttp.NewHealthHandler(upstream)
+	logger := zerolog.Nop()
+	router := apihttp.NewRouter(handler, healthHandler, logger)
+
+	tests := []struct {
+		method string
+		path   string
+		want   int
+	}{
+		{"GET", "/health", 200},
+		{"GET", "/health/live", 200},
+		{"GET", "/health/ready", 200},
+		{"GET", "/version", 200},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.method+" "+tt.path, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			if rec.Result().StatusCode != tt.want {
+				t.Errorf("status = %d, want %d", rec.Result().StatusCode, tt.want)
+			}
+		})
+	}
+}
+
+func TestNewRouterWithConfig_AdminHandler(t *testing.T) {
+	handler, _ := setupTestHandler()
+	upstream := &testUpstream{healthy: true}
+	healthHandler := apihttp.NewHealthHandler(upstream)
+	logger := zerolog.Nop()
+
+	adminHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		w.Write([]byte("admin"))
+	})
+
+	cfg := apihttp.RouterConfig{
+		AdminHandler: adminHandler,
+	}
+	router := apihttp.NewRouterWithConfig(handler, healthHandler, logger, cfg)
+
+	req := httptest.NewRequest("GET", "/admin/test", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Result().StatusCode != 200 {
+		t.Errorf("admin status = %d, want 200", rec.Result().StatusCode)
+	}
+	if rec.Body.String() != "admin" {
+		t.Errorf("body = %s, want admin", rec.Body.String())
+	}
+}
+
+func TestNewRouterWithConfig_PortalHandler(t *testing.T) {
+	handler, _ := setupTestHandler()
+	upstream := &testUpstream{healthy: true}
+	healthHandler := apihttp.NewHealthHandler(upstream)
+	logger := zerolog.Nop()
+
+	portalHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		w.Write([]byte("portal"))
+	})
+
+	cfg := apihttp.RouterConfig{
+		PortalHandler: portalHandler,
+	}
+	router := apihttp.NewRouterWithConfig(handler, healthHandler, logger, cfg)
+
+	req := httptest.NewRequest("GET", "/portal/login", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Result().StatusCode != 200 {
+		t.Errorf("portal status = %d, want 200", rec.Result().StatusCode)
+	}
+}
+
+func TestNewRouterWithConfig_WebHandler(t *testing.T) {
+	handler, _ := setupTestHandler()
+	upstream := &testUpstream{healthy: true}
+	healthHandler := apihttp.NewHealthHandler(upstream)
+	logger := zerolog.Nop()
+
+	webHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		w.Write([]byte("web:" + r.URL.Path))
+	})
+
+	cfg := apihttp.RouterConfig{
+		WebHandler: webHandler,
+	}
+	router := apihttp.NewRouterWithConfig(handler, healthHandler, logger, cfg)
+
+	tests := []string{
+		"/login",
+		"/dashboard",
+		"/users",
+		"/keys",
+		"/plans",
+		"/settings",
+		"/system",
+	}
+
+	for _, path := range tests {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest("GET", path, nil)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			if rec.Result().StatusCode != 200 {
+				t.Errorf("status = %d, want 200", rec.Result().StatusCode)
+			}
+			expected := "web:" + path
+			if rec.Body.String() != expected {
+				t.Errorf("body = %s, want %s", rec.Body.String(), expected)
+			}
+		})
+	}
+}
+
