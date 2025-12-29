@@ -546,6 +546,7 @@ type RouterConfig struct {
 	EnableOpenAPI bool
 	AdminHandler  http.Handler // Optional admin API handler
 	WebHandler    http.Handler // Optional web UI handler
+	PortalHandler http.Handler // Optional user portal handler
 }
 
 // NewRouter creates the main HTTP router.
@@ -602,6 +603,11 @@ func NewRouterWithConfig(proxyHandler *ProxyHandler, healthHandler *HealthHandle
 		r.Mount("/admin", cfg.AdminHandler)
 	}
 
+	// User portal (if enabled)
+	if cfg.PortalHandler != nil {
+		r.Mount("/portal", cfg.PortalHandler)
+	}
+
 	// Web UI (if enabled) - pass through specific paths to the web handler
 	if cfg.WebHandler != nil {
 		// Use a group that routes to the web handler
@@ -623,7 +629,12 @@ func NewRouterWithConfig(proxyHandler *ProxyHandler, healthHandler *HealthHandle
 		r.Get("/keys", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
 		r.Post("/keys", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
 		r.Delete("/keys/*", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		// Plans management
 		r.Get("/plans", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Get("/plans/*", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Post("/plans", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Post("/plans/*", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Delete("/plans/*", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
 		r.Get("/usage", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
 		r.Get("/settings", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
 		r.Get("/system", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })

@@ -7,14 +7,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/artpar/apigate/adapters/sqlite"
 	"github.com/artpar/apigate/bootstrap"
-	"github.com/artpar/apigate/config"
 	"github.com/artpar/apigate/domain/key"
 	"github.com/artpar/apigate/domain/route"
 	"github.com/artpar/apigate/ports"
@@ -303,6 +301,7 @@ func TestUI_Dashboard_SidebarNavigation(t *testing.T) {
 		{"Upstreams", "Upstreams"},
 		{"Users", "Users"},
 		{"API Keys", "API Keys"},
+		{"Plans", "Plans"},
 		{"Dashboard", "Dashboard"},
 	}
 
@@ -578,6 +577,167 @@ func TestUI_Upstreams_CreateUpstream(t *testing.T) {
 }
 
 // ============================================================================
+// Plans Tests
+// ============================================================================
+
+func TestUI_Plans_ListPage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping UI test in short mode")
+	}
+
+	suite := setupUITest(t)
+	defer suite.cleanup()
+
+	if err := suite.login("admin@test.com", "testpassword123"); err != nil {
+		t.Fatalf("login failed: %v", err)
+	}
+
+	if err := suite.navigate("/plans"); err != nil {
+		t.Fatalf("navigate failed: %v", err)
+	}
+
+	// Check page title
+	h1Text, err := suite.getText(`h1`)
+	if err != nil {
+		t.Fatalf("failed to get h1: %v", err)
+	}
+	if h1Text != "Plans" {
+		t.Errorf("h1 = %q, want 'Plans'", h1Text)
+	}
+
+	// Check for Create Plan button
+	var html string
+	chromedp.Run(suite.ctx, chromedp.OuterHTML(`body`, &html, chromedp.ByQuery))
+	if !strings.Contains(html, "Create Plan") {
+		t.Error("plans page should have 'Create Plan' button")
+	}
+}
+
+func TestUI_Plans_CreatePlan(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping UI test in short mode")
+	}
+
+	suite := setupUITest(t)
+	defer suite.cleanup()
+
+	if err := suite.login("admin@test.com", "testpassword123"); err != nil {
+		t.Fatalf("login failed: %v", err)
+	}
+
+	// Navigate directly to create plan page (same pattern as Routes/Upstreams)
+	err := chromedp.Run(suite.ctx,
+		chromedp.Navigate(suite.baseURL()+"/plans/new"),
+		chromedp.WaitVisible(`input[name="name"]`, chromedp.ByQuery),
+	)
+	if err != nil {
+		t.Fatalf("failed to load plan form: %v", err)
+	}
+
+	// Verify we're on the create plan page
+	title, err := suite.getTitle()
+	if err != nil {
+		t.Fatalf("failed to get title: %v", err)
+	}
+	if !strings.Contains(title, "Plan") {
+		t.Errorf("title = %q, want to contain 'Plan'", title)
+	}
+
+	// Verify form fields are present
+	var html string
+	chromedp.Run(suite.ctx, chromedp.OuterHTML(`body`, &html, chromedp.ByQuery))
+	if !strings.Contains(html, `name="id"`) {
+		t.Error("page should contain plan id field")
+	}
+	if !strings.Contains(html, `name="name"`) {
+		t.Error("page should contain plan name field")
+	}
+}
+
+func TestUI_Plans_EditPlan(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping UI test in short mode")
+	}
+
+	suite := setupUITest(t)
+	defer suite.cleanup()
+
+	if err := suite.login("admin@test.com", "testpassword123"); err != nil {
+		t.Fatalf("login failed: %v", err)
+	}
+
+	// Navigate to plans list page
+	if err := suite.navigate("/plans"); err != nil {
+		t.Fatalf("navigate failed: %v", err)
+	}
+
+	// Check page title
+	h1Text, err := suite.getText(`h1`)
+	if err != nil {
+		t.Fatalf("failed to get h1: %v", err)
+	}
+	if h1Text != "Plans" {
+		t.Errorf("h1 = %q, want 'Plans'", h1Text)
+	}
+
+	// Wait for HTMX to load the table
+	chromedp.Run(suite.ctx, chromedp.Sleep(1*time.Second))
+
+	// Verify table is rendered with Edit links
+	var html string
+	chromedp.Run(suite.ctx, chromedp.OuterHTML(`body`, &html, chromedp.ByQuery))
+	if !strings.Contains(html, "Edit") {
+		t.Error("plans table should have Edit links")
+	}
+}
+
+func TestUI_Plans_FormValidation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping UI test in short mode")
+	}
+
+	suite := setupUITest(t)
+	defer suite.cleanup()
+
+	if err := suite.login("admin@test.com", "testpassword123"); err != nil {
+		t.Fatalf("login failed: %v", err)
+	}
+
+	// Navigate to create plan page - wait for name input (same as other forms)
+	err := chromedp.Run(suite.ctx,
+		chromedp.Navigate(suite.baseURL()+"/plans/new"),
+		chromedp.WaitVisible(`input[name="name"]`, chromedp.ByQuery),
+	)
+	if err != nil {
+		t.Fatalf("failed to load plan form: %v", err)
+	}
+
+	// Verify form has all expected fields
+	var html string
+	chromedp.Run(suite.ctx, chromedp.OuterHTML(`body`, &html, chromedp.ByQuery))
+
+	expectedFields := []string{
+		`name="id"`,
+		`name="name"`,
+		`name="rate_limit"`,
+		`name="monthly_quota"`,
+		`name="price_monthly"`,
+		`name="overage_price"`,
+		`name="stripe_price_id"`,
+		`name="paddle_price_id"`,
+		`name="lemon_variant_id"`,
+		`name="enabled"`,
+		`name="is_default"`,
+	}
+
+	for _, field := range expectedFields {
+		if !strings.Contains(html, field) {
+			t.Errorf("plan form should have field %s", field)
+		}
+	}
+}
+
+// ============================================================================
 // Users Tests
 // ============================================================================
 
@@ -750,56 +910,39 @@ func setupTestAppWithAdmin(t *testing.T, upstreamURL string) (*bootstrap.App, st
 	t.Helper()
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.yaml")
-	dbPath := filepath.Join(dir, "test.db")
+	dbPath := dir + "/test.db"
 
-	configContent := fmt.Sprintf(`
-upstream:
-  url: "%s"
-  timeout: 5s
-
-database:
-  driver: sqlite
-  dsn: "%s"
-
-server:
-  host: "127.0.0.1"
-  port: 0
-
-auth:
-  mode: local
-  key_prefix: "ak_"
-
-rate_limit:
-  enabled: true
-  burst_tokens: 10
-  window_secs: 60
-
-plans:
-  - id: "admin"
-    name: "Admin Plan"
-    rate_limit_per_minute: 1000
-    requests_per_month: 1000000
-  - id: "test"
-    name: "Test Plan"
-    rate_limit_per_minute: 60
-    requests_per_month: 10000
-
-logging:
-  level: error
-  format: json
-`, upstreamURL, dbPath)
-
-	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	cfg, err := config.Load(configPath)
+	// Pre-create database and insert settings BEFORE bootstrap
+	db, err := sqlite.Open(dbPath)
 	if err != nil {
-		t.Fatalf("load config: %v", err)
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
 	}
 
-	app, err := bootstrap.New(cfg)
+	ctx := context.Background()
+	// Insert settings for upstream and rate limit
+	db.DB.ExecContext(ctx, "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", "upstream.url", upstreamURL)
+	db.DB.ExecContext(ctx, "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", "ratelimit.burst_tokens", "10")
+	db.DB.ExecContext(ctx, "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", "ratelimit.window_secs", "60")
+
+	// Create plans in database
+	db.DB.ExecContext(ctx,
+		"INSERT OR REPLACE INTO plans (id, name, rate_limit_per_minute, requests_per_month, enabled) VALUES (?, ?, ?, ?, ?)",
+		"admin", "Admin Plan", 1000, 1000000, 1)
+	db.DB.ExecContext(ctx,
+		"INSERT OR REPLACE INTO plans (id, name, rate_limit_per_minute, requests_per_month, enabled) VALUES (?, ?, ?, ?, ?)",
+		"test", "Test Plan", 60, 10000, 1)
+
+	db.Close()
+
+	// Set environment variables for bootstrap
+	os.Setenv(bootstrap.EnvDatabaseDSN, dbPath)
+	os.Setenv(bootstrap.EnvLogLevel, "error")
+	os.Setenv(bootstrap.EnvLogFormat, "json")
+
+	app, err := bootstrap.New()
 	if err != nil {
 		t.Fatalf("create app: %v", err)
 	}
@@ -809,6 +952,9 @@ logging:
 
 	cleanup := func() {
 		app.Shutdown()
+		os.Unsetenv(bootstrap.EnvDatabaseDSN)
+		os.Unsetenv(bootstrap.EnvLogLevel)
+		os.Unsetenv(bootstrap.EnvLogFormat)
 	}
 
 	return app, apiKey, cleanup
