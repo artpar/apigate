@@ -3,12 +3,16 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"strings"
 
+	"github.com/artpar/apigate/adapters/hasher"
 	"github.com/artpar/apigate/adapters/sqlite"
 	"github.com/artpar/apigate/domain/key"
+	"github.com/artpar/apigate/domain/settings"
 	"github.com/artpar/apigate/ports"
 	"github.com/spf13/cobra"
 )
@@ -32,9 +36,10 @@ Examples:
 }
 
 var (
-	initUpstream   string
-	initDatabase   string
-	initAdminEmail string
+	initUpstream       string
+	initDatabase       string
+	initAdminEmail     string
+	initAdminPassword  string
 	initNonInteractive bool
 )
 
@@ -44,6 +49,7 @@ func init() {
 	initCmd.Flags().StringVar(&initUpstream, "upstream", "", "upstream API URL")
 	initCmd.Flags().StringVar(&initDatabase, "database", "apigate.db", "database file path")
 	initCmd.Flags().StringVar(&initAdminEmail, "admin-email", "", "admin user email")
+	initCmd.Flags().StringVar(&initAdminPassword, "admin-password", "", "admin user password (auto-generated if not provided)")
 	initCmd.Flags().BoolVar(&initNonInteractive, "non-interactive", false, "run without prompts (requires --upstream)")
 }
 
@@ -82,9 +88,11 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	// Create admin user?
 	var adminEmail string
+	var adminPassword string
 	createAdmin := false
 	if initAdminEmail != "" {
 		adminEmail = initAdminEmail
+		adminPassword = initAdminPassword
 		createAdmin = true
 	} else if !initNonInteractive {
 		createAdmin = confirm("Create admin user?")
@@ -93,7 +101,14 @@ func runInit(cmd *cobra.Command, args []string) error {
 			if adminEmail == "" {
 				return fmt.Errorf("admin email is required")
 			}
+			// Prompt for password
+			adminPassword, _ = promptPassword("Admin password (leave empty to auto-generate)")
 		}
+	}
+
+	// Generate password if not provided
+	if createAdmin && adminPassword == "" {
+		adminPassword = generatePassword()
 	}
 
 	// Generate config
@@ -117,20 +132,43 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("%s Created database %s\n", checkMark, database)
 
+	// Save upstream URL and other settings to database
+	settingsStore := sqlite.NewSettingsStore(db)
+	ctx := context.Background()
+
+	// Save upstream URL
+	if err := settingsStore.Set(ctx, settings.KeyUpstreamURL, upstream, false); err != nil {
+		return fmt.Errorf("failed to save upstream URL: %w", err)
+	}
+
+	// Enable portal by default
+	if err := settingsStore.Set(ctx, settings.KeyPortalEnabled, "true", false); err != nil {
+		return fmt.Errorf("failed to enable portal: %w", err)
+	}
+
+	fmt.Printf("%s Saved settings to database\n", checkMark)
+
 	// Create admin user if requested
 	if createAdmin && adminEmail != "" {
-		apiKey, err := createAdminUser(db, adminEmail)
+		apiKey, err := createAdminUser(db, adminEmail, adminPassword)
 		if err != nil {
 			return fmt.Errorf("failed to create admin user: %w", err)
 		}
 		fmt.Printf("%s Created admin user: %s\n", checkMark, adminEmail)
 		fmt.Println()
-		fmt.Println("Admin API Key (save this, shown once):")
-		fmt.Printf("  %s\n", apiKey)
+		fmt.Println("Admin credentials (save these, shown once):")
+		fmt.Printf("  Email:    %s\n", adminEmail)
+		fmt.Printf("  Password: %s\n", adminPassword)
+		fmt.Printf("  API Key:  %s\n", apiKey)
 	}
 
 	fmt.Println()
 	fmt.Println("Run 'apigate serve' to start the proxy server.")
+	fmt.Println()
+	fmt.Println("Access points:")
+	fmt.Println("  Admin Dashboard: http://localhost:8080/login")
+	fmt.Println("  User Portal:     http://localhost:8080/portal/")
+	fmt.Println("  API Proxy:       http://localhost:8080/ (requires API key)")
 
 	return nil
 }
@@ -207,19 +245,27 @@ openapi:
 `, upstream, database)
 }
 
-func createAdminUser(db *sqlite.DB, email string) (string, error) {
+func createAdminUser(db *sqlite.DB, email, password string) (string, error) {
 	ctx := context.Background()
 
 	// Create user store and key store
 	userStore := sqlite.NewUserStore(db)
 	keyStore := sqlite.NewKeyStore(db)
 
-	// Create admin user
+	// Hash the password
+	h := hasher.NewBcrypt(10)
+	passwordHash, err := h.Hash(password)
+	if err != nil {
+		return "", fmt.Errorf("hash password: %w", err)
+	}
+
+	// Create admin user with password
 	user := ports.User{
-		ID:     generateID(),
-		Email:  email,
-		PlanID: "free",
-		Status: "active",
+		ID:           generateID(),
+		Email:        email,
+		PasswordHash: passwordHash,
+		PlanID:       "free",
+		Status:       "active",
 	}
 
 	if err := userStore.Create(ctx, user); err != nil {
@@ -234,6 +280,12 @@ func createAdminUser(db *sqlite.DB, email string) (string, error) {
 	}
 
 	return rawKey, nil
+}
+
+func generatePassword() string {
+	bytes := make([]byte, 12)
+	rand.Read(bytes)
+	return hex.EncodeToString(bytes)[:16]
 }
 
 func generateID() string {
