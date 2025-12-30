@@ -5,15 +5,18 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/artpar/apigate/core/analytics"
 	"github.com/artpar/apigate/core/convention"
+	"github.com/artpar/apigate/core/events"
 	"github.com/artpar/apigate/core/exporter"
 	"github.com/artpar/apigate/core/registry"
 	"github.com/artpar/apigate/core/schema"
 	"github.com/artpar/apigate/core/validation"
+	"github.com/rs/zerolog"
 )
 
 // Runtime is the core execution environment for modules.
@@ -41,6 +44,15 @@ type Runtime struct {
 	// hooks dispatcher
 	hooks *HookDispatcher
 
+	// functions registry for "call:" hooks
+	functions *FunctionRegistry
+
+	// events bus for "emit:" hooks
+	events *events.Bus
+
+	// logger for hook system
+	logger zerolog.Logger
+
 	// config
 	config Config
 }
@@ -55,6 +67,9 @@ type Config struct {
 
 	// Analytics is the analytics collector (optional).
 	Analytics analytics.Analytics
+
+	// Logger for runtime and hook system.
+	Logger zerolog.Logger
 }
 
 // Storage is the interface for data persistence.
@@ -133,6 +148,10 @@ type HookEvent struct {
 
 	// Data is the action input/output.
 	Data map[string]any
+
+	// Meta carries extra data through hooks (e.g., raw API key for one-time display).
+	// Hooks can read/write this to pass values back to the caller.
+	Meta map[string]any
 }
 
 // New creates a new runtime.
@@ -144,6 +163,9 @@ func New(storage Storage, config Config) *Runtime {
 		validator: validation.New(make(map[string]convention.Derived)),
 		channels:  make(map[string]Channel),
 		hooks:     &HookDispatcher{handlers: make(map[string][]HookHandler)},
+		functions: NewFunctionRegistry(),
+		events:    events.NewBus(config.Logger),
+		logger:    config.Logger,
 		config:    config,
 	}
 
@@ -280,12 +302,16 @@ func (r *Runtime) executeInternal(ctx context.Context, module, action string, in
 		return ActionResult{}, fmt.Errorf("action %q not found in module %q", action, module)
 	}
 
+	// Create meta map for hooks to pass data back to caller
+	meta := make(map[string]any)
+
 	// Run before hooks
 	if err := r.hooks.Dispatch(ctx, HookEvent{
 		Module: module,
 		Action: action,
 		Phase:  "before",
 		Data:   input.Data,
+		Meta:   meta,
 	}); err != nil {
 		return ActionResult{}, fmt.Errorf("before hook: %w", err)
 	}
@@ -321,9 +347,13 @@ func (r *Runtime) executeInternal(ctx context.Context, module, action string, in
 		Action: action,
 		Phase:  "after",
 		Data:   result.Data,
+		Meta:   meta,
 	}); err != nil {
 		return ActionResult{}, fmt.Errorf("after hook: %w", err)
 	}
+
+	// Attach meta to result for caller to access
+	result.Meta = meta
 
 	return result, nil
 }
@@ -374,6 +404,9 @@ type ActionResult struct {
 
 	// Count is the total count for list actions.
 	Count int64
+
+	// Meta carries extra data from hooks (e.g., raw API key shown only once).
+	Meta map[string]any
 }
 
 // executeList handles list actions.
@@ -643,6 +676,139 @@ func (d *HookDispatcher) OnHook(module, action, phase string, handler HookHandle
 // Registry returns the module registry.
 func (r *Runtime) Registry() *registry.Registry {
 	return r.registry
+}
+
+// OnHook registers a hook handler on the runtime.
+func (r *Runtime) OnHook(module, action, phase string, handler HookHandler) {
+	r.hooks.OnHook(module, action, phase, handler)
+}
+
+// Functions returns the function registry.
+func (r *Runtime) Functions() *FunctionRegistry {
+	return r.functions
+}
+
+// Events returns the event bus.
+func (r *Runtime) Events() *events.Bus {
+	return r.events
+}
+
+// RegisterFunction registers a callable function for "call:" hooks.
+func (r *Runtime) RegisterFunction(name string, fn HookHandler) {
+	r.functions.Register(name, fn)
+}
+
+// RegisterModuleHooks registers all hooks declared in a module's YAML.
+// This bridges declarative YAML hooks to runtime hook handlers.
+func (r *Runtime) RegisterModuleHooks(mod schema.Module) {
+	for hookPhase, hooks := range mod.Hooks {
+		// Parse the phase (e.g., "after_create" -> action="create", phase="after")
+		action, phase := parseHookPhase(hookPhase)
+		if action == "" || phase == "" {
+			r.logger.Warn().
+				Str("module", mod.Name).
+				Str("hook_phase", hookPhase).
+				Msg("invalid hook phase format, expected before_* or after_*")
+			continue
+		}
+
+		for _, hook := range hooks {
+			handler := r.createHookHandler(mod.Name, hook)
+			if handler != nil {
+				r.hooks.OnHook(mod.Name, action, phase, handler)
+				r.logger.Debug().
+					Str("module", mod.Name).
+					Str("action", action).
+					Str("phase", phase).
+					Msg("registered YAML hook")
+			}
+		}
+	}
+}
+
+// parseHookPhase parses "before_create" or "after_update" into action and phase.
+func parseHookPhase(hookPhase string) (action, phase string) {
+	if strings.HasPrefix(hookPhase, "before_") {
+		return strings.TrimPrefix(hookPhase, "before_"), "before"
+	}
+	if strings.HasPrefix(hookPhase, "after_") {
+		return strings.TrimPrefix(hookPhase, "after_"), "after"
+	}
+	return "", ""
+}
+
+// createHookHandler creates a hook handler from a YAML hook definition.
+func (r *Runtime) createHookHandler(moduleName string, hook schema.Hook) HookHandler {
+	// Handle shorthand "- emit: event.name" format
+	if hook.Emit != "" {
+		eventName := hook.Emit
+		return func(ctx context.Context, event HookEvent) error {
+			r.events.Publish(ctx, events.Event{
+				Name:   eventName,
+				Module: event.Module,
+				Action: event.Action,
+				Data:   event.Data,
+				Meta:   event.Meta,
+			})
+			return nil
+		}
+	}
+
+	// Handle shorthand "- call: function_name" format
+	if hook.Call != "" {
+		return r.createCallHandler(hook.Call)
+	}
+
+	// Handle explicit "event:" field (for type: emit)
+	if hook.Event != "" {
+		eventName := hook.Event
+		return func(ctx context.Context, event HookEvent) error {
+			r.events.Publish(ctx, events.Event{
+				Name:   eventName,
+				Module: event.Module,
+				Action: event.Action,
+				Data:   event.Data,
+				Meta:   event.Meta,
+			})
+			return nil
+		}
+	}
+
+	// Handle explicit type field for other hook types
+	switch hook.Type {
+	case "email":
+		// Email hooks not yet implemented
+		r.logger.Debug().
+			Str("module", moduleName).
+			Str("template", hook.Template).
+			Msg("email hook registered (not yet implemented)")
+		return nil
+
+	case "webhook":
+		// Webhook hooks not yet implemented
+		r.logger.Debug().
+			Str("module", moduleName).
+			Str("url", hook.URL).
+			Msg("webhook hook registered (not yet implemented)")
+		return nil
+	}
+
+	return nil
+}
+
+// createCallHandler creates a handler that invokes a registered function.
+func (r *Runtime) createCallHandler(funcName string) HookHandler {
+	return func(ctx context.Context, event HookEvent) error {
+		if !r.functions.Has(funcName) {
+			r.logger.Warn().
+				Str("function", funcName).
+				Str("module", event.Module).
+				Str("action", event.Action).
+				Msg("called unregistered function (skipping)")
+			return nil // Don't fail the action if function not registered
+		}
+		return r.functions.Call(ctx, funcName, event)
+	}
 }
 
 // Start starts all channels and exporters.

@@ -227,6 +227,9 @@ func (a *App) initHTTPServer() error {
 		a.Logger.Warn().Err(err).Msg("failed to start route service, continuing with empty routes")
 	}
 
+	// Wire router reloader for hook-triggered reloads
+	SetRouterReloader(a.routeService)
+
 	// Create and wire transform service
 	a.transformService = app.NewTransformService()
 	a.proxyService.SetTransformService(a.transformService)

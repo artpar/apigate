@@ -39,15 +39,29 @@ type ModuleMeta struct {
 }
 
 // Hook defines an event handler.
+// Supports shorthand YAML formats:
+//   - emit: event.name
+//   - call: function_name
+// Or explicit format:
+//   - type: email
+//     template: welcome
+//     to: "{{.email}}"
 type Hook struct {
+	// Shorthand: "- emit: event.name" -> Emit = "event.name"
+	Emit string `yaml:"emit,omitempty"`
+
+	// Shorthand: "- call: function_name" -> Call = "function_name"
+	Call string `yaml:"call,omitempty"`
+
 	// Type of hook action: email, webhook, emit, log, etc.
+	// Used for explicit format: "type: email"
 	Type string `yaml:"type,omitempty"`
 
 	// For email hooks
 	Template string `yaml:"template,omitempty"`
 	To       string `yaml:"to,omitempty"`
 
-	// For emit hooks
+	// For emit hooks (explicit format)
 	Event string `yaml:"event,omitempty"`
 
 	// For webhook hooks
