@@ -168,6 +168,20 @@ func (h *Handler) CreatePlan(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:          now,
 	}
 
+	// Clear default flag on existing plans if creating a new default plan
+	if req.IsDefault {
+		existingPlans, err := h.plans.List(ctx)
+		if err == nil {
+			for _, p := range existingPlans {
+				if p.IsDefault {
+					p.IsDefault = false
+					p.UpdatedAt = now
+					_ = h.plans.Update(ctx, p)
+				}
+			}
+		}
+	}
+
 	if err := h.plans.Create(ctx, plan); err != nil {
 		h.logger.Error().Err(err).Msg("failed to create plan")
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create plan")
@@ -236,6 +250,19 @@ func (h *Handler) UpdatePlan(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.IsDefault != nil {
 		plan.IsDefault = *req.IsDefault
+		// Clear default flag on other plans if setting this plan as default
+		if *req.IsDefault {
+			existingPlans, err := h.plans.List(ctx)
+			if err == nil {
+				for _, p := range existingPlans {
+					if p.IsDefault && p.ID != plan.ID {
+						p.IsDefault = false
+						p.UpdatedAt = time.Now().UTC()
+						_ = h.plans.Update(ctx, p)
+					}
+				}
+			}
+		}
 	}
 	if req.Enabled != nil {
 		plan.Enabled = *req.Enabled

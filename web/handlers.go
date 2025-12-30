@@ -670,6 +670,17 @@ func (h *Handler) PlanCreate(w http.ResponseWriter, r *http.Request) {
 		Enabled:            r.FormValue("enabled") == "on",
 	}
 
+	// Clear default flag on existing plans if creating a new default plan
+	if plan.IsDefault {
+		existingPlans, _ := h.plans.List(ctx)
+		for _, p := range existingPlans {
+			if p.IsDefault {
+				p.IsDefault = false
+				_ = h.plans.Update(ctx, p)
+			}
+		}
+	}
+
 	if err := h.plans.Create(ctx, plan); err != nil {
 		h.renderPlanFormError(w, r, "Failed to create plan: "+err.Error(), "", planToInfo(plan))
 		return
@@ -729,8 +740,20 @@ func (h *Handler) PlanUpdate(w http.ResponseWriter, r *http.Request) {
 	plan.StripePriceID = r.FormValue("stripe_price_id")
 	plan.PaddlePriceID = r.FormValue("paddle_price_id")
 	plan.LemonVariantID = r.FormValue("lemon_variant_id")
-	plan.IsDefault = r.FormValue("is_default") == "on"
+	newIsDefault := r.FormValue("is_default") == "on"
 	plan.Enabled = r.FormValue("enabled") == "on"
+
+	// Clear default flag on other plans if setting this plan as default
+	if newIsDefault && !plan.IsDefault {
+		existingPlans, _ := h.plans.List(ctx)
+		for _, p := range existingPlans {
+			if p.IsDefault && p.ID != plan.ID {
+				p.IsDefault = false
+				_ = h.plans.Update(ctx, p)
+			}
+		}
+	}
+	plan.IsDefault = newIsDefault
 
 	if err := h.plans.Update(ctx, plan); err != nil {
 		h.renderPlanFormError(w, r, "Failed to update plan: "+err.Error(), id, planToInfo(plan))
@@ -1448,6 +1471,20 @@ func (h *Handler) SetupStepSubmit(w http.ResponseWriter, r *http.Request) {
 			Enabled:            true,
 			CreatedAt:          now,
 			UpdatedAt:          now,
+		}
+
+		// Clear default flag on existing plans before creating new default plan
+		existingPlans, err := h.plans.List(r.Context())
+		if err == nil {
+			for _, p := range existingPlans {
+				if p.IsDefault {
+					p.IsDefault = false
+					p.UpdatedAt = now
+					if updateErr := h.plans.Update(r.Context(), p); updateErr != nil {
+						h.logger.Warn().Err(updateErr).Str("plan_id", p.ID).Msg("failed to clear default flag on existing plan")
+					}
+				}
+			}
 		}
 
 		if err := h.plans.Create(r.Context(), plan); err != nil {
