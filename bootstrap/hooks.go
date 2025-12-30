@@ -100,7 +100,8 @@ func apiKeyBeforeCreate(logger zerolog.Logger) runtime.HookHandler {
 		rawKey, k := key.Generate("ak_")
 
 		// Set the hash in the data (will be stored in database)
-		event.Data["hash"] = string(k.Hash)
+		// Keep as []byte for proper BLOB storage - bcrypt hashes are ASCII-safe
+		event.Data["hash"] = k.Hash
 
 		// Set the prefix for lookup
 		event.Data["prefix"] = k.Prefix

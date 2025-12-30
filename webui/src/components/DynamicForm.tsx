@@ -239,8 +239,25 @@ function validateField(field: FieldSchema, value: unknown): string | null {
           }
           break;
         case 'pattern':
-          if (typeof value === 'string' && !new RegExp(String(constraint.value)).test(value)) {
-            return constraint.message || `Invalid format`;
+          if (typeof value === 'string') {
+            try {
+              // Try to create regex and test - handle invalid patterns gracefully
+              const pattern = String(constraint.value);
+              // Fix common pattern issues: escape unescaped hyphen in character class if needed
+              const safePattern = pattern.replace(/\[([^\]]*)-([^\]]*)\]/g, (match, before, after) => {
+                // If hyphen is not at start/end of character class, escape it
+                if (before && after) {
+                  return `[${before}\\-${after}]`;
+                }
+                return match;
+              });
+              if (!new RegExp(safePattern).test(value)) {
+                return constraint.message || `Invalid format`;
+              }
+            } catch (e) {
+              // If regex is invalid, skip validation and log warning
+              console.warn(`Invalid regex pattern: ${constraint.value}`, e);
+            }
           }
           break;
       }

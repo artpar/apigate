@@ -185,7 +185,7 @@ func (s *KeyStore) Delete(ctx context.Context, id string) error {
 
 func scanKey(rows *sql.Rows) (key.Key, error) {
 	var k key.Key
-	var scopes string
+	var scopes sql.NullString
 	var expiresAt, revokedAt, lastUsed sql.NullTime
 
 	err := rows.Scan(
@@ -196,8 +196,8 @@ func scanKey(rows *sql.Rows) (key.Key, error) {
 		return key.Key{}, err
 	}
 
-	if scopes != "" && scopes != "null" {
-		if err := json.Unmarshal([]byte(scopes), &k.Scopes); err != nil {
+	if scopes.Valid && scopes.String != "" && scopes.String != "null" {
+		if err := json.Unmarshal([]byte(scopes.String), &k.Scopes); err != nil {
 			return key.Key{}, err
 		}
 	}
@@ -217,7 +217,7 @@ func scanKey(rows *sql.Rows) (key.Key, error) {
 
 func scanKeyRow(row *sql.Row) (key.Key, error) {
 	var k key.Key
-	var scopes string
+	var scopes sql.NullString
 	var expiresAt, revokedAt, lastUsed sql.NullTime
 
 	err := row.Scan(
@@ -231,8 +231,8 @@ func scanKeyRow(row *sql.Row) (key.Key, error) {
 		return key.Key{}, err
 	}
 
-	if scopes != "" && scopes != "null" {
-		if err := json.Unmarshal([]byte(scopes), &k.Scopes); err != nil {
+	if scopes.Valid && scopes.String != "" && scopes.String != "null" {
+		if err := json.Unmarshal([]byte(scopes.String), &k.Scopes); err != nil {
 			return key.Key{}, err
 		}
 	}

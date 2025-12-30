@@ -412,6 +412,13 @@ func convertValue(val any, f convention.DerivedField) any {
 		default:
 			return 0
 		}
+	case "secret", "bytes":
+		// Keep binary data as []byte for BLOB storage
+		// If passed as string (legacy), convert to bytes
+		if s, ok := val.(string); ok {
+			return []byte(s)
+		}
+		return val
 	default:
 		return val
 	}
@@ -433,8 +440,19 @@ func convertFromDB(val any, f convention.DerivedField) any {
 		default:
 			return false
 		}
+	case "secret", "bytes":
+		// Keep binary data as []byte - don't convert to string
+		// This is important for bcrypt hashes and other binary data
+		if b, ok := val.([]byte); ok {
+			return b
+		}
+		// If stored as string (legacy), convert back to bytes
+		if s, ok := val.(string); ok {
+			return []byte(s)
+		}
+		return val
 	default:
-		// Handle byte slices as strings
+		// Handle byte slices as strings for text fields
 		if b, ok := val.([]byte); ok {
 			return string(b)
 		}

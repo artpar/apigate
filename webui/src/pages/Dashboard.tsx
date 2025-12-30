@@ -79,7 +79,7 @@ export function Dashboard() {
             Create Plan
           </Link>
           <Link
-            to="/keys/new"
+            to="/api_key/new"
             className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

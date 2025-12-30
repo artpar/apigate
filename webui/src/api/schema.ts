@@ -17,11 +17,16 @@ const API_BASE = '/mod';
 const schemaCache = new Map<string, { data: ModuleSchema; timestamp: number }>();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
+/** Default fetch options with credentials for session cookies */
+const fetchOptions: RequestInit = {
+  credentials: 'include',
+};
+
 /**
  * Fetch all available modules (summary list).
  */
 export async function fetchModules(): Promise<ModuleSummary[]> {
-  const response = await fetch(`${API_BASE}/_schema`);
+  const response = await fetch(`${API_BASE}/_schema`, fetchOptions);
   if (!response.ok) {
     throw new Error(`Failed to fetch modules: ${response.statusText}`);
   }
@@ -45,7 +50,7 @@ export async function fetchModuleSchema(module: string): Promise<ModuleSchema> {
     return cached.data;
   }
 
-  const response = await fetch(`${API_BASE}/_schema/${module}`);
+  const response = await fetch(`${API_BASE}/_schema/${module}`, fetchOptions);
   if (!response.ok) {
     throw new Error(`Failed to fetch schema for ${module}: ${response.statusText}`);
   }
@@ -80,7 +85,7 @@ export async function fetchRecords(
 
   // Use the plural form for the API path (e.g., /mod/users)
   const url = `${API_BASE}/${modulePlural}${searchParams.toString() ? `?${searchParams}` : ''}`;
-  const response = await fetch(url);
+  const response = await fetch(url, fetchOptions);
   if (!response.ok) {
     throw new Error(`Failed to fetch ${modulePlural}: ${response.statusText}`);
   }
@@ -95,7 +100,7 @@ export async function fetchRecord(
   modulePlural: string,
   idOrLookup: string
 ): Promise<RecordResponse<Record>> {
-  const response = await fetch(`${API_BASE}/${modulePlural}/${encodeURIComponent(idOrLookup)}`);
+  const response = await fetch(`${API_BASE}/${modulePlural}/${encodeURIComponent(idOrLookup)}`, fetchOptions);
   if (!response.ok) {
     if (response.status === 404) {
       throw new Error(`Record not found: ${idOrLookup}`);
@@ -114,6 +119,7 @@ export async function createRecord(
   data: Record
 ): Promise<RecordResponse<Record>> {
   const response = await fetch(`${API_BASE}/${modulePlural}`, {
+    ...fetchOptions,
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -135,6 +141,7 @@ export async function updateRecord(
   data: Record
 ): Promise<RecordResponse<Record>> {
   const response = await fetch(`${API_BASE}/${modulePlural}/${encodeURIComponent(idOrLookup)}`, {
+    ...fetchOptions,
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -155,6 +162,7 @@ export async function deleteRecord(
   idOrLookup: string
 ): Promise<void> {
   const response = await fetch(`${API_BASE}/${modulePlural}/${encodeURIComponent(idOrLookup)}`, {
+    ...fetchOptions,
     method: 'DELETE',
   });
   if (!response.ok) {
@@ -176,6 +184,7 @@ export async function executeAction(
   const response = await fetch(
     `${API_BASE}/${modulePlural}/${encodeURIComponent(idOrLookup)}/${action}`,
     {
+      ...fetchOptions,
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: data ? JSON.stringify(data) : undefined,

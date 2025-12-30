@@ -266,14 +266,24 @@ func (h *AuthHandler) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check password
-	passwordHash, _ := result.Data["password_hash"].(string)
-	if passwordHash == "" {
+	// Check password - handle both string and []byte for password_hash
+	var passwordHashBytes []byte
+	switch v := result.Data["password_hash"].(type) {
+	case string:
+		passwordHashBytes = []byte(v)
+	case []byte:
+		passwordHashBytes = v
+	default:
 		authWriteError(w, fmt.Errorf("invalid email or password"), http.StatusUnauthorized)
 		return
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(req.Password)); err != nil {
+	if len(passwordHashBytes) == 0 {
+		authWriteError(w, fmt.Errorf("invalid email or password"), http.StatusUnauthorized)
+		return
+	}
+
+	if err := bcrypt.CompareHashAndPassword(passwordHashBytes, []byte(req.Password)); err != nil {
 		authWriteError(w, fmt.Errorf("invalid email or password"), http.StatusUnauthorized)
 		return
 	}

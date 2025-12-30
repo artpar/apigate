@@ -96,7 +96,7 @@ export function DynamicTable({
         <h3 className="text-lg font-medium text-gray-900 mb-2">No {module.plural} found</h3>
         <p className="text-gray-500 mb-4">Get started by creating a new {module.module}.</p>
         <Link
-          to={`/${module.plural}/new`}
+          to={`/${module.module}/new`}
           className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -148,7 +148,7 @@ export function DynamicTable({
                   <div className="flex items-center justify-end gap-2">
                     {/* View/Edit */}
                     <Link
-                      to={`/${module.plural}/${record.id}`}
+                      to={`/${module.module}/${record.id}`}
                       className="text-primary-600 hover:text-primary-800"
                       title="View"
                     >

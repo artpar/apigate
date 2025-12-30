@@ -28,7 +28,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const checkAuth = async () => {
     try {
       // First check if setup is required
-      const setupRes = await fetch('/mod/auth/setup-required');
+      const setupRes = await fetch('/mod/auth/setup-required', { credentials: 'include' });
       const setupData = await setupRes.json();
 
       if (setupData.setup_required) {
