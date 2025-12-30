@@ -39,6 +39,9 @@ type Field struct {
 
 	// Constraints defines validation rules for this field.
 	Constraints []Constraint `yaml:"constraints,omitempty"`
+
+	// Description provides human-readable documentation for this field.
+	Description string `yaml:"description,omitempty"`
 }
 
 // FieldType represents the type of a schema field.

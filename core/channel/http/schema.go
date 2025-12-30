@@ -4,6 +4,7 @@ package http
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
 
@@ -75,11 +76,8 @@ func (h *SchemaHandler) getModuleSchema(w http.ResponseWriter, r *http.Request) 
 
 // buildModuleSchema converts convention.Derived to schema.ModuleSchemaResponse
 func (h *SchemaHandler) buildModuleSchema(mod convention.Derived) schema.ModuleSchemaResponse {
-	// Build base path for endpoints
-	basePath := mod.Source.Channels.HTTP.Serve.BasePath
-	if basePath == "" {
-		basePath = "/mod/" + mod.Plural
-	}
+	// Build base path from plural (single source of truth)
+	basePath := "/" + mod.Plural
 
 	resp := schema.ModuleSchemaResponse{
 		Module:      mod.Source.Name,
@@ -102,12 +100,21 @@ func (h *SchemaHandler) buildFields(fields []convention.DerivedField) []schema.F
 	result := make([]schema.FieldSchema, 0, len(fields))
 
 	for _, f := range fields {
+		// Determine if field is filterable (indexed fields)
+		// Fields are filterable if they are: lookup, unique, or id
+		filterable := f.Lookup || f.Unique || f.Name == "id"
+
+		// Determine if field is sortable (non-internal, basic types)
+		sortable := !f.Internal && h.isSortableType(f.Type)
+
 		fs := schema.FieldSchema{
 			Name:        f.Name,
 			Type:        string(f.Type),
 			Required:    f.Required,
 			Unique:      f.Unique,
 			Lookup:      f.Lookup,
+			Filterable:  filterable,
+			Sortable:    sortable,
 			Values:      f.Values,
 			Ref:         f.Ref,
 			Default:     f.Default,
@@ -115,11 +122,30 @@ func (h *SchemaHandler) buildFields(fields []convention.DerivedField) []schema.F
 			Implicit:    f.Implicit,
 			SQLType:     f.SQLType,
 			Constraints: h.buildConstraints(f.Constraints),
+			Description: f.Description,
 		}
 		result = append(result, fs)
 	}
 
 	return result
+}
+
+// isSortableType returns true if the field type supports sorting
+func (h *SchemaHandler) isSortableType(t schema.FieldType) bool {
+	switch t {
+	case schema.FieldTypeString,
+		schema.FieldTypeInt,
+		schema.FieldTypeFloat,
+		schema.FieldTypeBool,
+		schema.FieldTypeEmail,
+		schema.FieldTypeTimestamp,
+		schema.FieldTypeUUID,
+		schema.FieldTypeEnum,
+		schema.FieldTypeRef:
+		return true
+	default:
+		return false
+	}
 }
 
 // buildConstraints converts schema.Constraint to schema.ConstraintSchema
@@ -130,14 +156,47 @@ func (h *SchemaHandler) buildConstraints(constraints []schema.Constraint) []sche
 
 	result := make([]schema.ConstraintSchema, 0, len(constraints))
 	for _, c := range constraints {
+		// Generate human-readable description if not provided
+		message := c.Message
+		if message == "" {
+			message = h.generateConstraintDescription(c)
+		}
+
 		cs := schema.ConstraintSchema{
 			Type:    string(c.Type),
 			Value:   c.Value,
-			Message: c.Message,
+			Message: message,
 		}
 		result = append(result, cs)
 	}
 	return result
+}
+
+// generateConstraintDescription creates a human-readable description for a constraint.
+func (h *SchemaHandler) generateConstraintDescription(c schema.Constraint) string {
+	switch c.Type {
+	case schema.ConstraintMin:
+		return fmt.Sprintf("Value must be at least %v", c.Value)
+	case schema.ConstraintMax:
+		return fmt.Sprintf("Value must be at most %v", c.Value)
+	case schema.ConstraintMinLength:
+		return fmt.Sprintf("Must be at least %v characters", c.Value)
+	case schema.ConstraintMaxLength:
+		return fmt.Sprintf("Must be at most %v characters", c.Value)
+	case schema.ConstraintPattern:
+		return fmt.Sprintf("Must match pattern: %v", c.Value)
+	case schema.ConstraintRefExists:
+		return fmt.Sprintf("Referenced %v must exist", c.Value)
+	case schema.ConstraintNotEmpty:
+		return "Must not be empty"
+	case schema.ConstraintOneOf:
+		if vals, ok := c.Value.([]string); ok {
+			return fmt.Sprintf("Must be one of: %v", vals)
+		}
+		return fmt.Sprintf("Must be one of: %v", c.Value)
+	default:
+		return ""
+	}
 }
 
 // buildActions converts convention.DerivedAction to schema.ActionSchema

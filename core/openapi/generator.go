@@ -348,62 +348,85 @@ func (g *Generator) buildResponseSchema(mod convention.Derived) *Schema {
 // fieldToSchema converts a field to OpenAPI schema.
 func (g *Generator) fieldToSchema(field convention.DerivedField) *Schema {
 	s := &Schema{
-		Description: "",
+		Description: field.Description,
 	}
 
 	// Map field type to OpenAPI type
 	switch field.Type {
 	case schema.FieldTypeString:
 		s.Type = "string"
+		s.Example = g.generateExample(field, "example-value")
 	case schema.FieldTypeInt:
 		s.Type = "integer"
+		s.Example = g.generateExample(field, 100)
 	case schema.FieldTypeFloat:
 		s.Type = "number"
 		s.Format = "float"
+		s.Example = g.generateExample(field, 99.99)
 	case schema.FieldTypeBool:
 		s.Type = "boolean"
+		s.Example = true
 	case schema.FieldTypeEmail:
 		s.Type = "string"
 		s.Format = "email"
+		s.Example = "user@example.com"
 	case schema.FieldTypeURL:
 		s.Type = "string"
 		s.Format = "uri"
+		s.Example = "https://api.example.com/v1"
 	case schema.FieldTypeTimestamp:
 		s.Type = "string"
 		s.Format = "date-time"
+		s.Example = "2024-01-15T10:30:00Z"
 	case schema.FieldTypeDuration:
 		s.Type = "string"
-		s.Description = "Duration in RFC 3339 format"
+		s.Description = "Duration in Go format (e.g., 1h30m, 24h)"
+		s.Example = "1h30m"
 	case schema.FieldTypeUUID:
 		s.Type = "string"
 		s.Format = "uuid"
+		s.Example = "550e8400-e29b-41d4-a716-446655440000"
 	case schema.FieldTypeJSON:
 		s.Type = "object"
+		s.Example = map[string]any{"key": "value"}
 	case schema.FieldTypeBytes:
 		s.Type = "string"
 		s.Format = "byte"
+		s.Example = "YmFzZTY0LWVuY29kZWQ="
 	case schema.FieldTypeSecret:
 		s.Type = "string"
 		s.Format = "password"
+		s.Example = "********"
 	case schema.FieldTypeEnum:
 		s.Type = "string"
 		s.Enum = field.Values
+		if len(field.Values) > 0 {
+			s.Example = field.Values[0]
+		}
 	case schema.FieldTypeRef:
 		s.Type = "string"
-		s.Description = fmt.Sprintf("Reference to %s", field.Ref)
+		if s.Description == "" {
+			s.Description = fmt.Sprintf("Reference to %s", field.Ref)
+		}
+		s.Example = fmt.Sprintf("%s-id-or-lookup", field.Ref)
 	case schema.FieldTypeStrings:
 		s.Type = "array"
 		s.Items = &Schema{Type: "string"}
+		s.Example = []string{"value1", "value2"}
 	case schema.FieldTypeInts:
 		s.Type = "array"
 		s.Items = &Schema{Type: "integer"}
+		s.Example = []int{1, 2, 3}
 	default:
 		s.Type = "string"
+		s.Example = "example"
 	}
 
 	// Add default value
 	if field.Default != nil {
 		s.Default = field.Default
+		// Use default as example if available
+		s.Example = field.Default
 	}
 
 	// Add constraints
@@ -412,6 +435,52 @@ func (g *Generator) fieldToSchema(field convention.DerivedField) *Schema {
 	}
 
 	return s
+}
+
+// generateExample creates a contextual example based on field name and type.
+func (g *Generator) generateExample(field convention.DerivedField, defaultExample any) any {
+	// Generate contextual examples based on field name
+	name := strings.ToLower(field.Name)
+
+	switch {
+	case strings.Contains(name, "name"):
+		if strings.Contains(name, "user") {
+			return "John Doe"
+		}
+		return "Example Name"
+	case strings.Contains(name, "email"):
+		return "user@example.com"
+	case strings.Contains(name, "url") || strings.Contains(name, "endpoint"):
+		return "https://api.example.com"
+	case strings.Contains(name, "path"):
+		return "/api/v1/resource"
+	case strings.Contains(name, "method"):
+		return "GET"
+	case strings.Contains(name, "port"):
+		return 8080
+	case strings.Contains(name, "host"):
+		return "localhost"
+	case strings.Contains(name, "timeout"):
+		return "30s"
+	case strings.Contains(name, "limit"):
+		return 100
+	case strings.Contains(name, "count"):
+		return 10
+	case strings.Contains(name, "rate"):
+		return 60
+	case strings.Contains(name, "price"):
+		return 999
+	case strings.Contains(name, "description"):
+		return "A brief description of this item"
+	case strings.Contains(name, "key"):
+		return "ak_example_key_prefix"
+	case strings.Contains(name, "secret"):
+		return "********"
+	case strings.Contains(name, "id") && field.Type == schema.FieldTypeUUID:
+		return "550e8400-e29b-41d4-a716-446655440000"
+	}
+
+	return defaultExample
 }
 
 // applyConstraint applies a constraint to a schema.

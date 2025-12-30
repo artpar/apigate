@@ -37,6 +37,8 @@ type FieldSchema struct {
 	Required    bool              `json:"required"`
 	Unique      bool              `json:"unique,omitempty"`
 	Lookup      bool              `json:"lookup,omitempty"`
+	Filterable  bool              `json:"filterable,omitempty"`  // can be used in query filters
+	Sortable    bool              `json:"sortable,omitempty"`    // can be used in order_by
 	Values      []string          `json:"values,omitempty"`      // enum options
 	Ref         string            `json:"ref,omitempty"`         // foreign key target module
 	Default     any               `json:"default,omitempty"`
@@ -44,6 +46,7 @@ type FieldSchema struct {
 	Implicit    bool              `json:"implicit,omitempty"`    // auto-generated (id, created_at, etc.)
 	SQLType     string            `json:"sql_type,omitempty"`    // for tooling
 	Constraints []ConstraintSchema `json:"constraints,omitempty"` // validation rules
+	Description string            `json:"description,omitempty"` // human-readable documentation
 }
 
 // ConstraintSchema describes a field constraint for introspection.
