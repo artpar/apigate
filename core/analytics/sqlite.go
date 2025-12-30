@@ -297,9 +297,19 @@ func (s *SQLiteStore) Query(ctx context.Context, opts QueryOptions) ([]Event, in
 		return nil, 0, err
 	}
 
-	// Order
+	// Order - whitelist allowed columns to prevent SQL injection
+	allowedOrderCols := map[string]bool{
+		"timestamp":      true,
+		"duration_ns":    true,
+		"memory_bytes":   true,
+		"request_bytes":  true,
+		"response_bytes": true,
+		"module":         true,
+		"action":         true,
+		"channel":        true,
+	}
 	orderBy := "timestamp"
-	if opts.OrderBy != "" {
+	if opts.OrderBy != "" && allowedOrderCols[opts.OrderBy] {
 		orderBy = opts.OrderBy
 	}
 	order := "DESC"
@@ -444,7 +454,7 @@ func (s *SQLiteStore) Aggregate(ctx context.Context, opts AggregateOptions) ([]S
 			COUNT(*) as total_requests,
 			SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as success_requests,
 			SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as error_requests,
-			AVG(duration_ns) as avg_duration_ns,
+			CAST(COALESCE(AVG(duration_ns), 0) AS INTEGER) as avg_duration_ns,
 			MIN(duration_ns) as min_duration_ns,
 			MAX(duration_ns) as max_duration_ns,
 			SUM(memory_bytes) as total_memory_bytes,
