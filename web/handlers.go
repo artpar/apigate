@@ -1365,6 +1365,7 @@ func (h *Handler) SetupStepSubmit(w http.ResponseWriter, r *http.Request) {
 		})
 
 		http.Redirect(w, r, "/setup/step/1", http.StatusFound)
+		return
 	case 1:
 		// Create admin user
 		email := r.FormValue("admin_email")
@@ -1414,6 +1415,7 @@ func (h *Handler) SetupStepSubmit(w http.ResponseWriter, r *http.Request) {
 		}
 
 		http.Redirect(w, r, "/setup/step/2", http.StatusFound)
+		return
 	case 2:
 		// Create the plan from form data
 		planName := r.FormValue("plan_name")
@@ -1474,6 +1476,7 @@ func (h *Handler) SetupStepSubmit(w http.ResponseWriter, r *http.Request) {
 		}
 
 		http.Redirect(w, r, "/setup/step/3", http.StatusFound)
+		return
 	default:
 		// After setup complete, redirect to dashboard (user already logged in from step 1)
 		http.Redirect(w, r, "/dashboard", http.StatusFound)

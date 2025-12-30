@@ -245,7 +245,7 @@ body.panel-open .main-content { margin-right: 380px; }
 /* Info Tooltip - shows detailed explanation on hover */
 .info-tooltip { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-left: 6px; font-size: 11px; font-weight: 600; color: #6b7280; background: #e5e7eb; border-radius: 50%; cursor: help; vertical-align: middle; }
 .info-tooltip:hover { background: #3b82f6; color: #fff; }
-.info-tooltip::after { content: attr(data-tip); position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%); margin-bottom: 8px; padding: 10px 14px; background: #1f2937; color: #fff; font-size: 0.8125rem; font-weight: 400; line-height: 1.5; border-radius: 6px; white-space: normal; width: max-content; max-width: 320px; opacity: 0; visibility: hidden; transition: opacity 0.15s; z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.15); pointer-events: none; }
+.info-tooltip::after { content: attr(data-tip); position: absolute; left: 100%; top: 50%; bottom: auto; transform: translateY(-50%); margin-left: 8px; margin-bottom: 0; padding: 10px 14px; background: #1f2937; color: #fff; font-size: 0.8125rem; font-weight: 400; line-height: 1.5; border-radius: 6px; white-space: normal; width: max-content; max-width: 280px; min-width: 200px; opacity: 0; visibility: hidden; transition: opacity 0.15s; z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.15); pointer-events: none; }
 .info-tooltip:hover::after { opacity: 1; visibility: visible; }
 
 /* Docs Link - inline link to extended documentation */
@@ -593,20 +593,8 @@ body.panel-open .test-result-grid { grid-template-columns: 1fr; }
 }
 
 /* === INFO TOOLTIP RESPONSIVE === */
-/* Prevent tooltip overflow on narrow screens */
-.info-tooltip::after {
-    left: auto;
-    right: 0;
-    transform: none;
-}
-
-@media (min-width: 768px) {
-    .info-tooltip::after {
-        left: 50%;
-        right: auto;
-        transform: translateX(-50%);
-    }
-}
+/* Tooltip always aligns to left of icon to prevent clipping */
+/* No responsive overrides needed - left: 0 works for all screen sizes */
 
 /* === TABS RESPONSIVE === */
 @media (max-width: 600px) {
