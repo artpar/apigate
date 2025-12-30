@@ -90,6 +90,11 @@ func (s *SQLiteStore) Create(ctx context.Context, module string, data map[string
 		return "", fmt.Errorf("module %q not registered", module)
 	}
 
+	// Validate references before insert
+	if err := s.validateReferences(ctx, mod, data); err != nil {
+		return "", err
+	}
+
 	// Generate ID if not provided
 	id, ok := data["id"].(string)
 	if !ok || id == "" {
@@ -224,10 +229,22 @@ func (s *SQLiteStore) List(ctx context.Context, module string, opts ListOptions)
 	// Build main query
 	querySQL := fmt.Sprintf("SELECT %s FROM %s%s", strings.Join(columns, ", "), mod.Table, whereClause)
 
-	// Add ordering
+	// Add ordering - validate orderBy against actual field names to prevent SQL injection
 	orderBy := opts.OrderBy
 	if orderBy == "" {
 		orderBy = "created_at"
+	} else {
+		// Validate that orderBy is an actual field name
+		validField := false
+		for _, f := range mod.Fields {
+			if f.Name == orderBy {
+				validField = true
+				break
+			}
+		}
+		if !validField {
+			orderBy = "created_at" // Fall back to safe default
+		}
 	}
 	if opts.OrderDesc {
 		querySQL += fmt.Sprintf(" ORDER BY %s DESC", orderBy)
@@ -278,6 +295,11 @@ func (s *SQLiteStore) Update(ctx context.Context, module string, id string, data
 
 	if !ok {
 		return fmt.Errorf("module %q not registered", module)
+	}
+
+	// Validate references before update
+	if err := s.validateReferences(ctx, mod, data); err != nil {
+		return err
 	}
 
 	// Build UPDATE statement
@@ -418,4 +440,44 @@ func convertFromDB(val any, f convention.DerivedField) any {
 		}
 		return val
 	}
+}
+
+// validateReferences checks that all referenced records exist.
+func (s *SQLiteStore) validateReferences(ctx context.Context, mod convention.Derived, data map[string]any) error {
+	for _, field := range mod.Fields {
+		// Skip fields without references
+		if field.Ref == "" {
+			continue
+		}
+
+		// Get the reference value from data
+		refValue, exists := data[field.Name]
+		if !exists || refValue == nil {
+			continue // No value provided, skip validation
+		}
+
+		refID, ok := refValue.(string)
+		if !ok || refID == "" {
+			continue // Empty or invalid reference, skip
+		}
+
+		// Get the referenced module
+		refMod, ok := s.modules[field.Ref]
+		if !ok {
+			return fmt.Errorf("referenced module %q not registered for field %q", field.Ref, field.Name)
+		}
+
+		// Check if the referenced record exists
+		var count int
+		query := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE id = ?", refMod.Table)
+		if err := s.db.QueryRowContext(ctx, query, refID).Scan(&count); err != nil {
+			return fmt.Errorf("check reference for field %q: %w", field.Name, err)
+		}
+
+		if count == 0 {
+			return fmt.Errorf("referenced %s with id %q does not exist (field: %s)", field.Ref, refID, field.Name)
+		}
+	}
+
+	return nil
 }

@@ -41,6 +41,20 @@ func (v *Validator) ValidateCreate(moduleName string, data map[string]any) schem
 		return result
 	}
 
+	// Build field lookup for unknown field detection
+	knownFields := make(map[string]bool)
+	for _, f := range mod.Fields {
+		knownFields[f.Name] = true
+	}
+
+	// Check for unknown fields (strict mode - fail loud)
+	for fieldName := range data {
+		if !knownFields[fieldName] {
+			result.AddError(fieldName, "unknown_field", fieldName,
+				fmt.Sprintf("unknown field '%s' - not defined in schema", fieldName))
+		}
+	}
+
 	for _, field := range mod.Fields {
 		value, hasValue := data[field.Name]
 
@@ -94,7 +108,9 @@ func (v *Validator) ValidateUpdate(moduleName string, data map[string]any) schem
 	for fieldName, value := range data {
 		field, ok := fieldMap[fieldName]
 		if !ok {
-			// Unknown field - could be a warning or error depending on strictness
+			// Unknown field - strict mode: reject unknown fields
+			result.AddError(fieldName, "unknown_field", fieldName,
+				fmt.Sprintf("unknown field '%s' - not defined in schema", fieldName))
 			continue
 		}
 
