@@ -8,7 +8,7 @@ schema:
   name:          { type: string, default: "" }
 
   # Billing integration
-  stripe_id:     { type: string }
+  stripe_id:     { type: string, internal: true }
   plan_id:       { type: ref, to: plan, default: "free" }
 
   # Account state

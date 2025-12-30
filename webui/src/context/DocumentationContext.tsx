@@ -6,7 +6,7 @@
  * contextual documentation in the right pane.
  */
 
-import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useState, useCallback, useMemo, useRef } from 'react';
 import type { DocFocus, ModuleSchema, FieldSchema, ActionSchema } from '@/types/schema';
 
 interface DocumentationContextValue {
@@ -22,8 +22,11 @@ interface DocumentationContextValue {
   /** Set focus to an action within current module */
   focusAction: (action: ActionSchema, module: ModuleSchema) => void;
 
-  /** Clear focus (show default documentation) */
+  /** Clear focus (show default documentation) - delayed to allow hovering on docs panel */
   clearFocus: () => void;
+
+  /** Cancel pending clear focus (call when hovering on docs panel) */
+  cancelClearFocus: () => void;
 
   /** Whether documentation panel is expanded */
   isExpanded: boolean;
@@ -40,22 +43,38 @@ const DocumentationContext = createContext<DocumentationContextValue | null>(nul
 export function DocumentationProvider({ children }: { children: React.ReactNode }) {
   const [focus, setFocus] = useState<DocFocus>({ type: 'none' });
   const [isExpanded, setIsExpanded] = useState(true);
+  const clearTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cancel any pending clear
+  const cancelClearFocus = useCallback(() => {
+    if (clearTimeoutRef.current) {
+      clearTimeout(clearTimeoutRef.current);
+      clearTimeoutRef.current = null;
+    }
+  }, []);
 
   const focusModule = useCallback((module: ModuleSchema) => {
+    cancelClearFocus();
     setFocus({ type: 'module', module });
-  }, []);
+  }, [cancelClearFocus]);
 
   const focusField = useCallback((field: FieldSchema, module: ModuleSchema) => {
+    cancelClearFocus();
     setFocus({ type: 'field', field, module });
-  }, []);
+  }, [cancelClearFocus]);
 
   const focusAction = useCallback((action: ActionSchema, module: ModuleSchema) => {
+    cancelClearFocus();
     setFocus({ type: 'action', action, module });
-  }, []);
+  }, [cancelClearFocus]);
 
+  // Delayed clear to allow hovering on documentation panel
   const clearFocus = useCallback(() => {
-    setFocus({ type: 'none' });
-  }, []);
+    cancelClearFocus();
+    clearTimeoutRef.current = setTimeout(() => {
+      setFocus({ type: 'none' });
+    }, 300); // 300ms delay gives time to move to docs panel
+  }, [cancelClearFocus]);
 
   const toggleExpanded = useCallback(() => {
     setIsExpanded(prev => !prev);
@@ -71,10 +90,11 @@ export function DocumentationProvider({ children }: { children: React.ReactNode 
     focusField,
     focusAction,
     clearFocus,
+    cancelClearFocus,
     isExpanded,
     toggleExpanded,
     setExpanded,
-  }), [focus, focusModule, focusField, focusAction, clearFocus, isExpanded, toggleExpanded, setExpanded]);
+  }), [focus, focusModule, focusField, focusAction, clearFocus, cancelClearFocus, isExpanded, toggleExpanded, setExpanded]);
 
   return (
     <DocumentationContext.Provider value={value}>

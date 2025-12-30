@@ -18,11 +18,12 @@ import (
 
 // Channel implements the HTTP channel for modules.
 type Channel struct {
-	router  chi.Router
-	runtime *runtime.Runtime
-	modules map[string]convention.Derived
-	addr    string
-	server  *http.Server
+	router      chi.Router
+	runtime     *runtime.Runtime
+	modules     map[string]convention.Derived
+	addr        string
+	server      *http.Server
+	authHandler *AuthHandler
 }
 
 // New creates a new HTTP channel.
@@ -33,6 +34,12 @@ func New(rt *runtime.Runtime, addr string) *Channel {
 		modules: make(map[string]convention.Derived),
 		addr:    addr,
 	}
+
+	// Create auth handler
+	c.authHandler = NewAuthHandler(rt)
+
+	// Register auth routes (login, register, logout, me)
+	c.router.Mount("/auth", c.authHandler.Routes())
 
 	// Register schema introspection routes
 	schemaHandler := NewSchemaHandler(c.modules)
@@ -46,11 +53,14 @@ func New(rt *runtime.Runtime, addr string) *Channel {
 	c.router.Get("/swagger", c.handleSwaggerUI)
 	c.router.Get("/swagger/", c.handleSwaggerUI)
 
-	// Mount Web UI at /ui
-	// Create a subrouter for the UI that handles all subpaths
+	// Mount Web UI at /ui (and root)
+	webHandler := WebUIHandler()
 	c.router.Route("/ui", func(r chi.Router) {
-		webHandler := WebUIHandler()
 		r.Get("/*", webHandler.ServeHTTP)
+	})
+	// Also serve UI at root for clean URLs
+	c.router.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/ui/", http.StatusTemporaryRedirect)
 	})
 
 	return c

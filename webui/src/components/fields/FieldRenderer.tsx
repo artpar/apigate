@@ -8,6 +8,7 @@
 import React, { forwardRef } from 'react';
 import type { FieldSchema, ModuleSchema } from '@/types/schema';
 import { useFieldDocumentation } from '@/context/DocumentationContext';
+import { RefField } from './RefField';
 
 interface FieldRendererProps {
   field: FieldSchema;
@@ -251,24 +252,17 @@ export const FieldRenderer = forwardRef<HTMLInputElement, FieldRendererProps>(
         );
 
       case 'ref':
-        // TODO: Implement autocomplete lookup for references
         return (
           <div className="mb-4" {...docHandlers}>
             {label}
-            <div className="relative">
-              <input
-                ref={ref}
-                type="text"
-                value={String(value ?? '')}
-                onChange={(e) => onChange(e.target.value)}
-                disabled={disabled || field.computed}
-                className={baseClasses}
-                placeholder={`Enter ${field.ref} ID...`}
-              />
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">
-                {field.ref}
-              </span>
-            </div>
+            <RefField
+              targetModule={field.ref || ''}
+              value={value as string | undefined}
+              onChange={(val) => onChange(val)}
+              disabled={disabled || field.computed}
+              hasError={!!error}
+              placeholder={`Select ${formatLabel(field.ref || 'reference')}...`}
+            />
             {helpText}
             {errorMessage}
           </div>

@@ -111,7 +111,7 @@ function Sidebar() {
             {modules.map((mod) => (
               <NavLink
                 key={mod.module}
-                to={`/${mod.plural}`}
+                to={`/${mod.module}`}
                 className={({ isActive }) =>
                   `flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
                     isActive

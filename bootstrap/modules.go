@@ -286,7 +286,7 @@ func coreUserModule() schema.Module {
 			"email":         {Type: schema.FieldTypeEmail, Unique: true, Lookup: true, Required: boolPtr(true)},
 			"password_hash": {Type: schema.FieldTypeSecret, Internal: true},
 			"name":          {Type: schema.FieldTypeString, Default: ""},
-			"stripe_id":     {Type: schema.FieldTypeString},
+			"stripe_id":     {Type: schema.FieldTypeString, Internal: true},
 			"plan_id":       {Type: schema.FieldTypeRef, To: "plan", Default: "free"},
 			"status":        {Type: schema.FieldTypeEnum, Values: []string{"pending", "active", "suspended", "cancelled"}, Default: "active"},
 		},

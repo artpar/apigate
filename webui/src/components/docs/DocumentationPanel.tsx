@@ -37,7 +37,7 @@ const tabs: Tab[] = [
 ];
 
 export function DocumentationPanel() {
-  const { focus, isExpanded, toggleExpanded } = useDocumentation();
+  const { focus, isExpanded, toggleExpanded, cancelClearFocus } = useDocumentation();
   const [activeTab, setActiveTab] = useState<TabId>('spec');
 
   if (!isExpanded) {
@@ -55,7 +55,10 @@ export function DocumentationPanel() {
   }
 
   return (
-    <div className="w-80 bg-white border-l border-gray-200 flex flex-col h-full">
+    <div
+      className="w-80 bg-white border-l border-gray-200 flex flex-col h-full"
+      onMouseEnter={cancelClearFocus}
+    >
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50">
         <h2 className="text-sm font-semibold text-gray-700">Documentation</h2>
