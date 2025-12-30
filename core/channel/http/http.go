@@ -85,11 +85,8 @@ func (c *Channel) Register(mod convention.Derived) error {
 
 	c.modules[mod.Source.Name] = mod
 
-	// Build base path
-	basePath := mod.Source.Channels.HTTP.Serve.BasePath
-	if basePath == "" {
-		basePath = "/api/" + mod.Plural
-	}
+	// Build base path from plural (single source of truth)
+	basePath := "/" + mod.Plural
 
 	// Register routes for each action
 	for _, action := range mod.Actions {
@@ -282,10 +279,16 @@ func (c *Channel) doCreate(ctx context.Context, w http.ResponseWriter, r *http.R
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	c.writeJSON(w, map[string]any{
+
+	// Build response with optional meta (e.g., raw_key for API keys)
+	resp := map[string]any{
 		"id":   result.ID,
 		"data": result.Data,
-	})
+	}
+	if len(result.Meta) > 0 {
+		resp["meta"] = result.Meta
+	}
+	c.writeJSON(w, resp)
 }
 
 // doUpdate handles update requests.

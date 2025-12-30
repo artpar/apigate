@@ -120,6 +120,12 @@ export interface ListResponse<T> {
 export interface RecordResponse<T> {
   module: string;
   data: T;
+  id?: string;
+  /** Meta contains one-time data from hooks (e.g., raw_key for API keys) */
+  meta?: {
+    raw_key?: string;
+    [key: string]: unknown;
+  };
 }
 
 /** API error response */

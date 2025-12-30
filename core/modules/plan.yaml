@@ -3,25 +3,25 @@ module: plan
 
 schema:
   # Identity
-  name:               { type: string, required: true, lookup: true }
-  description:        { type: string, default: "" }
+  name:               { type: string, required: true, lookup: true, description: "Unique name identifying this pricing plan" }
+  description:        { type: string, default: "", description: "Human-readable description of plan features" }
 
   # Rate limiting
-  rate_limit_per_minute: { type: int, default: 60 }
-  requests_per_month:    { type: int, default: 1000 }
+  rate_limit_per_minute: { type: int, default: 60, description: "Maximum API requests allowed per minute" }
+  requests_per_month:    { type: int, default: 1000, description: "Total API requests included per billing cycle" }
 
   # Pricing (all values in cents)
-  price_monthly:      { type: int, default: 0 }
-  overage_price:      { type: int, default: 0 }
+  price_monthly:      { type: int, default: 0, description: "Monthly subscription price in cents" }
+  overage_price:      { type: int, default: 0, description: "Price per additional request beyond quota in cents" }
 
   # Payment provider IDs
-  stripe_price_id:    { type: string }
-  paddle_price_id:    { type: string }
-  lemon_variant_id:   { type: string }
+  stripe_price_id:    { type: string, description: "Stripe Price ID for subscription billing" }
+  paddle_price_id:    { type: string, description: "Paddle Price ID for subscription billing" }
+  lemon_variant_id:   { type: string, description: "LemonSqueezy variant ID for subscription billing" }
 
   # Plan state
-  is_default:         { type: bool, default: false }
-  enabled:            { type: bool, default: true }
+  is_default:         { type: bool, default: false, description: "Whether this plan is assigned to new users" }
+  enabled:            { type: bool, default: true, description: "Whether this plan is available for selection" }
 
 actions:
   enable:

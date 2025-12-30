@@ -5,6 +5,7 @@ import { ThreePaneLayout } from '@/components/layout/ThreePaneLayout';
 import { Dashboard } from '@/pages/Dashboard';
 import { ModuleList } from '@/pages/ModuleList';
 import { ModuleView } from '@/pages/ModuleView';
+import { UsageDashboard } from '@/pages/UsageDashboard';
 import { Login } from '@/pages/Login';
 import { Register } from '@/pages/Register';
 import { Setup } from '@/pages/Setup';
@@ -118,6 +119,7 @@ function AppRoutes() {
         }
       >
         <Route index element={<Dashboard />} />
+        <Route path="usage" element={<UsageDashboard />} />
         <Route path=":module" element={<ModuleList />} />
         <Route path=":module/:id" element={<ModuleView />} />
       </Route>

@@ -74,6 +74,9 @@ type DerivedField struct {
 
 	// Constraints are validation rules for this field.
 	Constraints []schema.Constraint
+
+	// Description provides human-readable documentation for this field.
+	Description string
 }
 
 // DerivedAction is a fully-derived action with all defaults applied.
@@ -180,6 +183,7 @@ func deriveFields(mod schema.Module) []DerivedField {
 			Ref:         f.To,
 			Implicit:    false,
 			Constraints: f.Constraints,
+			Description: f.Description,
 		}
 		fields = append(fields, field)
 	}
@@ -279,6 +283,7 @@ func deriveActions(mod schema.Module, fields []DerivedField) []DerivedAction {
 			Type:        schema.ActionTypeCustom,
 			Source:      &action,
 			Set:         action.Set,
+			Input:       deriveCustomActionInputs(action.Input),
 			Auth:        action.Auth,
 			Confirm:     action.Confirm,
 			Description: action.Description,
@@ -297,6 +302,32 @@ func deriveActions(mod schema.Module, fields []DerivedField) []DerivedAction {
 	}
 
 	return actions
+}
+
+// deriveCustomActionInputs converts schema.ActionInput to convention.ActionInput for custom actions.
+func deriveCustomActionInputs(inputs []schema.ActionInput) []ActionInput {
+	if len(inputs) == 0 {
+		return nil
+	}
+
+	result := make([]ActionInput, len(inputs))
+	for i, input := range inputs {
+		name := input.Name
+		if name == "" {
+			name = input.Field
+		}
+
+		result[i] = ActionInput{
+			Name:       name,
+			Field:      input.Field,
+			Type:       schema.FieldType(input.Type),
+			Required:   input.Required,
+			Default:    input.Default,
+			Prompt:     input.Prompt,
+			PromptText: input.PromptText,
+		}
+	}
+	return result
 }
 
 // deriveCreateInputs derives input parameters for create action.

@@ -3,9 +3,9 @@ module: setting
 
 schema:
   # Key-value storage
-  key:        { type: string, unique: true, lookup: true, required: true }
-  value:      { type: string, required: true }
-  encrypted:  { type: int, default: 0 }  # SQLite stores as INTEGER
+  key:        { type: string, unique: true, lookup: true, required: true, description: "Unique configuration key (e.g., smtp.host, auth.jwt_secret)" }
+  value:      { type: string, required: true, description: "Configuration value (may be encrypted if sensitive)" }
+  encrypted:  { type: int, default: 0, description: "Whether the value is stored encrypted (0=plaintext, 1=encrypted)" }
 
 actions:
   # Get by prefix (for grouped settings)

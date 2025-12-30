@@ -3,24 +3,24 @@ module: upstream
 
 schema:
   # Identity
-  name:             { type: string, required: true, lookup: true }
-  description:      { type: string, default: "" }
+  name:             { type: string, required: true, lookup: true, description: "Unique name identifying this upstream service" }
+  description:      { type: string, default: "", description: "Human-readable description of this backend service" }
 
   # Target
-  base_url:         { type: string, required: true }
-  timeout_ms:       { type: int, default: 30000 }
+  base_url:         { type: string, required: true, description: "Base URL of the backend service (e.g., https://api.example.com)" }
+  timeout_ms:       { type: int, default: 30000, description: "Request timeout in milliseconds" }
 
   # Connection pooling
-  max_idle_conns:   { type: int, default: 100 }
-  idle_conn_timeout_ms: { type: int, default: 90000 }
+  max_idle_conns:   { type: int, default: 100, description: "Maximum number of idle connections to maintain" }
+  idle_conn_timeout_ms: { type: int, default: 90000, description: "How long idle connections are kept alive in milliseconds" }
 
   # Authentication injection
-  auth_type:        { type: enum, values: [none, header, bearer, basic], default: none }
-  auth_header:      { type: string, default: "" }
-  auth_value_encrypted: { type: bytes, default: null }  # Encrypted auth value (BLOB)
+  auth_type:        { type: enum, values: [none, header, bearer, basic], default: none, description: "Type of authentication to inject into upstream requests" }
+  auth_header:      { type: string, default: "", description: "Custom header name for authentication (when auth_type is header)" }
+  auth_value_encrypted: { type: bytes, default: null, description: "Encrypted authentication credentials" }
 
   # State
-  enabled:          { type: bool, default: true }
+  enabled:          { type: bool, default: true, description: "Whether this upstream is available for routing" }
 
 actions:
   enable:

@@ -3,16 +3,16 @@ module: user
 
 schema:
   # Core identity
-  email:         { type: email, unique: true, lookup: true, required: true }
-  password_hash: { type: secret, internal: true }
-  name:          { type: string, default: "" }
+  email:         { type: email, unique: true, lookup: true, required: true, description: "Primary email address for login and notifications" }
+  password_hash: { type: secret, internal: true, description: "Hashed password for authentication" }
+  name:          { type: string, default: "", description: "Display name for the user" }
 
   # Billing integration
-  stripe_id:     { type: string, internal: true }
-  plan_id:       { type: ref, to: plan, default: "free" }
+  stripe_id:     { type: string, internal: true, description: "Stripe customer ID for payment processing" }
+  plan_id:       { type: ref, to: plan, default: "free", description: "Reference to the user's pricing plan" }
 
   # Account state
-  status:        { type: enum, values: [pending, active, suspended, cancelled], default: active }
+  status:        { type: enum, values: [pending, active, suspended, cancelled], default: active, description: "Current account status controlling access" }
 
 actions:
   # Account lifecycle

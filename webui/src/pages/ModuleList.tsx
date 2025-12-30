@@ -8,13 +8,14 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { fetchModuleSchema, fetchRecords, deleteRecord } from '@/api/schema';
+import { fetchModuleSchema, fetchRecords, deleteRecord, executeAction } from '@/api/schema';
 import { DynamicTable } from '@/components/DynamicTable';
 
 export function ModuleList() {
   const { module } = useParams<{ module: string }>();
   const queryClient = useQueryClient();
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [actionConfirm, setActionConfirm] = useState<{ action: string; id: string } | null>(null);
 
   // Fetch schema
   const { data: schema, isLoading: schemaLoading } = useQuery({
@@ -39,6 +40,16 @@ export function ModuleList() {
     },
   });
 
+  // Custom action mutation
+  const actionMutation = useMutation({
+    mutationFn: ({ action, id }: { action: string; id: string }) =>
+      executeAction(schema!.plural, action, id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['records', module] });
+      setActionConfirm(null);
+    },
+  });
+
   const handleDelete = (id: string) => {
     setDeleteConfirm(id);
   };
@@ -46,6 +57,22 @@ export function ModuleList() {
   const confirmDelete = () => {
     if (deleteConfirm) {
       deleteMutation.mutate(deleteConfirm);
+    }
+  };
+
+  // Handle custom action - check if it requires confirmation
+  const handleAction = (action: string, id: string) => {
+    const actionDef = schema?.actions.find((a) => a.name === action);
+    if (actionDef?.confirm) {
+      setActionConfirm({ action, id });
+    } else {
+      actionMutation.mutate({ action, id });
+    }
+  };
+
+  const confirmAction = () => {
+    if (actionConfirm) {
+      actionMutation.mutate(actionConfirm);
     }
   };
 
@@ -97,6 +124,7 @@ export function ModuleList() {
         records={recordsData?.data || []}
         isLoading={recordsLoading}
         onDelete={handleDelete}
+        onAction={handleAction}
       />
 
       {/* Delete Confirmation Modal */}
@@ -125,6 +153,44 @@ export function ModuleList() {
           </div>
         </div>
       )}
+
+      {/* Action Confirmation Modal */}
+      {actionConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              Confirm {formatActionName(actionConfirm.action)}
+            </h3>
+            <p className="text-gray-600 mb-6">
+              {schema.actions.find((a) => a.name === actionConfirm.action)?.description ||
+                `Are you sure you want to ${actionConfirm.action} this ${schema.module}?`}
+            </p>
+            <div className="flex items-center justify-end gap-3">
+              <button
+                onClick={() => setActionConfirm(null)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmAction}
+                disabled={actionMutation.isPending}
+                className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-50"
+              >
+                {actionMutation.isPending ? 'Processing...' : formatActionName(actionConfirm.action)}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+// Format action name for display (e.g., "set_default" -> "Set Default")
+function formatActionName(name: string): string {
+  return name
+    .split('_')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
 }

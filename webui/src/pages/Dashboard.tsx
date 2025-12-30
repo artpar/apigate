@@ -134,7 +134,9 @@ function ModuleCard({ module }: { module: ModuleSummary }) {
 
   return (
     <Link
-      to={`/${module.plural}`}
+      to={`/${module.module}`}
+      data-testid="module-card"
+      data-module={module.module}
       className="block bg-white rounded-lg shadow-sm border border-gray-200 p-5 hover:shadow-md hover:border-primary-300 transition-all"
     >
       <div className="flex items-start justify-between">

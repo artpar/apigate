@@ -3,34 +3,34 @@ module: route
 
 schema:
   # Identity
-  name:           { type: string, required: true, lookup: true }
-  description:    { type: string, default: "" }
+  name:           { type: string, required: true, lookup: true, description: "Unique name identifying this route" }
+  description:    { type: string, default: "", description: "Human-readable description of this route's purpose" }
 
   # Matching criteria
-  path_pattern:   { type: string, required: true }
-  match_type:     { type: enum, values: [exact, prefix, regex], default: prefix }
-  methods:        { type: json }        # Array of HTTP methods, empty = all
-  headers:        { type: json }        # Array of header match conditions
+  path_pattern:   { type: string, required: true, description: "URL path pattern to match incoming requests" }
+  match_type:     { type: enum, values: [exact, prefix, regex], default: prefix, description: "How path_pattern is matched: exact, prefix, or regex" }
+  methods:        { type: json, description: "HTTP methods to match (empty array matches all methods)" }
+  headers:        { type: json, description: "Header conditions that must match for this route" }
 
   # Target configuration
-  upstream_id:    { type: ref, to: upstream, required: true }
-  path_rewrite:   { type: string }      # Expr expression for path rewriting
-  method_override: { type: string }     # Override request method
+  upstream_id:    { type: ref, to: upstream, required: true, description: "Backend service to forward matching requests to" }
+  path_rewrite:   { type: string, description: "Expression to transform the request path before forwarding" }
+  method_override: { type: string, description: "Override the HTTP method when forwarding to upstream" }
 
   # Transformations (JSON objects)
-  request_transform:  { type: json }    # Request transformation rules
-  response_transform: { type: json }    # Response transformation rules
+  request_transform:  { type: json, description: "Rules to transform request headers and body" }
+  response_transform: { type: json, description: "Rules to transform response headers and body" }
 
   # Metering
-  metering_expr:  { type: string, default: "1" }
-  metering_mode:  { type: enum, values: [request, response_field, bytes, custom], default: request }
+  metering_expr:  { type: string, default: "1", description: "Expression to calculate request cost for rate limiting" }
+  metering_mode:  { type: enum, values: [request, response_field, bytes, custom], default: request, description: "How API usage is measured for billing" }
 
   # Protocol behavior
-  protocol:       { type: enum, values: [http, http_stream, sse, websocket], default: http }
+  protocol:       { type: enum, values: [http, http_stream, sse, websocket], default: http, description: "Protocol handling mode for this route" }
 
   # Priority and state
-  priority:       { type: int, default: 0 }
-  enabled:        { type: bool, default: true }
+  priority:       { type: int, default: 0, description: "Route matching priority (higher values match first)" }
+  enabled:        { type: bool, default: true, description: "Whether this route is active and processing requests" }
 
 actions:
   enable:
