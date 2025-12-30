@@ -79,11 +79,46 @@
                         <td class="text-muted">{{timeAgo .LastUsed}}</td>
                     </tr>
                     {{else}}
-                    <tr><td colspan="4" class="table-empty">No usage data for this period.</td></tr>
+                    <tr><td colspan="4" class="table-empty">
+                        <div class="empty-state-inline">
+                            <strong>No usage data yet</strong>
+                            <p>Usage data appears here when users make API requests. Try changing the time period.</p>
+                        </div>
+                    </td></tr>
                     {{end}}
                 </tbody>
             </table>
         </div>
     </div>
+</div>
+{{end}}
+
+{{define "panel-docs"}}
+<div class="panel-section">
+    <h3>Usage Statistics</h3>
+    <p>Monitor API consumption across all users and API keys. Track requests, errors, and rate limiting.</p>
+</div>
+
+<div class="panel-section">
+    <h4>Statistics Explained</h4>
+    <ul class="panel-list">
+        <li><strong>Total Requests</strong> - All API calls in the selected period</li>
+        <li><strong>Successful</strong> - Requests that returned 2xx status</li>
+        <li><strong>Rate Limited</strong> - Requests blocked due to rate limits (429)</li>
+        <li><strong>Errors</strong> - Requests with 4xx/5xx errors</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>Filtering</h4>
+    <ul class="panel-list">
+        <li><strong>User</strong> - Filter by specific user or view all</li>
+        <li><strong>Period</strong> - Today, this week, or this month</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>Usage Tracking</h4>
+    <p>Usage is tracked per API key and aggregated by user. This data is used to enforce monthly quotas and for billing purposes.</p>
 </div>
 {{end}}

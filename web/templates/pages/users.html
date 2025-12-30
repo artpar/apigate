@@ -12,3 +12,33 @@
     </div>
 </div>
 {{end}}
+
+{{define "panel-docs"}}
+<div class="panel-section">
+    <h3>Users</h3>
+    <p>Users are your API consumers. Each user can have one or more API keys to access your gateway.</p>
+</div>
+
+<div class="panel-section">
+    <h4>User Properties</h4>
+    <ul class="panel-list">
+        <li><strong>Email</strong> - Unique identifier for the user</li>
+        <li><strong>Plan</strong> - Determines rate limits and quotas</li>
+        <li><strong>Status</strong> - Active or suspended</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>Managing Users</h4>
+    <ul class="panel-list">
+        <li><strong>Create</strong> - Add a new API consumer</li>
+        <li><strong>Edit</strong> - Change plan or status</li>
+        <li><strong>Delete</strong> - Remove user (also revokes their keys)</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>User Plans</h4>
+    <p>Each user is assigned a plan that controls their rate limits and monthly quota. You can change a user's plan at any time from the edit page.</p>
+</div>
+{{end}}

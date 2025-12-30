@@ -12,3 +12,34 @@
     </div>
 </div>
 {{end}}
+
+{{define "panel-docs"}}
+<div class="panel-section">
+    <h3>Plans</h3>
+    <p>Plans define usage limits and pricing tiers for your API. Each user is assigned to one plan.</p>
+</div>
+
+<div class="panel-section">
+    <h4>Plan Properties</h4>
+    <ul class="panel-list">
+        <li><strong>Rate Limit</strong> - Maximum requests per minute</li>
+        <li><strong>Monthly Quota</strong> - Total requests allowed per month (0 = unlimited)</li>
+        <li><strong>Price</strong> - Monthly subscription cost</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>Typical Plan Structure</h4>
+    <ul class="panel-list">
+        <li><strong>Free</strong> - Low limits for testing (e.g., 60 req/min, 1K/month)</li>
+        <li><strong>Starter</strong> - Small projects (e.g., 120 req/min, 10K/month)</li>
+        <li><strong>Pro</strong> - Production use (e.g., 600 req/min, 100K/month)</li>
+        <li><strong>Enterprise</strong> - Unlimited or custom limits</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>Default Plan</h4>
+    <p>One plan can be marked as "default" - new users are automatically assigned to this plan when they sign up.</p>
+</div>
+{{end}}

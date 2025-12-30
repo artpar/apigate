@@ -6,6 +6,7 @@
     'use strict';
 
     const STORAGE_KEY = 'apigate_panel_open';
+    const FIRST_VISIT_KEY = 'apigate_visited';
 
     class ContextPanel {
         constructor() {
@@ -28,9 +29,16 @@
             this.panel = document.getElementById('context-panel');
             if (!this.panel) return;
 
-            // Restore state from localStorage
+            // Check if this is the user's first visit
+            const hasVisited = localStorage.getItem(FIRST_VISIT_KEY);
             const savedState = localStorage.getItem(STORAGE_KEY);
-            if (savedState === 'true') {
+
+            if (!hasVisited) {
+                // First visit - auto-open the panel and mark as visited
+                localStorage.setItem(FIRST_VISIT_KEY, 'true');
+                this.open();
+            } else if (savedState === 'true') {
+                // Restore previous state
                 this.open();
             }
 

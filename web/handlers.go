@@ -3,21 +3,59 @@ package web
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"runtime"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/artpar/apigate/domain/key"
+	"github.com/artpar/apigate/domain/route"
 	"github.com/artpar/apigate/ports"
 	"github.com/go-chi/chi/v5"
 )
 
+// setModuleSessionCookie sets the apigate_session cookie for module WebUI compatibility.
+// This allows users logged in via the root WebUI to also access the module WebUI.
+func setModuleSessionCookie(w http.ResponseWriter, userID, email, name string, expiresAt time.Time) {
+	session := struct {
+		UserID    string    `json:"user_id"`
+		Email     string    `json:"email"`
+		Name      string    `json:"name"`
+		ExpiresAt time.Time `json:"expires_at"`
+	}{
+		UserID:    userID,
+		Email:     email,
+		Name:      name,
+		ExpiresAt: expiresAt,
+	}
+	data, _ := json.Marshal(session)
+	encoded := base64.StdEncoding.EncodeToString(data)
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "apigate_session",
+		Value:    encoded,
+		Path:     "/",
+		Expires:  expiresAt,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
 // LoginPage renders the login form.
 func (h *Handler) LoginPage(w http.ResponseWriter, r *http.Request) {
+	// If setup not complete, redirect to setup wizard
+	if h.isSetup != nil && !h.isSetup() {
+		http.Redirect(w, r, "/setup", http.StatusFound)
+		return
+	}
+
 	// If already logged in, redirect to dashboard
 	if cookie, err := r.Cookie("token"); err == nil {
 		if _, err := h.tokens.ValidateToken(cookie.Value); err == nil {
@@ -62,7 +100,7 @@ func (h *Handler) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set cookie
+	// Set JWT cookie for root WebUI
 	http.SetCookie(w, &http.Cookie{
 		Name:     "token",
 		Value:    token,
@@ -71,6 +109,9 @@ func (h *Handler) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
 	})
+
+	// Also set apigate_session cookie for module WebUI compatibility
+	setModuleSessionCookie(w, user.ID, user.Email, user.Name, expiresAt)
 
 	http.Redirect(w, r, "/dashboard", http.StatusFound)
 }
@@ -88,8 +129,9 @@ func (h *Handler) renderLoginError(w http.ResponseWriter, r *http.Request, errMs
 	h.render(w, "login", data)
 }
 
-// Logout clears the session cookie.
+// Logout clears the session cookies.
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
+	// Clear root WebUI JWT cookie
 	http.SetCookie(w, &http.Cookie{
 		Name:     "token",
 		Value:    "",
@@ -97,7 +139,24 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 		Expires:  time.Unix(0, 0),
 		HttpOnly: true,
 	})
+	// Clear module WebUI session cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     "apigate_session",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+	})
 	http.Redirect(w, r, "/login", http.StatusFound)
+}
+
+// ChecklistItem represents a single onboarding checklist item.
+type ChecklistItem struct {
+	Title       string
+	Description string
+	Done        bool
+	Link        string
+	LinkText    string
 }
 
 // Dashboard renders the main dashboard.
@@ -107,6 +166,20 @@ func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 	users, _ := h.users.List(ctx, 1000, 0)
 	activeKeys := h.countActiveKeys(ctx, users)
 
+	// Get routes and upstreams for checklist
+	routes, _ := h.routes.List(ctx)
+	upstreams, _ := h.upstreams.List(ctx)
+
+	// Check if any API calls have been made
+	hasAPIActivity := false
+	for _, u := range users {
+		events, _ := h.usage.GetRecentRequests(ctx, u.ID, 1)
+		if len(events) > 0 {
+			hasAPIActivity = true
+			break
+		}
+	}
+
 	data := struct {
 		PageData
 		Stats struct {
@@ -114,13 +187,76 @@ func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 			ActiveKeys    int
 			RequestsToday int64
 		}
+		Checklist         []ChecklistItem
+		ChecklistComplete bool
 	}{
 		PageData: h.newPageData(ctx, "Dashboard"),
 	}
 	data.CurrentPath = "/dashboard"
 	data.Stats.TotalUsers = len(users)
 	data.Stats.ActiveKeys = activeKeys
-	data.Stats.RequestsToday = 0 // TODO: Get from usage store
+
+	// Build checklist
+	data.Checklist = []ChecklistItem{
+		{
+			Title:       "Create admin account",
+			Description: "Set up your administrator account",
+			Done:        true, // Always true if logged in
+			Link:        "/users",
+			LinkText:    "Manage users",
+		},
+		{
+			Title:       "Add an upstream API",
+			Description: "Connect to the API you want to proxy",
+			Done:        len(upstreams) > 0,
+			Link:        "/upstreams",
+			LinkText:    "Add upstream",
+		},
+		{
+			Title:       "Create a route",
+			Description: "Define how requests are routed to your API",
+			Done:        len(routes) > 0,
+			Link:        "/routes",
+			LinkText:    "Create route",
+		},
+		{
+			Title:       "Generate an API key",
+			Description: "Create a key for authenticating requests",
+			Done:        activeKeys > 0,
+			Link:        "/keys",
+			LinkText:    "Create key",
+		},
+		{
+			Title:       "Make your first API call",
+			Description: "Test your gateway with a real request",
+			Done:        hasAPIActivity,
+			Link:        "/usage",
+			LinkText:    "View usage",
+		},
+	}
+
+	// Check if all items are complete
+	data.ChecklistComplete = true
+	for _, item := range data.Checklist {
+		if !item.Done {
+			data.ChecklistComplete = false
+			break
+		}
+	}
+
+	// Get today's request count from usage store
+	now := time.Now()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	var requestsToday int64
+	h.logger.Debug().Str("start", startOfDay.Format("2006-01-02 15:04:05")).Str("end", now.Format("2006-01-02 15:04:05")).Int("users", len(users)).Msg("dashboard usage query")
+	for _, u := range users {
+		summary, err := h.usage.GetSummary(ctx, u.ID, startOfDay, now)
+		h.logger.Debug().Str("user", u.ID).Int64("count", summary.RequestCount).Err(err).Msg("user summary")
+		if err == nil {
+			requestsToday += summary.RequestCount
+		}
+	}
+	data.Stats.RequestsToday = requestsToday
 
 	h.render(w, "dashboard", data)
 }
@@ -391,6 +527,7 @@ func (h *Handler) KeysPage(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) KeyCreate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := r.FormValue("user_id")
+	name := r.FormValue("name")
 
 	if _, err := h.users.Get(ctx, userID); err != nil {
 		http.Error(w, "User not found", http.StatusNotFound)
@@ -399,7 +536,7 @@ func (h *Handler) KeyCreate(w http.ResponseWriter, r *http.Request) {
 
 	// Generate key using domain function
 	rawKey, keyData := key.Generate("ak_")
-	keyData = keyData.WithUserID(userID)
+	keyData = keyData.WithUserID(userID).WithName(name)
 
 	if err := h.keys.Create(ctx, keyData); err != nil {
 		http.Error(w, "Failed to create key", http.StatusInternalServerError)
@@ -722,6 +859,83 @@ func (h *Handler) UsagePage(w http.ResponseWriter, r *http.Request) {
 	}
 	data.SelectedUser = r.URL.Query().Get("user_id")
 
+	// Calculate time range based on period
+	now := time.Now()
+	var start time.Time
+	switch data.Period {
+	case "week":
+		start = now.AddDate(0, 0, -7)
+	case "month":
+		start = now.AddDate(0, -1, 0)
+	default: // "day"
+		start = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	}
+
+	// Aggregate usage data
+	var totalRequests, totalErrors int64
+	userEmails := make(map[string]string)
+	for _, u := range users {
+		userEmails[u.ID] = u.Email
+	}
+
+	// Get usage for selected user or all users
+	usersToQuery := users
+	if data.SelectedUser != "" {
+		for _, u := range users {
+			if u.ID == data.SelectedUser {
+				usersToQuery = []ports.User{u}
+				break
+			}
+		}
+	}
+
+	for _, u := range usersToQuery {
+		summary, err := h.usage.GetSummary(ctx, u.ID, start, now)
+		if err != nil {
+			continue
+		}
+		totalRequests += summary.RequestCount
+		totalErrors += summary.ErrorCount
+
+		// Get keys for this user to build usage data
+		keys, _ := h.keys.ListByUser(ctx, u.ID)
+		for _, k := range keys {
+			if k.RevokedAt != nil {
+				continue
+			}
+			// Get recent requests for this key
+			events, _ := h.usage.GetRecentRequests(ctx, u.ID, 100)
+			var keyRequests int64
+			var lastUsed time.Time
+			for _, e := range events {
+				if e.KeyID == k.ID && (e.Timestamp.After(start) || e.Timestamp.Equal(start)) {
+					keyRequests++
+					if e.Timestamp.After(lastUsed) {
+						lastUsed = e.Timestamp
+					}
+				}
+			}
+			if keyRequests > 0 || !lastUsed.IsZero() {
+				data.UsageData = append(data.UsageData, struct {
+					UserEmail    string
+					KeyID        string
+					RequestCount int64
+					LastUsed     time.Time
+				}{
+					UserEmail:    u.Email,
+					KeyID:        k.ID,
+					RequestCount: keyRequests,
+					LastUsed:     lastUsed,
+				})
+			}
+		}
+	}
+
+	data.Summary.TotalRequests = totalRequests
+	data.Summary.Errors = totalErrors
+	data.Summary.Successful = totalRequests - totalErrors
+	// Note: RateLimited would need separate tracking - for now we show 0
+
 	h.render(w, "usage", data)
 }
 
@@ -819,13 +1033,27 @@ func (h *Handler) PartialStats(w http.ResponseWriter, r *http.Request) {
 	users, _ := h.users.List(ctx, 1000, 0)
 	activeKeys := h.countActiveKeys(ctx, users)
 
+	// Get today's request count
+	now := time.Now()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	h.logger.Debug().Str("start", startOfDay.Format("2006-01-02 15:04:05")).Str("end", now.Format("2006-01-02 15:04:05")).Int("users", len(users)).Msg("partial stats usage query")
+	var requestsToday int64
+	for _, u := range users {
+		summary, err := h.usage.GetSummary(ctx, u.ID, startOfDay, now)
+		h.logger.Debug().Str("user", u.ID).Int64("count", summary.RequestCount).Err(err).Msg("partial stats user summary")
+		if err == nil {
+			requestsToday += summary.RequestCount
+		}
+	}
+
 	data := struct {
 		TotalUsers    int
 		ActiveKeys    int
 		RequestsToday int64
 	}{
-		TotalUsers: len(users),
-		ActiveKeys: activeKeys,
+		TotalUsers:    len(users),
+		ActiveKeys:    activeKeys,
+		RequestsToday: requestsToday,
 	}
 
 	h.renderPartial(w, "stats", data)
@@ -875,6 +1103,13 @@ func (h *Handler) PartialKeys(w http.ResponseWriter, r *http.Request) {
 
 // PartialActivity returns recent activity.
 func (h *Handler) PartialActivity(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	limitStr := r.URL.Query().Get("limit")
+	limit := 10
+	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+		limit = l
+	}
+
 	data := struct {
 		Activities []struct {
 			Type      string
@@ -882,6 +1117,61 @@ func (h *Handler) PartialActivity(w http.ResponseWriter, r *http.Request) {
 			Timestamp time.Time
 		}
 	}{}
+
+	// Get recent requests from all users
+	users, _ := h.users.List(ctx, 100, 0)
+	userEmails := make(map[string]string)
+	for _, u := range users {
+		userEmails[u.ID] = u.Email
+	}
+
+	// Collect recent events from all users
+	type activityEvent struct {
+		Type      string
+		Message   string
+		Timestamp time.Time
+	}
+	var allEvents []activityEvent
+
+	for _, u := range users {
+		events, err := h.usage.GetRecentRequests(ctx, u.ID, limit)
+		if err != nil {
+			continue
+		}
+		for _, e := range events {
+			statusType := "success"
+			if e.StatusCode >= 400 {
+				statusType = "error"
+			}
+			msg := fmt.Sprintf("%s %s → %d", e.Method, e.Path, e.StatusCode)
+			allEvents = append(allEvents, activityEvent{
+				Type:      statusType,
+				Message:   msg,
+				Timestamp: e.Timestamp,
+			})
+		}
+	}
+
+	// Sort by timestamp descending and take top N
+	sort.Slice(allEvents, func(i, j int) bool {
+		return allEvents[i].Timestamp.After(allEvents[j].Timestamp)
+	})
+	if len(allEvents) > limit {
+		allEvents = allEvents[:limit]
+	}
+
+	// Convert to template data
+	for _, e := range allEvents {
+		data.Activities = append(data.Activities, struct {
+			Type      string
+			Message   string
+			Timestamp time.Time
+		}{
+			Type:      e.Type,
+			Message:   e.Message,
+			Timestamp: e.Timestamp,
+		})
+	}
 
 	h.renderPartial(w, "partial_activity", data)
 }
@@ -954,7 +1244,7 @@ func (h *Handler) SetupPage(w http.ResponseWriter, r *http.Request) {
 		Error       string
 	}{
 		PageData:    h.newPageData(r.Context(), "Setup"),
-		Steps:       []string{"Upstream API", "Admin Account", "First Plan", "Done"},
+		Steps:       []string{"Connect Your API", "Create Account", "Set Up Pricing", "Ready!"},
 		CurrentStep: 0,
 	}
 
@@ -982,7 +1272,7 @@ func (h *Handler) SetupStep(w http.ResponseWriter, r *http.Request) {
 		Error        string
 	}{
 		PageData:    h.newPageData(r.Context(), "Setup"),
-		Steps:       []string{"Upstream API", "Admin Account", "First Plan", "Done"},
+		Steps:       []string{"Connect Your API", "Create Account", "Set Up Pricing", "Ready!"},
 		CurrentStep: step,
 	}
 
@@ -995,7 +1285,85 @@ func (h *Handler) SetupStepSubmit(w http.ResponseWriter, r *http.Request) {
 
 	switch step {
 	case 0:
-		// Validate upstream URL - for now, just proceed
+		// Create upstream from URL
+		upstreamURL := r.FormValue("upstream_url")
+		if upstreamURL == "" {
+			h.renderSetupError(w, r, 0, "Upstream URL is required")
+			return
+		}
+
+		// Parse and validate URL
+		parsedURL, err := url.Parse(upstreamURL)
+		if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
+			h.renderSetupError(w, r, 0, "Invalid URL. Must start with http:// or https://")
+			return
+		}
+
+		now := time.Now().UTC()
+
+		// Extract a name from the host
+		upstreamName := parsedURL.Host
+		if idx := strings.Index(upstreamName, ":"); idx > 0 {
+			upstreamName = upstreamName[:idx]
+		}
+
+		// Create the upstream
+		upstream := route.Upstream{
+			ID:          "default",
+			Name:        upstreamName,
+			Description: "Default upstream created during setup",
+			BaseURL:     upstreamURL,
+			Timeout:     30 * time.Second,
+			AuthType:    route.AuthNone,
+			Enabled:     true,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}
+
+		if err := h.upstreams.Create(r.Context(), upstream); err != nil {
+			h.renderSetupError(w, r, 0, "Failed to create upstream: "+err.Error())
+			return
+		}
+
+		// Create a catch-all route pointing to this upstream
+		defaultRoute := route.Route{
+			ID:          "default",
+			Name:        "Default Route",
+			Description: "Catch-all route created during setup",
+			PathPattern: "/*",
+			MatchType:   route.MatchPrefix,
+			UpstreamID:  "default",
+			Protocol:    route.ProtocolHTTP,
+			Priority:    0,
+			Enabled:     true,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}
+
+		if err := h.routes.Create(r.Context(), defaultRoute); err != nil {
+			h.renderSetupError(w, r, 0, "Failed to create route: "+err.Error())
+			return
+		}
+
+		// Trigger route reload so proxy service picks up the new route
+		h.logger.Info().Bool("has_callback", h.onRouteChange != nil).Msg("attempting route reload after setup")
+		if h.onRouteChange != nil {
+			if err := h.onRouteChange(r.Context()); err != nil {
+				h.logger.Warn().Err(err).Msg("failed to reload routes after setup")
+			} else {
+				h.logger.Info().Msg("route reload completed successfully")
+			}
+		}
+
+		// Store upstream URL in cookie for display on final step
+		http.SetCookie(w, &http.Cookie{
+			Name:     "setup_upstream_url",
+			Value:    upstreamURL,
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteStrictMode,
+		})
+
 		http.Redirect(w, r, "/setup/step/1", http.StatusFound)
 	case 1:
 		// Create admin user
@@ -1019,7 +1387,7 @@ func (h *Handler) SetupStepSubmit(w http.ResponseWriter, r *http.Request) {
 			ID:           "admin",
 			Email:        email,
 			PasswordHash: passwordHash,
-			PlanID:       "admin",
+			PlanID:       "admin", // Will be updated in step 2
 			Status:       "active",
 			CreatedAt:    now,
 			UpdatedAt:    now,
@@ -1030,12 +1398,85 @@ func (h *Handler) SetupStepSubmit(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Auto-login: Generate JWT token and set cookie
+		token, expiresAt, err := h.tokens.GenerateToken(user.ID, user.Email, "admin")
+		if err == nil {
+			http.SetCookie(w, &http.Cookie{
+				Name:     "token",
+				Value:    token,
+				Path:     "/",
+				Expires:  expiresAt,
+				HttpOnly: true,
+				SameSite: http.SameSiteStrictMode,
+			})
+			// Also set apigate_session cookie for module WebUI compatibility
+			setModuleSessionCookie(w, user.ID, user.Email, user.Email, expiresAt)
+		}
+
 		http.Redirect(w, r, "/setup/step/2", http.StatusFound)
 	case 2:
-		// Create first plan (plans are from config, so just proceed)
+		// Create the plan from form data
+		planName := r.FormValue("plan_name")
+		if planName == "" {
+			planName = "Starter"
+		}
+
+		rateLimit, _ := strconv.Atoi(r.FormValue("rate_limit"))
+		if rateLimit <= 0 {
+			rateLimit = 60
+		}
+
+		monthlyQuota, _ := strconv.ParseInt(r.FormValue("monthly_quota"), 10, 64)
+		if monthlyQuota <= 0 {
+			monthlyQuota = 1000
+		}
+
+		now := time.Now().UTC()
+
+		// Create slug from plan name for ID
+		planID := strings.ToLower(strings.ReplaceAll(planName, " ", "-"))
+
+		plan := ports.Plan{
+			ID:                 planID,
+			Name:               planName,
+			Description:        "Default plan created during setup",
+			RateLimitPerMinute: rateLimit,
+			RequestsPerMonth:   monthlyQuota,
+			IsDefault:          true,
+			Enabled:            true,
+			CreatedAt:          now,
+			UpdatedAt:          now,
+		}
+
+		if err := h.plans.Create(r.Context(), plan); err != nil {
+			h.renderSetupError(w, r, 2, "Failed to create plan: "+err.Error())
+			return
+		}
+
+		// Trigger plan reload so proxy service picks up the new plan
+		h.logger.Info().Bool("has_callback", h.onPlanChange != nil).Msg("attempting plan reload after setup")
+		if h.onPlanChange != nil {
+			if err := h.onPlanChange(r.Context()); err != nil {
+				h.logger.Warn().Err(err).Msg("failed to reload plans after setup")
+			} else {
+				h.logger.Info().Msg("plan reload completed successfully")
+			}
+		} else {
+			h.logger.Warn().Msg("onPlanChange callback is nil")
+		}
+
+		// Update admin user's plan to the newly created plan (ISSUE-011 fix)
+		adminUser, err := h.users.Get(r.Context(), "admin")
+		if err == nil {
+			adminUser.PlanID = planID
+			adminUser.UpdatedAt = now
+			_ = h.users.Update(r.Context(), adminUser)
+		}
+
 		http.Redirect(w, r, "/setup/step/3", http.StatusFound)
 	default:
-		http.Redirect(w, r, "/login", http.StatusFound)
+		// After setup complete, redirect to dashboard (user already logged in from step 1)
+		http.Redirect(w, r, "/dashboard", http.StatusFound)
 	}
 }
 
@@ -1047,7 +1488,7 @@ func (h *Handler) renderSetupError(w http.ResponseWriter, r *http.Request, step 
 		Error       string
 	}{
 		PageData:    h.newPageData(r.Context(), "Setup"),
-		Steps:       []string{"Upstream API", "Admin Account", "First Plan", "Done"},
+		Steps:       []string{"Connect Your API", "Create Account", "Set Up Pricing", "Ready!"},
 		CurrentStep: step,
 		Error:       errMsg,
 	}

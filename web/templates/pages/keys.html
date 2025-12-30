@@ -44,20 +44,112 @@
 {{if .NewKey}}
 <!-- New Key Display Modal -->
 <div id="new-key-modal" class="modal">
-    <div class="modal-content">
+    <div class="modal-content modal-lg">
         <div class="modal-header">
-            <h3 class="modal-title">API Key Created</h3>
+            <h3 class="modal-title">API Key Created Successfully</h3>
         </div>
         <div class="modal-body">
             <div class="alert alert-warning mb-4">
-                Copy this key now. You won't be able to see it again!
+                <strong>Important:</strong> Copy this key now. You won't be able to see it again!
             </div>
-            <div class="setup-code">{{.NewKey}}</div>
-            <div class="form-actions">
-                <button onclick="document.getElementById('new-key-modal').classList.add('hidden')" class="btn btn-primary">Done</button>
+
+            <div class="key-display mb-4">
+                <label class="form-label">Your API Key</label>
+                <div class="key-copy-container">
+                    <code class="key-value" id="new-api-key">{{.NewKey}}</code>
+                    <button type="button" class="btn btn-sm btn-secondary" onclick="copyToClipboard('new-api-key')">Copy</button>
+                </div>
+            </div>
+
+            <div class="usage-examples">
+                <h4 class="text-md font-semibold mb-3">How to Use Your Key</h4>
+
+                <div class="example-tabs">
+                    <button class="tab-btn active" onclick="showTab('curl')">cURL</button>
+                    <button class="tab-btn" onclick="showTab('javascript')">JavaScript</button>
+                    <button class="tab-btn" onclick="showTab('python')">Python</button>
+                </div>
+
+                <div id="tab-curl" class="tab-content active">
+                    <pre class="code-block"><code>curl -H "X-API-Key: {{.NewKey}}" \
+     http://localhost:8080/your-endpoint</code></pre>
+                </div>
+
+                <div id="tab-javascript" class="tab-content">
+                    <pre class="code-block"><code>fetch('http://localhost:8080/your-endpoint', {
+  headers: {
+    'X-API-Key': '{{.NewKey}}'
+  }
+})
+.then(res => res.json())
+.then(data => console.log(data));</code></pre>
+                </div>
+
+                <div id="tab-python" class="tab-content">
+                    <pre class="code-block"><code>import requests
+
+response = requests.get(
+    'http://localhost:8080/your-endpoint',
+    headers={'X-API-Key': '{{.NewKey}}'}
+)
+print(response.json())</code></pre>
+                </div>
+            </div>
+
+            <div class="form-actions mt-4">
+                <button onclick="document.getElementById('new-key-modal').classList.add('hidden')" class="btn btn-primary">Got it, I've copied my key</button>
             </div>
         </div>
     </div>
 </div>
+
+<script>
+function copyToClipboard(elementId) {
+    const text = document.getElementById(elementId).textContent;
+    navigator.clipboard.writeText(text).then(() => {
+        const btn = event.target;
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = 'Copy', 2000);
+    });
+}
+
+function showTab(tabName) {
+    document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+    document.getElementById('tab-' + tabName).classList.add('active');
+    event.target.classList.add('active');
+}
+</script>
 {{end}}
+{{end}}
+
+{{define "panel-docs"}}
+<div class="panel-section">
+    <h3>API Keys</h3>
+    <p>API keys authenticate requests to your gateway. Each key is tied to a user and inherits their plan's rate limits.</p>
+</div>
+
+<div class="panel-section">
+    <h4>Key Management</h4>
+    <ul class="panel-list">
+        <li><strong>Create</strong> - Generate a new key for a user</li>
+        <li><strong>Revoke</strong> - Disable a key permanently</li>
+        <li><strong>Last Used</strong> - Track when keys are active</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>Using API Keys</h4>
+    <p>Include the key in your request header:</p>
+    <pre class="panel-code">X-API-Key: ak_your_key_here</pre>
+</div>
+
+<div class="panel-section">
+    <h4>Security Tips</h4>
+    <ul class="panel-list">
+        <li>Never share keys in public repositories</li>
+        <li>Rotate keys regularly</li>
+        <li>Revoke compromised keys immediately</li>
+    </ul>
+</div>
 {{end}}

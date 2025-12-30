@@ -2,7 +2,50 @@
 <div class="page">
     <div class="page-header">
         <h1 class="page-title">Dashboard</h1>
+        <div class="quick-actions">
+            <a href="/keys" class="btn btn-primary">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M10 1h4v4M10 6l5-5M12 9v5a1 1 0 01-1 1H2a1 1 0 01-1-1V4a1 1 0 011-1h5"/>
+                </svg>
+                Create API Key
+            </a>
+            <a href="/users/new" class="btn btn-secondary">Add User</a>
+        </div>
     </div>
+
+    {{if not .ChecklistComplete}}
+    <!-- Getting Started Checklist -->
+    <div class="card mb-4 checklist-card">
+        <div class="card-header">
+            <span class="card-title">Getting Started</span>
+            <span class="text-muted text-sm">Complete these steps to set up your API gateway</span>
+        </div>
+        <div class="card-body">
+            <div class="checklist">
+                {{range .Checklist}}
+                <div class="checklist-item {{if .Done}}checklist-done{{end}}">
+                    <div class="checklist-check">
+                        {{if .Done}}
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                            <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/>
+                        </svg>
+                        {{else}}
+                        <span class="checklist-number"></span>
+                        {{end}}
+                    </div>
+                    <div class="checklist-content">
+                        <div class="checklist-title">{{.Title}}</div>
+                        <div class="checklist-desc">{{.Description}}</div>
+                    </div>
+                    {{if not .Done}}
+                    <a href="{{.Link}}" class="btn btn-sm btn-primary">{{.LinkText}}</a>
+                    {{end}}
+                </div>
+                {{end}}
+            </div>
+        </div>
+    </div>
+    {{end}}
 
     <!-- Stats -->
     <div class="grid grid-3 mb-4" hx-get="/partials/stats" hx-trigger="load, every 30s" hx-swap="innerHTML">
@@ -47,20 +90,59 @@
 {{define "stats"}}
 <div class="card">
     <div class="stat">
-        <div class="stat-label">Total Users</div>
+        <div class="stat-label">
+            Total Users
+            <span class="info-tooltip" data-tip="The total number of registered users who can access your API. Each user can have multiple API keys.">?</span>
+        </div>
         <div class="stat-value">{{.TotalUsers}}</div>
     </div>
 </div>
 <div class="card">
     <div class="stat">
-        <div class="stat-label">Active API Keys</div>
+        <div class="stat-label">
+            Active API Keys
+            <span class="info-tooltip" data-tip="API keys that are currently active and can make requests. Revoked keys are not counted here.">?</span>
+        </div>
         <div class="stat-value">{{.ActiveKeys}}</div>
     </div>
 </div>
 <div class="card">
     <div class="stat">
-        <div class="stat-label">Requests Today</div>
+        <div class="stat-label">
+            Requests Today
+            <span class="info-tooltip" data-tip="Total API requests processed through your gateway since midnight (local time). Updates every 30 seconds.">?</span>
+        </div>
         <div class="stat-value">{{.RequestsToday}}</div>
     </div>
+</div>
+{{end}}
+
+{{define "panel-docs"}}
+<div class="panel-section">
+    <h3>Dashboard Overview</h3>
+    <p>Your central hub for monitoring API gateway activity and managing your setup.</p>
+</div>
+
+<div class="panel-section">
+    <h4>Quick Actions</h4>
+    <ul class="panel-list">
+        <li><a href="/routes" class="panel-link">Configure Routes</a> - Set up API routing rules</li>
+        <li><a href="/keys" class="panel-link">Manage API Keys</a> - Create and revoke keys</li>
+        <li><a href="/usage" class="panel-link">View Usage</a> - Monitor API consumption</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>Understanding Stats</h4>
+    <ul class="panel-list">
+        <li><strong>Total Users</strong> - Registered API consumers</li>
+        <li><strong>Active Keys</strong> - Non-revoked API keys</li>
+        <li><strong>Requests Today</strong> - API calls in the last 24h</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>Need Help?</h4>
+    <p>Press <kbd>?</kbd> anytime to toggle this help panel, or <kbd>Esc</kbd> to close it.</p>
 </div>
 {{end}}

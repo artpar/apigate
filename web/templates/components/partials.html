@@ -27,7 +27,12 @@
             </td>
         </tr>
         {{else}}
-        <tr><td colspan="5" class="table-empty">No users found.</td></tr>
+        <tr><td colspan="5" class="table-empty">
+            <div class="empty-state-inline">
+                <strong>No users yet</strong>
+                <p>Users can access your API with API keys. <a href="/users/new" class="link">Add your first user</a></p>
+            </div>
+        </td></tr>
         {{end}}
     </tbody>
 </table>
@@ -38,6 +43,7 @@
     <thead>
         <tr>
             <th>Key</th>
+            <th>Name</th>
             <th>User</th>
             <th>Status</th>
             <th>Created</th>
@@ -48,10 +54,8 @@
     <tbody>
         {{range .Keys}}
         <tr>
-            <td>
-                <div class="cell-primary cell-mono">{{maskKey .ID}}</div>
-                {{if .Name}}<div class="cell-secondary">{{.Name}}</div>{{end}}
-            </td>
+            <td class="cell-mono">{{maskKey .ID}}</td>
+            <td>{{if .Name}}{{.Name}}{{else}}<span class="text-muted">-</span>{{end}}</td>
             <td class="text-muted">{{.UserID}}</td>
             <td>
                 {{if .RevokedAt}}
@@ -71,7 +75,12 @@
             </td>
         </tr>
         {{else}}
-        <tr><td colspan="6" class="table-empty">No API keys found.</td></tr>
+        <tr><td colspan="7" class="table-empty">
+            <div class="empty-state-inline">
+                <strong>No API keys yet</strong>
+                <p>API keys authenticate requests to your gateway. <a href="/keys" class="link">Create your first key</a></p>
+            </div>
+        </td></tr>
         {{end}}
     </tbody>
 </table>
@@ -91,7 +100,12 @@
     {{end}}
 </div>
 {{else}}
-<div class="table-empty">No recent activity.</div>
+<div class="table-empty">
+    <div class="empty-state-inline">
+        <strong>No activity yet</strong>
+        <p>Activity will appear here once users start making API requests.</p>
+    </div>
+</div>
 {{end}}
 {{end}}
 
@@ -129,7 +143,12 @@
             </td>
         </tr>
         {{else}}
-        <tr><td colspan="6" class="table-empty">No routes found. <a href="/routes/new" class="link">Create one</a></td></tr>
+        <tr><td colspan="6" class="table-empty">
+            <div class="empty-state-inline">
+                <strong>No routes configured</strong>
+                <p>Routes define how incoming requests are mapped to your APIs. <a href="/routes/new" class="link">Create a route</a></p>
+            </div>
+        </td></tr>
         {{end}}
     </tbody>
 </table>
@@ -166,7 +185,12 @@
             </td>
         </tr>
         {{else}}
-        <tr><td colspan="6" class="table-empty">No upstreams found. <a href="/upstreams/new" class="link">Create one</a></td></tr>
+        <tr><td colspan="6" class="table-empty">
+            <div class="empty-state-inline">
+                <strong>No upstreams configured</strong>
+                <p>Upstreams are your backend API servers. <a href="/upstreams/new" class="link">Add an upstream</a></p>
+            </div>
+        </td></tr>
         {{end}}
     </tbody>
 </table>
@@ -206,7 +230,12 @@
             </td>
         </tr>
         {{else}}
-        <tr><td colspan="7" class="table-empty">No plans found. <a href="/plans/new" class="link">Create one</a></td></tr>
+        <tr><td colspan="7" class="table-empty">
+            <div class="empty-state-inline">
+                <strong>No plans configured</strong>
+                <p>Plans define rate limits and quotas for your users. <a href="/plans/new" class="link">Create a plan</a></p>
+            </div>
+        </td></tr>
         {{end}}
     </tbody>
 </table>

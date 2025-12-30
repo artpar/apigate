@@ -20,63 +20,125 @@
             <h2 class="setup-step-title">Step {{add .CurrentStep 1}} of {{len .Steps}}: {{index .Steps .CurrentStep}}</h2>
 
             {{if eq .CurrentStep 0}}
-            <p class="setup-step-desc">What API are you monetizing?</p>
+            <p class="setup-step-desc">Enter the URL of the API you want to share with customers</p>
             <form action="/setup/step/0" method="POST" class="form">
                 <div class="form-group">
-                    <input type="url" id="upstream_url" name="upstream_url" required class="form-input" placeholder="https://api.myservice.com" value="{{.UpstreamURL}}">
-                    <p class="form-hint">This is the API your customers will access through APIGate.</p>
+                    <label for="upstream_url" class="form-label">
+                        Your API URL
+                        <span class="info-tooltip" data-tip="This is the base URL of your existing API server. APIGate will forward all requests to this address. Example: https://api.mycompany.com">?</span>
+                    </label>
+                    <input type="url" id="upstream_url" name="upstream_url" required class="form-input" placeholder="https://api.example.com" value="{{.UpstreamURL}}">
+                    <p class="form-hint">This is where your actual API lives. APIGate will forward requests here.</p>
+                </div>
+                <div class="setup-help-tip">
+                    <strong>What does APIGate do?</strong>
+                    <p>APIGate sits between your customers and your API. It handles authentication, rate limiting, and usage tracking - so you don't have to.</p>
                 </div>
                 {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
                 <button type="submit" class="btn btn-primary" style="width: 100%;">Test Connection & Continue</button>
             </form>
 
             {{else if eq .CurrentStep 1}}
+            <p class="setup-step-desc">Create your administrator account to manage APIGate</p>
             <form action="/setup/step/1" method="POST" class="form">
                 <div class="form-group">
-                    <label for="admin_email" class="form-label">Admin Email</label>
-                    <input type="email" id="admin_email" name="admin_email" required class="form-input" value="{{.AdminEmail}}">
+                    <label for="admin_email" class="form-label">
+                        Your Email
+                        <span class="info-tooltip" data-tip="You'll use this email to log into the admin dashboard. It won't be shared with your API users.">?</span>
+                    </label>
+                    <input type="email" id="admin_email" name="admin_email" required class="form-input" placeholder="you@company.com" value="{{.AdminEmail}}">
                 </div>
                 <div class="form-group">
-                    <label for="admin_password" class="form-label">Password</label>
+                    <label for="admin_password" class="form-label">Choose a Password</label>
                     <input type="password" id="admin_password" name="admin_password" required class="form-input" minlength="8">
+                    <p class="form-hint">At least 8 characters. Use a mix of letters, numbers, and symbols for best security.</p>
                 </div>
                 <div class="form-group">
                     <label for="admin_password_confirm" class="form-label">Confirm Password</label>
                     <input type="password" id="admin_password_confirm" name="admin_password_confirm" required class="form-input">
                 </div>
                 {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
-                <button type="submit" class="btn btn-primary" style="width: 100%;">Create Admin Account</button>
+                <div class="setup-actions">
+                    <a href="/setup/step/0" class="btn btn-secondary">Back</a>
+                    <button type="submit" class="btn btn-primary">Continue</button>
+                </div>
             </form>
 
             {{else if eq .CurrentStep 2}}
-            <p class="setup-step-desc">Create your first API plan. You can add more later.</p>
+            <p class="setup-step-desc">Define how much customers can use your API. You can add more plans later.</p>
             <form action="/setup/step/2" method="POST" class="form">
                 <div class="form-group">
-                    <label for="plan_name" class="form-label">Plan Name</label>
+                    <label for="plan_name" class="form-label">
+                        Plan Name
+                        <span class="info-tooltip" data-tip="This is what your customers will see. Common examples: Free, Basic, Starter, Pro, Enterprise">?</span>
+                    </label>
                     <input type="text" id="plan_name" name="plan_name" required class="form-input" placeholder="Free" value="{{.PlanName}}">
+                    <p class="form-hint">What should customers see? (e.g., Free, Starter, Pro)</p>
                 </div>
                 <div class="form-group">
-                    <label for="rate_limit" class="form-label">Rate Limit (requests/minute)</label>
+                    <label for="rate_limit" class="form-label">
+                        Speed Limit
+                        <span class="info-tooltip" data-tip="How many requests can one user make per minute? This prevents anyone from overwhelming your API. 60/min is reasonable for most APIs.">?</span>
+                    </label>
                     <input type="number" id="rate_limit" name="rate_limit" required class="form-input" value="{{if .RateLimit}}{{.RateLimit}}{{else}}60{{end}}" min="1">
+                    <p class="form-hint">Max requests per minute (prevents overload). 60 is a good default.</p>
                 </div>
                 <div class="form-group">
-                    <label for="monthly_quota" class="form-label">Monthly Quota (requests)</label>
+                    <label for="monthly_quota" class="form-label">
+                        Monthly Allowance
+                        <span class="info-tooltip" data-tip="Total requests a user can make in a calendar month. When they hit this limit, requests will be blocked until next month. 1,000 is typical for free tiers.">?</span>
+                    </label>
                     <input type="number" id="monthly_quota" name="monthly_quota" required class="form-input" value="{{if .MonthlyQuota}}{{.MonthlyQuota}}{{else}}1000{{end}}" min="1">
+                    <p class="form-hint">Total requests allowed per month. Start with 1,000 for a free tier.</p>
+                </div>
+                <div class="setup-help-tip">
+                    <strong>Not sure what to set?</strong>
+                    <p>Start with the defaults. You can create additional plans (like "Pro" with higher limits) from the dashboard anytime.</p>
                 </div>
                 {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
-                <button type="submit" class="btn btn-primary" style="width: 100%;">Create Plan & Finish</button>
+                <div class="setup-actions">
+                    <a href="/setup/step/1" class="btn btn-secondary">Back</a>
+                    <button type="submit" class="btn btn-primary">Create Plan & Finish</button>
+                </div>
             </form>
 
             {{else if eq .CurrentStep 3}}
             <div class="setup-success">
                 <div class="setup-success-icon">&#10003;</div>
-                <h3>Setup Complete!</h3>
-                <p>Your APIGate instance is ready to use.</p>
-                <div class="setup-code">
-                    <strong>Quick Start:</strong><br>
-                    curl -H "X-API-Key: YOUR_KEY" {{.Config.UpstreamURL}}
+                <h3>You're All Set!</h3>
+                <p>APIGate is ready to proxy requests to your API.</p>
+
+                <div class="setup-summary">
+                    <h4>What's been configured:</h4>
+                    <ul class="setup-checklist">
+                        <li><span class="check">&#10003;</span> Your API is connected</li>
+                        <li><span class="check">&#10003;</span> Admin account created</li>
+                        <li><span class="check">&#10003;</span> First pricing plan ready</li>
+                    </ul>
                 </div>
-                <a href="/dashboard" class="btn btn-primary">Go to Dashboard</a>
+
+                <div class="setup-next-steps">
+                    <h4>What to do next:</h4>
+                    <div class="next-step-card">
+                        <div class="next-step-number">1</div>
+                        <div class="next-step-content">
+                            <strong>Create an API Key</strong>
+                            <p>Generate a key to authenticate your API requests</p>
+                        </div>
+                    </div>
+                    <div class="next-step-card">
+                        <div class="next-step-number">2</div>
+                        <div class="next-step-content">
+                            <strong>Make a Test Request</strong>
+                            <p>Try calling your API through APIGate</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="setup-actions-final">
+                    <a href="/keys" class="btn btn-primary btn-lg">Create Your First API Key</a>
+                    <a href="/dashboard" class="btn btn-secondary">Go to Dashboard</a>
+                </div>
             </div>
             {{end}}
         </div>

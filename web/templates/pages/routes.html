@@ -80,3 +80,34 @@ document.body.addEventListener('htmx:afterSwap', function(evt) {
 });
 </script>
 {{end}}
+
+{{define "panel-docs"}}
+<div class="panel-section">
+    <h3>Routes</h3>
+    <p>Routes define how incoming requests are matched and forwarded to your backend APIs (upstreams).</p>
+</div>
+
+<div class="panel-section">
+    <h4>Route Properties</h4>
+    <ul class="panel-list">
+        <li><strong>Path Pattern</strong> - URL path to match (supports wildcards)</li>
+        <li><strong>Methods</strong> - HTTP methods to allow (GET, POST, etc.)</li>
+        <li><strong>Upstream</strong> - Where to forward matching requests</li>
+        <li><strong>Priority</strong> - Higher priority routes are checked first</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>Path Patterns</h4>
+    <ul class="panel-list">
+        <li><code>/api/users</code> - Exact match</li>
+        <li><code>/api/users/*</code> - Match one segment</li>
+        <li><code>/api/**</code> - Match any path under /api</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>Request Flow</h4>
+    <p>1. Request arrives → 2. Route matched → 3. Headers/body transformed → 4. Forwarded to upstream → 5. Response returned → 6. Usage metered</p>
+</div>
+{{end}}

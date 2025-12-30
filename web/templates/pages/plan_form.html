@@ -48,14 +48,20 @@
 
                     <div class="form-row">
                         <div class="form-group">
-                            <label for="rate_limit" class="form-label">Rate Limit (req/min)</label>
+                            <label for="rate_limit" class="form-label">
+                                Rate Limit (req/min)
+                                <span class="info-tooltip" data-tip="Prevents users from overwhelming your API with too many requests in a short time. If exceeded, requests return 429 Too Many Requests.">?</span>
+                            </label>
                             <input type="number" id="rate_limit" name="rate_limit" class="form-input"
                                    min="1" value="{{.FormPlan.RateLimit}}" placeholder="60">
                             <p class="form-hint">Maximum requests per minute</p>
                         </div>
 
                         <div class="form-group">
-                            <label for="monthly_quota" class="form-label">Monthly Quota</label>
+                            <label for="monthly_quota" class="form-label">
+                                Monthly Quota
+                                <span class="info-tooltip" data-tip="Total requests allowed per calendar month. When exceeded, requests are blocked until the next month (or charged overage if configured). Set to 0 for unlimited.">?</span>
+                            </label>
                             <input type="number" id="monthly_quota" name="monthly_quota" class="form-input"
                                    min="0" value="{{.FormPlan.MonthlyQuota}}" placeholder="1000">
                             <p class="form-hint">Total requests per month (0 = unlimited)</p>
@@ -69,13 +75,19 @@
 
                     <div class="form-row">
                         <div class="form-group">
-                            <label for="price_monthly" class="form-label">Monthly Price ($)</label>
+                            <label for="price_monthly" class="form-label">
+                                Monthly Price ($)
+                                <span class="info-tooltip" data-tip="The subscription price charged monthly. Set to 0 for free plans. Requires payment provider integration to collect payments.">?</span>
+                            </label>
                             <input type="number" id="price_monthly" name="price_monthly" class="form-input"
                                    min="0" step="0.01" value="{{printf "%.2f" .FormPlan.PriceMonthly}}" placeholder="0.00">
                         </div>
 
                         <div class="form-group">
-                            <label for="overage_price" class="form-label">Overage Price ($)</label>
+                            <label for="overage_price" class="form-label">
+                                Overage Price ($)
+                                <span class="info-tooltip" data-tip="Instead of blocking requests over quota, you can charge per additional request. Example: $0.001 per request = $1 per 1000 extra requests.">?</span>
+                            </label>
                             <input type="number" id="overage_price" name="overage_price" class="form-input"
                                    min="0" step="0.001" value="{{printf "%.3f" .FormPlan.OveragePrice}}" placeholder="0.000">
                             <p class="form-hint">Cost per request over quota</p>
@@ -180,4 +192,33 @@
     height: 18px;
 }
 </style>
+{{end}}
+
+{{define "panel-docs"}}
+<div class="panel-section">
+    <h3>Plan Configuration</h3>
+    <p>Plans define the limits and pricing for your API users. Each user is assigned to one plan.</p>
+</div>
+
+<div class="panel-section">
+    <h4>Setting Limits</h4>
+    <ul class="panel-list">
+        <li><strong>Rate Limit</strong> - Prevents API abuse by limiting requests per minute</li>
+        <li><strong>Monthly Quota</strong> - Controls total usage and costs</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>Pricing Options</h4>
+    <ul class="panel-list">
+        <li><strong>Free Plan</strong> - Set monthly price to $0</li>
+        <li><strong>Fixed Price</strong> - Charge a flat monthly fee</li>
+        <li><strong>Overage</strong> - Allow usage beyond quota at a per-request rate</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>Payment Integration</h4>
+    <p>To collect payments, enter the product/price ID from your payment provider (Stripe, Paddle, or LemonSqueezy).</p>
+</div>
 {{end}}

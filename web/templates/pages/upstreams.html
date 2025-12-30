@@ -96,3 +96,34 @@ document.body.addEventListener('htmx:afterSwap', function(evt) {
 });
 </script>
 {{end}}
+
+{{define "panel-docs"}}
+<div class="panel-section">
+    <h3>Upstreams</h3>
+    <p>Upstreams are your backend API servers. Routes forward requests to these servers after authentication and rate limiting.</p>
+</div>
+
+<div class="panel-section">
+    <h4>Upstream Properties</h4>
+    <ul class="panel-list">
+        <li><strong>Base URL</strong> - The root URL of your API (e.g., https://api.openai.com)</li>
+        <li><strong>Auth Type</strong> - How to authenticate with the upstream</li>
+        <li><strong>Timeout</strong> - How long to wait for a response</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>Authentication Types</h4>
+    <ul class="panel-list">
+        <li><strong>None</strong> - No authentication</li>
+        <li><strong>API Key</strong> - Send key in header</li>
+        <li><strong>Bearer Token</strong> - OAuth-style authorization</li>
+        <li><strong>Basic Auth</strong> - Username/password</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>Common Use Cases</h4>
+    <p>LLM APIs (OpenAI, Anthropic), payment providers, internal microservices, or any REST API you want to proxy.</p>
+</div>
+{{end}}
