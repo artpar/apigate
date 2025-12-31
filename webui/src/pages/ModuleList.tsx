@@ -10,6 +10,7 @@ import { Link, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchModuleSchema, fetchRecords, deleteRecord, executeAction } from '@/api/schema';
 import { DynamicTable } from '@/components/DynamicTable';
+import { formatModuleName } from '@/components/layout/ThreePaneLayout';
 
 export function ModuleList() {
   const { module } = useParams<{ module: string }>();
@@ -104,8 +105,8 @@ export function ModuleList() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 capitalize">{schema.plural}</h1>
-          <p className="text-gray-500">{schema.description || `Manage ${schema.plural}`}</p>
+          <h1 className="text-2xl font-bold text-gray-900">{formatModuleName(schema.plural)}</h1>
+          <p className="text-gray-500">{schema.description || `Manage ${formatModuleName(schema.plural)}`}</p>
         </div>
         <Link
           to={`/${module}/new`}
@@ -114,7 +115,7 @@ export function ModuleList() {
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
-          Create {schema.module}
+          Create {formatModuleName(schema.module)}
         </Link>
       </div>
 
@@ -133,7 +134,7 @@ export function ModuleList() {
           <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
             <h3 className="text-lg font-semibold text-gray-900 mb-2">Confirm Delete</h3>
             <p className="text-gray-600 mb-6">
-              Are you sure you want to delete this {schema.module}? This action cannot be undone.
+              Are you sure you want to delete this {formatModuleName(schema.module).toLowerCase()}? This action cannot be undone.
             </p>
             <div className="flex items-center justify-end gap-3">
               <button
@@ -163,7 +164,7 @@ export function ModuleList() {
             </h3>
             <p className="text-gray-600 mb-6">
               {schema.actions.find((a) => a.name === actionConfirm.action)?.description ||
-                `Are you sure you want to ${actionConfirm.action} this ${schema.module}?`}
+                `Are you sure you want to ${formatActionName(actionConfirm.action).toLowerCase()} this ${formatModuleName(schema.module).toLowerCase()}?`}
             </p>
             <div className="flex items-center justify-end gap-3">
               <button

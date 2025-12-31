@@ -13,6 +13,43 @@ import { fetchModules } from '@/api/schema';
 import { DocumentationPanel } from '@/components/docs/DocumentationPanel';
 import { useDocumentation } from '@/context/DocumentationContext';
 
+/**
+ * Format module names for display.
+ * Converts snake_case to Title Case with special handling for acronyms.
+ * Examples: "api_keys" -> "API Keys", "user" -> "Users", "route" -> "Routes"
+ */
+export function formatModuleName(name: string): string {
+  // Special case mappings for acronyms and common terms
+  const specialCases: Record<string, string> = {
+    'api': 'API',
+    'api_key': 'API Key',
+    'api_keys': 'API Keys',
+    'id': 'ID',
+    'url': 'URL',
+    'uuid': 'UUID',
+    'sse': 'SSE',
+    'http': 'HTTP',
+  };
+
+  // Check for exact match first
+  if (specialCases[name.toLowerCase()]) {
+    return specialCases[name.toLowerCase()];
+  }
+
+  // Split by underscore and process each word
+  return name
+    .split('_')
+    .map(word => {
+      const lower = word.toLowerCase();
+      if (specialCases[lower]) {
+        return specialCases[lower];
+      }
+      // Capitalize first letter
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    })
+    .join(' ');
+}
+
 export function ThreePaneLayout() {
   const { isExpanded } = useDocumentation();
 
@@ -136,7 +173,7 @@ function Sidebar() {
                 }
               >
                 <ModuleIcon module={mod.module} />
-                <span className="capitalize">{mod.plural}</span>
+                <span>{formatModuleName(mod.plural)}</span>
               </NavLink>
             ))}
           </nav>

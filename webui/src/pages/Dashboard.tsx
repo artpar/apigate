@@ -8,6 +8,7 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { fetchModules, fetchRecords } from '@/api/schema';
 import type { ModuleSummary } from '@/types/schema';
+import { formatModuleName } from '@/components/layout/ThreePaneLayout';
 
 export function Dashboard() {
   const { data: modules, isLoading, error } = useQuery({
@@ -141,8 +142,8 @@ function ModuleCard({ module }: { module: ModuleSummary }) {
     >
       <div className="flex items-start justify-between">
         <div>
-          <h3 className="text-lg font-semibold text-gray-900 capitalize">{module.plural}</h3>
-          <p className="text-sm text-gray-500 mt-1">{module.description || `Manage ${module.plural}`}</p>
+          <h3 className="text-lg font-semibold text-gray-900">{formatModuleName(module.plural)}</h3>
+          <p className="text-sm text-gray-500 mt-1">{module.description || `Manage ${formatModuleName(module.plural)}`}</p>
         </div>
         <div className="text-2xl font-bold text-primary-600">
           {data?.count ?? '-'}

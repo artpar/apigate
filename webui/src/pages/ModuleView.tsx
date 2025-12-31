@@ -16,6 +16,7 @@ import {
 } from '@/api/schema';
 import { DynamicForm } from '@/components/DynamicForm';
 import { PasswordModal } from '@/components/PasswordModal';
+import { formatModuleName } from '@/components/layout/ThreePaneLayout';
 import type { Record, RecordResponse } from '@/types/schema';
 
 export function ModuleView() {
@@ -116,14 +117,14 @@ export function ModuleView() {
       <div className="flex items-center justify-between">
         {/* Breadcrumb */}
         <nav className="flex items-center gap-2 text-sm">
-          <Link to={`/${module}`} className="text-gray-500 hover:text-gray-700 capitalize">
-            {schema.plural}
+          <Link to={`/${module}`} className="text-gray-500 hover:text-gray-700">
+            {formatModuleName(schema.plural)}
           </Link>
           <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
           </svg>
           <span className="text-gray-900 font-medium">
-            {isCreate ? 'Create New' : recordData?.data?.id || id}
+            {isCreate ? 'Create New' : (recordData?.data?.name as string) || (recordData?.data?.email as string) || id}
           </span>
         </nav>
 

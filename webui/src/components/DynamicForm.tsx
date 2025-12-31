@@ -9,6 +9,7 @@ import React, { useState, useMemo, useCallback } from 'react';
 import type { ModuleSchema, FieldSchema, Record } from '@/types/schema';
 import { FieldRenderer } from '@/components/fields/FieldRenderer';
 import { useDocumentation } from '@/context/DocumentationContext';
+import { formatModuleName } from '@/components/layout/ThreePaneLayout';
 
 interface DynamicFormProps {
   module: ModuleSchema;
@@ -128,7 +129,7 @@ export function DynamicForm({
       {/* Form fields */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <h2 className="text-lg font-semibold text-gray-900 mb-6">
-          {mode === 'create' ? `Create ${module.module}` : `Edit ${module.module}`}
+          {mode === 'create' ? `Create ${formatModuleName(module.module)}` : `Edit ${formatModuleName(module.module)}`}
         </h2>
 
         {fields.map((field) => (
