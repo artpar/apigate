@@ -4,6 +4,7 @@ package web
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -30,6 +31,7 @@ type PortalHandler struct {
 	logger       zerolog.Logger
 	hasher       ports.Hasher
 	idGen        ports.IDGenerator
+	payment      ports.PaymentProvider
 
 	// Portal-specific settings
 	baseURL      string
@@ -49,6 +51,7 @@ type PortalDeps struct {
 	Logger      zerolog.Logger
 	Hasher      ports.Hasher
 	IDGen       ports.IDGenerator
+	Payment     ports.PaymentProvider
 	JWTSecret   string
 	BaseURL     string
 	AppName     string
@@ -74,6 +77,7 @@ func NewPortalHandler(deps PortalDeps) (*PortalHandler, error) {
 		logger:      deps.Logger,
 		hasher:      deps.Hasher,
 		idGen:       deps.IDGen,
+		payment:     deps.Payment,
 		baseURL:     deps.BaseURL,
 		appName:     appName,
 	}, nil
@@ -114,6 +118,12 @@ func (h *PortalHandler) Router() chi.Router {
 		// Plans (upgrade/downgrade)
 		r.Get("/plans", h.PlansPage)
 		r.Post("/plans/change", h.ChangePlan)
+
+		// Subscription management
+		r.Get("/subscription/checkout-success", h.CheckoutSuccess)
+		r.Get("/subscription/checkout-cancel", h.CheckoutCancel)
+		r.Get("/subscription/manage", h.ManageSubscription)
+		r.Post("/subscription/cancel", h.CancelSubscription)
 
 		// Account settings
 		r.Get("/settings", h.AccountSettingsPage)
@@ -355,11 +365,11 @@ func (h *PortalHandler) SignupSubmit(w http.ResponseWriter, r *http.Request) {
 				h.logger.Error().Err(err).Str("email", req.Email).Msg("failed to send verification email")
 			}
 		}
-		// Redirect to login with verification message
-		http.Redirect(w, r, "/portal/login?signup=success", http.StatusFound)
+		// Redirect to login with verification message, pre-fill email
+		http.Redirect(w, r, "/portal/login?signup=success&email="+url.QueryEscape(req.Email), http.StatusFound)
 	} else {
-		// Redirect to login with ready-to-login message
-		http.Redirect(w, r, "/portal/login?signup=ready", http.StatusFound)
+		// Redirect to login with ready-to-login message, pre-fill email
+		http.Redirect(w, r, "/portal/login?signup=ready&email="+url.QueryEscape(req.Email), http.StatusFound)
 	}
 }
 
@@ -370,6 +380,7 @@ func (h *PortalHandler) SignupSubmit(w http.ResponseWriter, r *http.Request) {
 func (h *PortalHandler) PortalLoginPage(w http.ResponseWriter, r *http.Request) {
 	message := ""
 	messageType := ""
+	email := r.URL.Query().Get("email") // Pre-fill email from signup redirect
 
 	switch r.URL.Query().Get("signup") {
 	case "success":
@@ -389,7 +400,7 @@ func (h *PortalHandler) PortalLoginPage(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(h.renderLoginPage("", message, messageType, nil)))
+	w.Write([]byte(h.renderLoginPage(email, message, messageType, nil)))
 }
 
 func (h *PortalHandler) PortalLoginSubmit(w http.ResponseWriter, r *http.Request) {
@@ -813,7 +824,7 @@ func (h *PortalHandler) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Show the key to the user (only shown once)
-	h.renderKeyCreatedPage(w, user, rawKey, keyName)
+	h.renderKeyCreatedPage(w, r, user, rawKey, keyName)
 }
 
 func (h *PortalHandler) RevokeAPIKey(w http.ResponseWriter, r *http.Request) {
@@ -1094,9 +1105,18 @@ func (h *PortalHandler) PlansPage(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("error") == "payment" {
 		errorMsg = "Payment is required for this plan. Please contact support."
 	}
+	if r.URL.Query().Get("error") == "cancelled" {
+		errorMsg = "Payment was cancelled. You can try again when ready."
+	}
+	if r.URL.Query().Get("error") == "no_subscription" {
+		errorMsg = "No active subscription found. Please upgrade to a paid plan first."
+	}
+
+	// Check if user has a Stripe subscription
+	hasStripeSubscription := dbUser.StripeID != ""
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(h.renderPlansPage(user, plans, currentPlan, success, errorMsg)))
+	w.Write([]byte(h.renderPlansPage(user, plans, currentPlan, success, errorMsg, hasStripeSubscription)))
 }
 
 func (h *PortalHandler) ChangePlan(w http.ResponseWriter, r *http.Request) {
@@ -1129,27 +1149,70 @@ func (h *PortalHandler) ChangePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If the new plan has a price > 0, check for payment integration
-	// For now, we allow free plan changes and require payment integration for paid plans
+	// If the new plan has a price > 0, redirect to payment checkout
 	if newPlan.PriceMonthly > 0 {
-		// Check if we have payment settings configured
-		allSettings, _ := h.settings.GetAll(ctx)
-		stripeKey := allSettings.Get("payment.stripe.secret_key")
-		paddleKey := allSettings.Get("payment.paddle.api_key")
-		lemonKey := allSettings.Get("payment.lemonsqueezy.api_key")
-
-		if stripeKey == "" && paddleKey == "" && lemonKey == "" {
-			// No payment provider configured - redirect with message
+		// Check if payment provider is configured
+		if h.payment == nil {
+			h.logger.Error().Msg("no payment provider configured for paid plan change")
 			http.Redirect(w, r, "/portal/plans?error=payment", http.StatusFound)
 			return
 		}
 
-		// TODO: Create checkout session with payment provider
-		// For now, just update the plan (would be integrated with webhooks)
-		h.logger.Info().Str("user_id", user.ID).Str("new_plan", newPlanID).Int64("price", newPlan.PriceMonthly).Msg("paid plan change requested - payment integration needed")
+		// Get or create Stripe customer ID for user
+		customerID := dbUser.StripeID
+		if customerID == "" {
+			// Create new customer in Stripe
+			var err error
+			customerID, err = h.payment.CreateCustomer(ctx, dbUser.Email, dbUser.Name, dbUser.ID)
+			if err != nil {
+				h.logger.Error().Err(err).Msg("failed to create Stripe customer")
+				http.Redirect(w, r, "/portal/plans?error=payment", http.StatusFound)
+				return
+			}
+			// Store customer ID
+			dbUser.StripeID = customerID
+			dbUser.UpdatedAt = time.Now().UTC()
+			if err := h.users.Update(ctx, dbUser); err != nil {
+				h.logger.Error().Err(err).Msg("failed to store Stripe customer ID")
+			}
+		}
+
+		// Get the Stripe price ID for this plan
+		priceID := newPlan.StripePriceID
+		if priceID == "" {
+			h.logger.Error().Str("plan_id", newPlanID).Msg("plan has no Stripe price ID configured")
+			http.Redirect(w, r, "/portal/plans?error=payment", http.StatusFound)
+			return
+		}
+
+		// Build success/cancel URLs
+		scheme := "http"
+		if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+			scheme = "https"
+		}
+		baseURL := scheme + "://" + r.Host
+		successURL := baseURL + "/portal/subscription/checkout-success?plan=" + url.QueryEscape(newPlanID)
+		cancelURL := baseURL + "/portal/subscription/checkout-cancel"
+
+		// Create checkout session with trial period if configured
+		checkoutURL, err := h.payment.CreateCheckoutSession(ctx, customerID, priceID, successURL, cancelURL, newPlan.TrialDays)
+		if err != nil {
+			h.logger.Error().Err(err).Msg("failed to create checkout session")
+			http.Redirect(w, r, "/portal/plans?error=payment", http.StatusFound)
+			return
+		}
+
+		h.logger.Info().
+			Str("user_id", user.ID).
+			Str("new_plan", newPlanID).
+			Int64("price", newPlan.PriceMonthly).
+			Msg("redirecting to payment checkout")
+
+		http.Redirect(w, r, checkoutURL, http.StatusFound)
+		return
 	}
 
-	// Update user's plan
+	// Free plan change - update directly
 	dbUser.PlanID = newPlanID
 	dbUser.UpdatedAt = time.Now().UTC()
 	if err := h.users.Update(ctx, dbUser); err != nil {
@@ -1158,8 +1221,154 @@ func (h *PortalHandler) ChangePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.logger.Info().Str("user_id", user.ID).Str("old_plan", dbUser.PlanID).Str("new_plan", newPlanID).Msg("user changed plan")
+	h.logger.Info().Str("user_id", user.ID).Str("old_plan", dbUser.PlanID).Str("new_plan", newPlanID).Msg("user changed to free plan")
 	http.Redirect(w, r, "/portal/plans?changed=true", http.StatusFound)
+}
+
+// -----------------------------------------------------------------------------
+// Subscription Management
+// -----------------------------------------------------------------------------
+
+// CheckoutSuccess handles the return from a successful Stripe checkout
+func (h *PortalHandler) CheckoutSuccess(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := getPortalUser(ctx)
+
+	planID := r.URL.Query().Get("plan")
+	if planID == "" {
+		http.Redirect(w, r, "/portal/plans?error=invalid", http.StatusFound)
+		return
+	}
+
+	// Verify plan exists and is enabled
+	plan, err := h.plans.Get(ctx, planID)
+	if err != nil || !plan.Enabled {
+		h.logger.Error().Err(err).Str("plan_id", planID).Msg("invalid plan in checkout success")
+		http.Redirect(w, r, "/portal/plans?error=invalid", http.StatusFound)
+		return
+	}
+
+	// Update user's plan
+	// Note: In production, this should be handled by Stripe webhooks
+	// This is a simplified flow for immediate feedback
+	dbUser, err := h.users.Get(ctx, user.ID)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to get user in checkout success")
+		http.Redirect(w, r, "/portal/plans?error=internal", http.StatusFound)
+		return
+	}
+
+	oldPlan := dbUser.PlanID
+	dbUser.PlanID = planID
+	dbUser.UpdatedAt = time.Now().UTC()
+	if err := h.users.Update(ctx, dbUser); err != nil {
+		h.logger.Error().Err(err).Msg("failed to update user plan after checkout")
+		http.Redirect(w, r, "/portal/plans?error=internal", http.StatusFound)
+		return
+	}
+
+	h.logger.Info().
+		Str("user_id", user.ID).
+		Str("old_plan", oldPlan).
+		Str("new_plan", planID).
+		Msg("user upgraded plan after checkout")
+
+	http.Redirect(w, r, "/portal/plans?changed=true", http.StatusFound)
+}
+
+// CheckoutCancel handles the return from a cancelled Stripe checkout
+func (h *PortalHandler) CheckoutCancel(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, "/portal/plans?error=cancelled", http.StatusFound)
+}
+
+// ManageSubscription redirects to Stripe Customer Portal for subscription management
+func (h *PortalHandler) ManageSubscription(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := getPortalUser(ctx)
+
+	if h.payment == nil {
+		http.Redirect(w, r, "/portal/plans?error=payment", http.StatusFound)
+		return
+	}
+
+	dbUser, err := h.users.Get(ctx, user.ID)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to get user for subscription management")
+		http.Redirect(w, r, "/portal/plans?error=internal", http.StatusFound)
+		return
+	}
+
+	if dbUser.StripeID == "" {
+		http.Redirect(w, r, "/portal/plans?error=no_subscription", http.StatusFound)
+		return
+	}
+
+	// Build return URL
+	scheme := "http"
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
+	returnURL := scheme + "://" + r.Host + "/portal/plans"
+
+	// Create Stripe Customer Portal session
+	portalURL, err := h.payment.CreatePortalSession(ctx, dbUser.StripeID, returnURL)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to create portal session")
+		http.Redirect(w, r, "/portal/plans?error=payment", http.StatusFound)
+		return
+	}
+
+	http.Redirect(w, r, portalURL, http.StatusFound)
+}
+
+// CancelSubscription handles subscription cancellation
+func (h *PortalHandler) CancelSubscription(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := getPortalUser(ctx)
+
+	// For now, redirect to Stripe Customer Portal for cancellation
+	// The portal provides a better UX for handling cancellation reasons, prorations, etc.
+	if h.payment == nil {
+		http.Redirect(w, r, "/portal/plans?error=payment", http.StatusFound)
+		return
+	}
+
+	dbUser, err := h.users.Get(ctx, user.ID)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to get user for cancellation")
+		http.Redirect(w, r, "/portal/plans?error=internal", http.StatusFound)
+		return
+	}
+
+	if dbUser.StripeID == "" {
+		// No Stripe subscription - just set to free plan
+		dbUser.PlanID = "free"
+		dbUser.UpdatedAt = time.Now().UTC()
+		if err := h.users.Update(ctx, dbUser); err != nil {
+			h.logger.Error().Err(err).Msg("failed to downgrade to free plan")
+			http.Redirect(w, r, "/portal/plans?error=internal", http.StatusFound)
+			return
+		}
+		http.Redirect(w, r, "/portal/plans?changed=true", http.StatusFound)
+		return
+	}
+
+	// Build return URL
+	scheme := "http"
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
+	returnURL := scheme + "://" + r.Host + "/portal/plans"
+
+	// Redirect to Stripe Customer Portal for cancellation
+	portalURL, err := h.payment.CreatePortalSession(ctx, dbUser.StripeID, returnURL)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to create portal session for cancellation")
+		http.Redirect(w, r, "/portal/plans?error=payment", http.StatusFound)
+		return
+	}
+
+	http.Redirect(w, r, portalURL, http.StatusFound)
 }
 
 // -----------------------------------------------------------------------------

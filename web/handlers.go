@@ -1943,6 +1943,21 @@ func (h *Handler) SetupStepSubmit(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Test connection to the upstream
+		client := &http.Client{Timeout: 10 * time.Second}
+		testReq, err := http.NewRequest("HEAD", upstreamURL, nil)
+		if err == nil {
+			resp, err := client.Do(testReq)
+			if err != nil {
+				h.logger.Warn().Err(err).Str("url", upstreamURL).Msg("upstream connection test failed")
+				h.renderSetupError(w, r, 0, "Could not connect to the API. Please verify the URL is correct and the API is running. Error: "+err.Error())
+				return
+			}
+			resp.Body.Close()
+			// Any response (even 4xx/5xx) means the server is reachable
+			h.logger.Info().Str("url", upstreamURL).Int("status", resp.StatusCode).Msg("upstream connection test successful")
+		}
+
 		now := time.Now().UTC()
 
 		// Extract a name from the host

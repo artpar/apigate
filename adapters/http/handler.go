@@ -548,6 +548,7 @@ type RouterConfig struct {
 	AdminHandler   http.Handler // Optional admin API handler
 	WebHandler     http.Handler // Optional web UI handler
 	PortalHandler  http.Handler // Optional user portal handler
+	DocsHandler    http.Handler // Optional developer documentation portal handler
 	ModuleHandler  http.Handler // Optional declarative module handler (mounted at /api/v2)
 }
 
@@ -610,6 +611,11 @@ func NewRouterWithConfig(proxyHandler *ProxyHandler, healthHandler *HealthHandle
 	// User portal (if enabled)
 	if cfg.PortalHandler != nil {
 		r.Mount("/portal", cfg.PortalHandler)
+	}
+
+	// Developer documentation portal (if enabled)
+	if cfg.DocsHandler != nil {
+		r.Mount("/docs", cfg.DocsHandler)
 	}
 
 	// Module API (declarative modules, if enabled)

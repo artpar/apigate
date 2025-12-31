@@ -243,6 +243,34 @@ func (h *PortalHandler) renderResetPasswordPage(token string, errors map[string]
 }
 
 func (h *PortalHandler) renderDashboardPage(user *PortalUser, keyCount int, requestCount int64, planName string, requestsPerMonth int64, rateLimitPerMinute int) string {
+	// Show getting started section for new users with no API keys
+	gettingStartedSection := ""
+	if keyCount == 0 {
+		gettingStartedSection = `
+        <div class="card" style="margin-bottom: 24px; padding: 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 12px;">
+            <h2 style="margin: 0 0 12px 0; font-size: 20px;">Welcome! Let's get you started</h2>
+            <p style="margin: 0 0 16px 0; opacity: 0.9;">Follow these simple steps to start using the API:</p>
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <span style="background: rgba(255,255,255,0.2); width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold;">1</span>
+                    <span><strong>Create an API Key</strong> - Click the button below to generate your first key</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <span style="background: rgba(255,255,255,0.2); width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold;">2</span>
+                    <span><strong>Read the Docs</strong> - Learn how to authenticate and make API calls</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <span style="background: rgba(255,255,255,0.2); width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold;">3</span>
+                    <span><strong>Make your first request</strong> - Use your key to call the API</span>
+                </div>
+            </div>
+            <div style="margin-top: 20px; display: flex; gap: 12px;">
+                <a href="/portal/api-keys" style="background: white; color: #667eea; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: 600;">Create API Key</a>
+                <a href="/docs" target="_blank" style="background: rgba(255,255,255,0.2); color: white; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: 600;">View Documentation</a>
+            </div>
+        </div>`
+	}
+
 	// Calculate quota usage
 	quotaSection := ""
 	if requestsPerMonth > 0 {
@@ -308,6 +336,7 @@ func (h *PortalHandler) renderDashboardPage(user *PortalUser, keyCount int, requ
             <p>Welcome back, %s!</p>
         </div>
         %s
+        %s
         <div class="stats-grid">
             <div class="stat-card">
                 <div class="stat-value">%d</div>
@@ -329,6 +358,10 @@ func (h *PortalHandler) renderDashboardPage(user *PortalUser, keyCount int, requ
                     <strong>View Usage</strong>
                     <span>Monitor your API usage</span>
                 </a>
+                <a href="/docs" class="link-card" target="_blank">
+                    <strong>API Documentation</strong>
+                    <span>Learn how to use the API</span>
+                </a>
                 <a href="/portal/settings" class="link-card">
                     <strong>Account Settings</strong>
                     <span>Update your account</span>
@@ -337,7 +370,7 @@ func (h *PortalHandler) renderDashboardPage(user *PortalUser, keyCount int, requ
         </div>
     </main>
 </body>
-</html>`, h.appName, portalCSS, h.renderPortalNav(user), user.Name, quotaSection, keyCount, requestCount)
+</html>`, h.appName, portalCSS, h.renderPortalNav(user), user.Name, quotaSection, gettingStartedSection, keyCount, requestCount)
 }
 
 func (h *PortalHandler) renderAPIKeysPage(user *PortalUser, keys []key.Key, revokedMsg bool) string {
@@ -432,11 +465,18 @@ func (h *PortalHandler) renderAPIKeysPage(user *PortalUser, keys []key.Key, revo
 </html>`, h.appName, portalCSS, h.renderPortalNav(user), successMsg, keyRows)
 }
 
-func (h *PortalHandler) renderKeyCreatedPage(w http.ResponseWriter, user *PortalUser, rawKey, keyName string) {
+func (h *PortalHandler) renderKeyCreatedPage(w http.ResponseWriter, r *http.Request, user *PortalUser, rawKey, keyName string) {
 	displayName := keyName
 	if displayName == "" {
 		displayName = "API Key"
 	}
+
+	// Get the server base URL from the request
+	scheme := "http"
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
+	baseURL := fmt.Sprintf("%s://%s", scheme, r.Host)
 
 	html := fmt.Sprintf(`
 <!DOCTYPE html>
@@ -472,9 +512,9 @@ func (h *PortalHandler) renderKeyCreatedPage(w http.ResponseWriter, user *Portal
                 <div style="background: #1e1e1e; color: #d4d4d4; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 13px; overflow-x: auto;">
                     <div style="color: #6a9955;">## Example request with curl</div>
                     <div>curl -H "X-API-Key: <span style="color: #ce9178;">%s</span>" \</div>
-                    <div style="padding-left: 20px;">https://your-apigate-url/your-endpoint</div>
+                    <div style="padding-left: 20px;">%s/your-endpoint</div>
                 </div>
-                <p style="margin: 12px 0 0 0; color: #6c757d; font-size: 13px;">Replace <code style="background: #e9ecef; padding: 2px 6px; border-radius: 4px;">your-apigate-url</code> with this server's address and <code style="background: #e9ecef; padding: 2px 6px; border-radius: 4px;">your-endpoint</code> with the API path.</p>
+                <p style="margin: 12px 0 0 0; color: #6c757d; font-size: 13px;">Replace <code style="background: #e9ecef; padding: 2px 6px; border-radius: 4px;">your-endpoint</code> with the API path you want to call.</p>
             </div>
 
             <div style="margin-top: 20px;">
@@ -483,7 +523,7 @@ func (h *PortalHandler) renderKeyCreatedPage(w http.ResponseWriter, user *Portal
         </div>
     </main>
 </body>
-</html>`, h.appName, portalCSS, h.renderPortalNav(user), displayName, rawKey, rawKey)
+</html>`, h.appName, portalCSS, h.renderPortalNav(user), displayName, rawKey, rawKey, baseURL)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(html))
@@ -648,6 +688,7 @@ func (h *PortalHandler) renderPortalNav(user *PortalUser) string {
             <a href="/portal/api-keys">API Keys</a>
             <a href="/portal/usage">Usage</a>
             <a href="/portal/plans">Plans</a>
+            <a href="/docs" target="_blank">Docs</a>
             <a href="/portal/settings">Settings</a>
         </div>
         <div class="nav-user">
@@ -660,7 +701,7 @@ func (h *PortalHandler) renderPortalNav(user *PortalUser) string {
 `, h.appName, user.Email)
 }
 
-func (h *PortalHandler) renderPlansPage(user *PortalUser, plans []ports.Plan, currentPlan *ports.Plan, success, errorMsg string) string {
+func (h *PortalHandler) renderPlansPage(user *PortalUser, plans []ports.Plan, currentPlan *ports.Plan, success, errorMsg string, hasStripeSubscription bool) string {
 	alertHTML := ""
 	if success != "" {
 		alertHTML = fmt.Sprintf(`<div class="alert alert-success">%s</div>`, success)
@@ -711,17 +752,27 @@ func (h *PortalHandler) renderPlansPage(user *PortalUser, plans []ports.Plan, cu
 			currentBadge = `<span style="display: inline-block; background: #22c55e; color: white; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; margin-left: 8px;">Current Plan</span>`
 		}
 
+		// Trial badge
+		trialBadge := ""
+		if p.TrialDays > 0 {
+			trialBadge = fmt.Sprintf(`<div style="color: #7c3aed; font-size: 13px; font-weight: 500; margin-top: 4px;">%d-day free trial</div>`, p.TrialDays)
+		}
+
 		// Action button
 		actionBtn := ""
 		if isCurrent {
 			actionBtn = `<button class="btn" disabled style="background: #e5e7eb; color: #9ca3af; cursor: not-allowed;">Current Plan</button>`
 		} else if p.PriceMonthly > 0 {
-			// Paid plan - show upgrade button
+			// Paid plan - show upgrade button with trial info
+			buttonText := "Upgrade"
+			if p.TrialDays > 0 {
+				buttonText = fmt.Sprintf("Start %d-Day Trial", p.TrialDays)
+			}
 			actionBtn = fmt.Sprintf(`
 				<form method="POST" action="/portal/plans/change" onsubmit="return confirm('Change to %s plan?')">
 					<input type="hidden" name="plan_id" value="%s">
-					<button type="submit" class="btn btn-primary">Upgrade</button>
-				</form>`, p.Name, p.ID)
+					<button type="submit" class="btn btn-primary">%s</button>
+				</form>`, p.Name, p.ID, buttonText)
 		} else {
 			// Free plan - show downgrade button
 			actionBtn = fmt.Sprintf(`
@@ -746,6 +797,7 @@ func (h *PortalHandler) renderPlansPage(user *PortalUser, plans []ports.Plan, cu
 					</div>
 					<div style="text-align: right;">
 						<div style="font-size: 28px; font-weight: bold; color: #111827;">%s</div>
+						%s
 					</div>
 				</div>
 				<div style="border-top: 1px solid #e5e7eb; padding-top: 16px; margin-bottom: 16px;">
@@ -766,11 +818,27 @@ func (h *PortalHandler) renderPlansPage(user *PortalUser, plans []ports.Plan, cu
 				</div>
 				<div>%s</div>
 			</div>
-		`, cardStyle, p.Name, currentBadge, p.Description, priceDisplay, quotaDisplay, rateDisplay, overageDisplay, actionBtn)
+		`, cardStyle, p.Name, currentBadge, p.Description, priceDisplay, trialBadge, quotaDisplay, rateDisplay, overageDisplay, actionBtn)
 	}
 
 	if planCards == "" {
 		planCards = `<div class="card" style="text-align: center; padding: 40px;"><p style="color: #6b7280;">No plans available at this time.</p></div>`
+	}
+
+	// Subscription management section for paid subscribers
+	subscriptionSection := ""
+	if hasStripeSubscription {
+		subscriptionSection = `
+        <div style="margin-top: 32px; padding: 24px; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+            <h3 style="margin: 0 0 16px 0; font-size: 18px;">Subscription Management</h3>
+            <p style="margin: 0 0 16px 0; color: #6b7280;">Manage your billing, payment methods, and invoices through the customer portal.</p>
+            <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                <a href="/portal/subscription/manage" class="btn btn-primary" style="text-decoration: none;">Manage Billing</a>
+                <form method="POST" action="/portal/subscription/cancel" onsubmit="return confirm('Are you sure you want to cancel your subscription?')">
+                    <button type="submit" class="btn btn-secondary" style="background: #fef2f2; color: #dc2626; border: 1px solid #fecaca;">Cancel Subscription</button>
+                </form>
+            </div>
+        </div>`
 	}
 
 	return fmt.Sprintf(`
@@ -793,6 +861,7 @@ func (h *PortalHandler) renderPlansPage(user *PortalUser, plans []ports.Plan, cu
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px;">
             %s
         </div>
+        %s
         <div style="margin-top: 24px; padding: 16px; background: #f3f4f6; border-radius: 8px;">
             <p style="margin: 0; color: #6b7280; font-size: 14px;">
                 Need a custom plan with higher limits? <a href="mailto:support@example.com" style="color: #3b82f6;">Contact us</a>
@@ -800,7 +869,7 @@ func (h *PortalHandler) renderPlansPage(user *PortalUser, plans []ports.Plan, cu
         </div>
     </main>
 </body>
-</html>`, h.appName, portalCSS, h.renderPortalNav(user), alertHTML, planCards)
+</html>`, h.appName, portalCSS, h.renderPortalNav(user), alertHTML, planCards, subscriptionSection)
 }
 
 // Portal CSS styles
