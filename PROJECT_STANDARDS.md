@@ -13,7 +13,7 @@ APIGate is built on five foundational principles. Every feature, every change, e
 | 1 | **Self-Onboarding** | Zero human intervention required for any user to start |
 | 2 | **Self-Service** | Users can accomplish everything without contacting support |
 | 3 | **Self-Documenting** | Single source of truth, code and docs always in sync |
-| 4 | **Type Safety** | Explicit types everywhere, no `any`, no runtime type errors |
+| 4 | **Type Safety (Server)** | Go server: explicit types, no `interface{}`, no runtime type errors |
 | 5 | **Test Coverage** | 80%+ coverage, all critical paths tested |
 
 ---
@@ -176,15 +176,15 @@ Every new feature must answer:
 
 ---
 
-## Principle 4: Type Safety
+## Principle 4: Type Safety (Server)
 
 ### Definition
 
-All code must be explicitly typed. No implicit any, no runtime type coercion surprises, no "trust me" casting. Types are documentation that the compiler enforces.
+The Go server must be explicitly typed throughout. No `interface{}` without immediate type assertion, no runtime type surprises, no "trust me" casting. Types are documentation that the compiler enforces.
+
+> **Scope:** This principle applies to the **Go backend server only**. The React/TypeScript dashboard is not covered by this requirement.
 
 ### Requirements
-
-#### Go (Backend)
 
 | Requirement | Enforcement |
 |-------------|-------------|
@@ -193,47 +193,68 @@ All code must be explicitly typed. No implicit any, no runtime type coercion sur
 | Error handling explicit | errcheck linter |
 | No panics in production code | Panic-free guarantee |
 | Struct fields typed and tagged | Required |
-
-#### TypeScript (Frontend)
-
-| Requirement | Enforcement |
-|-------------|-------------|
-| `strict: true` in tsconfig | CI check |
-| No `any` type | ESLint rule |
-| No `@ts-ignore` without justification | PR review |
-| Props interfaces for all components | Required |
-| API responses typed | Generated from OpenAPI |
+| JSON unmarshaling into typed structs | No `map[string]interface{}` |
+| Database queries return typed results | No raw interface returns |
+| API handlers use typed request/response | Struct bindings required |
 
 ### Measurable Criteria
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│ TYPE SAFETY METRICS                              Target    Blocker │
+│ TYPE SAFETY METRICS (Go Server)                  Target    Blocker │
 ├─────────────────────────────────────────────────────────────────────┤
-│ TypeScript strict mode                           enabled   disabled│
-│ `any` types in codebase                          0         > 10    │
 │ `interface{}` without assertion                  0         > 5     │
-│ Runtime type errors in logs                      0         > 0     │
-│ @ts-ignore comments                              0         > 5     │
-│ Untyped API responses                            0         > 0     │
+│ `map[string]interface{}` in handlers             0         > 3     │
+│ Runtime type assertion panics                    0         > 0     │
+│ Untyped JSON unmarshal                           0         > 5     │
+│ Missing error returns                            0         > 0     │
+│ Naked panics (non-recovery)                      0         > 0     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Validation
 
-- [ ] `tsc --noEmit` passes with strict mode
-- [ ] ESLint no-any rule passes
-- [ ] Go vet passes
+- [ ] `go vet ./...` passes
+- [ ] `golangci-lint run` passes with strict config
 - [ ] No type assertion errors in production logs
-- [ ] API types generated from OpenAPI spec
+- [ ] All API handlers use typed request structs
+- [ ] All database queries return typed results
+
+### Anti-Patterns to Avoid
+
+```go
+// BAD: Untyped interface
+func GetData() interface{} { ... }
+
+// GOOD: Explicit return type
+func GetData() (*UserData, error) { ... }
+
+// BAD: map[string]interface{} for JSON
+var data map[string]interface{}
+json.Unmarshal(body, &data)
+
+// GOOD: Typed struct
+var req CreateUserRequest
+json.Unmarshal(body, &req)
+
+// BAD: Type assertion without check
+user := ctx.Value("user").(User)
+
+// GOOD: Type assertion with check
+user, ok := ctx.Value("user").(User)
+if !ok {
+    return ErrInvalidContext
+}
+```
 
 ### Implementation Checklist
 
-Every new code must answer:
-- [ ] Are all function parameters and returns typed?
-- [ ] Are error cases handled explicitly?
+Every new Go code must answer:
+- [ ] Are all function parameters and returns explicitly typed?
+- [ ] Are error cases handled explicitly (no ignored errors)?
 - [ ] Would a type change here break compilation (good) or runtime (bad)?
 - [ ] Is the type narrow enough to prevent misuse?
+- [ ] Are all `interface{}` immediately asserted to concrete types?
 
 ---
 
@@ -324,10 +345,10 @@ A release is blocked if ANY of these fail:
 │ [ ] No documentation drift detected                                 │
 │ [ ] Error catalog up to date                                        │
 │                                                                     │
-│ TYPE SAFETY                                                         │
-│ [ ] TypeScript strict mode passes                                   │
-│ [ ] No new `any` types                                              │
+│ TYPE SAFETY (Go Server)                                             │
 │ [ ] Go vet passes                                                   │
+│ [ ] golangci-lint passes                                            │
+│ [ ] No new `interface{}` without assertion                          │
 │                                                                     │
 │ TEST COVERAGE                                                       │
 │ [ ] Overall coverage > 80%                                          │
@@ -345,10 +366,10 @@ These must pass in CI before merge:
 ```yaml
 # .github/workflows/standards.yml
 checks:
-  - name: type-safety
+  - name: type-safety-go
     commands:
-      - tsc --noEmit --strict
-      - golangci-lint run
+      - go vet ./...
+      - golangci-lint run --config .golangci.yml
     blocker: true
 
   - name: test-coverage
@@ -419,9 +440,10 @@ SELF-DOCUMENTING
   OpenAPI drift: 0 endpoints ✓
   Error catalog match: 100% ✓
 
-TYPE SAFETY
-  TypeScript any count: 0 ✓
-  Go interface{} unasserted: 0 ✓
+TYPE SAFETY (Go Server)
+  interface{} unasserted: 0 ✓
+  map[string]interface{} in handlers: 0 ✓
+  golangci-lint: passed ✓
 
 TEST COVERAGE
   Overall: 82.3% (Target: >80%) ✓
@@ -485,7 +507,7 @@ Before PR:
 [ ] Self-onboarding: Can a new user discover this?
 [ ] Self-service: Is this fully UI-accessible?
 [ ] Self-documenting: Is the source of truth clear?
-[ ] Type safety: All types explicit?
+[ ] Type safety: All Go types explicit? No interface{}?
 [ ] Test coverage: >80% for new code?
 
 Before merge:
