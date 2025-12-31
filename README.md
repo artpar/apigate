@@ -88,10 +88,10 @@ Customers → APIGate → Your API
 | Feature | What It Does |
 |---------|--------------|
 | **Reverse Proxy** | Transparent forwarding, header injection |
-| **Rate Limiting** | Sliding window algorithm, per-key limits |
+| **Rate Limiting** | Token bucket algorithm, per-key limits |
 | **High Performance** | Written in Go, handles thousands of req/sec |
 | **Single Binary** | No dependencies, runs anywhere |
-| **SQLite or Postgres** | Start simple, scale when needed |
+| **SQLite Storage** | Embedded database, zero config |
 
 ---
 
@@ -131,7 +131,7 @@ services:
     volumes:
       - apigate-data:/data
     environment:
-      - DATABASE_DSN=/data/apigate.db
+      - APIGATE_DATABASE_DSN=/data/apigate.db
 
 volumes:
   apigate-data:
@@ -155,30 +155,32 @@ Stripe/Paddle handles billing. You see MRR in your dashboard.
 
 ---
 
-## Pricing Configuration Example
+## Creating Plans
 
-```yaml
-plans:
-  - id: free
-    name: "Free"
-    requests_per_month: 1000
-    rate_limit_per_minute: 10
-    price_monthly: 0
+Plans are created via the web UI during setup or using the CLI:
 
-  - id: starter
-    name: "Starter"
-    requests_per_month: 50000
-    rate_limit_per_minute: 60
-    price_monthly: 29.00
-    overage_price_per_1000: 0.50
+```bash
+# Create a free tier
+apigate plans create \
+  --name "Free" \
+  --requests_per_month 1000 \
+  --rate_limit_per_minute 10 \
+  --price_monthly 0 \
+  --is_default true
 
-  - id: pro
-    name: "Pro"
-    requests_per_month: 500000
-    rate_limit_per_minute: 300
-    price_monthly: 99.00
-    overage_price_per_1000: 0.30
+# Create a paid tier
+apigate plans create \
+  --name "Pro" \
+  --requests_per_month 100000 \
+  --rate_limit_per_minute 600 \
+  --price_monthly 2900 \
+  --trial_days 14
+
+# List all plans
+apigate plans list
 ```
+
+Or configure via the Admin Dashboard at `/ui/plans`.
 
 ---
 
@@ -229,12 +231,6 @@ APIGate adds these headers to requests it forwards:
 
 ## Production Deployment
 
-### With PostgreSQL
-
-```bash
-DATABASE_DSN="postgres://user:pass@localhost:5432/apigate" ./apigate
-```
-
 ### Behind Nginx
 
 ```nginx
@@ -254,10 +250,30 @@ server {
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `DATABASE_DSN` | Database connection string | `apigate.db` (SQLite) |
-| `APIGATE_PORT` | HTTP port | `8080` |
-| `STRIPE_SECRET_KEY` | Stripe API key | - |
-| `SENDGRID_API_KEY` | SendGrid API key | - |
+| `APIGATE_DATABASE_DSN` | SQLite database path | `apigate.db` |
+| `APIGATE_SERVER_PORT` | HTTP port | `8080` |
+| `APIGATE_SERVER_HOST` | Bind address | `0.0.0.0` |
+| `APIGATE_LOG_LEVEL` | Log level (debug, info, warn, error) | `info` |
+| `APIGATE_LOG_FORMAT` | Log format (json, text) | `json` |
+
+Payment and email providers are configured via the Admin Dashboard settings.
+
+---
+
+## Documentation
+
+### User Guides
+- **[User Guide](docs/USER_GUIDE.md)** - Complete guide for both API sellers (admins) and API buyers (customers)
+
+### Technical Reference
+- **[Technical Features](docs/TECHNICAL_FEATURES.md)** - Comprehensive list of all features, APIs, CLI commands, and configuration options
+
+### Architecture & Design
+- **[System Architecture](docs/SYSTEM_ARCHITECTURE.md)** - Module system, capability architecture, data models, and deployment
+- **[Architecture (Patterns)](docs/ARCHITECTURE.md)** - Functional core/imperative shell pattern, testing strategies
+
+### Additional Resources
+- **[Developer KT](docs/DEVELOPER_KT.md)** - Knowledge transfer for developers joining the project
 
 ---
 
@@ -284,9 +300,10 @@ Free for:
 
 ## Built With
 
-- **Go** - Fast, reliable, single binary
-- **SQLite/PostgreSQL** - Your choice of database
-- **HTMX** - Lightweight, no JavaScript framework bloat
+- **Go 1.21+** - Fast, reliable, single binary
+- **SQLite** - Embedded database, zero configuration
+- **React** - Modern admin UI with dynamic forms
+- **TailwindCSS** - Clean, responsive styling
 
 ---
 
