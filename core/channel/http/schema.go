@@ -230,12 +230,13 @@ func (h *SchemaHandler) buildInputs(inputs []convention.ActionInput) []schema.In
 	result := make([]schema.InputSchema, 0, len(inputs))
 
 	for _, i := range inputs {
+		defaultStr, _ := i.Default.(string)
 		is := schema.InputSchema{
 			Name:       i.Name,
 			Field:      i.Field,
 			Type:       string(i.Type),
 			Required:   i.Required,
-			Default:    i.Default,
+			Default:    defaultStr,
 			Prompt:     i.Prompt,
 			PromptText: i.PromptText,
 		}

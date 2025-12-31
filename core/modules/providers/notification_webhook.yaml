@@ -1,0 +1,69 @@
+# Webhook Notification Provider Module
+# Implements the notification capability using generic HTTP webhooks
+# Flexible integration for custom notification endpoints
+module: notification_webhook
+
+meta:
+  description: Generic HTTP webhook notifications for custom integrations
+  implements: [notification]
+  icon: globe
+  display_name: Webhook Notifications
+
+schema:
+  enabled:           { type: bool, default: false, description: "Whether this notification provider is active" }
+  endpoint_url:      { type: string, required: true, description: "Webhook endpoint URL" }
+  method:            { type: string, default: "POST", description: "HTTP method (POST, PUT)" }
+  headers:           { type: json, description: "Custom HTTP headers (key-value pairs)" }
+  auth_type:         { type: string, default: "none", description: "none, bearer, basic, hmac" }
+  auth_token:        { type: secret, description: "Bearer token or API key" }
+  auth_username:     { type: string, description: "Basic auth username" }
+  auth_password:     { type: secret, description: "Basic auth password" }
+  hmac_secret:       { type: secret, description: "HMAC signing secret" }
+  hmac_header:       { type: string, default: "X-Signature", description: "Header for HMAC signature" }
+  timeout:           { type: int, default: 30, description: "Request timeout in seconds" }
+  retry_count:       { type: int, default: 3, description: "Number of retry attempts" }
+  retry_delay:       { type: int, default: 5, description: "Delay between retries in seconds" }
+  payload_template:  { type: string, description: "Custom JSON template (uses Go text/template)" }
+  batch_enabled:     { type: bool, default: true, description: "Batch multiple notifications" }
+  batch_max_size:    { type: int, default: 100, description: "Maximum notifications per batch" }
+  batch_window:      { type: int, default: 5, description: "Seconds to wait before sending batch" }
+
+actions:
+  send:
+    description: Send a notification via webhook
+    input:
+      - { name: channel, type: string, description: "Optional routing hint" }
+      - { name: title, type: string, required: true }
+      - { name: message, type: string, required: true }
+      - { name: severity, type: string, default: "info" }
+      - { name: fields, type: json, description: "Additional structured data" }
+      - { name: override_url, type: string, description: "Override endpoint for this message" }
+
+  send_batch:
+    description: Send multiple notifications in one request
+    input:
+      - { name: notifications, type: json, required: true }
+
+  send_raw:
+    description: Send raw JSON payload (bypass templating)
+    input:
+      - { name: payload, type: json, required: true }
+      - { name: override_url, type: string }
+
+  test_connection:
+    description: Send test notification to verify endpoint
+
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /api/notifications/webhook
+      endpoints:
+        - { action: test_connection, method: POST, path: "/test" }
+
+  cli:
+    serve:
+      enabled: true
+      command: notify webhook
+      commands:
+        - action: test_connection

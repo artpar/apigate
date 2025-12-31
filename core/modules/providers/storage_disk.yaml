@@ -1,0 +1,90 @@
+# Disk Storage Provider Module
+# Implements the storage capability using local filesystem
+module: storage_disk
+
+meta:
+  description: Local filesystem storage for development and single-server deployments
+  implements: [storage]
+  icon: folder
+  display_name: Disk Storage
+
+schema:
+  enabled:          { type: bool, default: false, description: "Whether this storage provider is active" }
+  base_path:        { type: string, default: "./data/storage", description: "Base directory for file storage" }
+  create_dirs:      { type: bool, default: true, description: "Automatically create directories if they don't exist" }
+  permissions:      { type: string, default: "0755", description: "Directory permissions (octal)" }
+  file_permissions: { type: string, default: "0644", description: "File permissions (octal)" }
+  max_file_size:    { type: int, default: 104857600, description: "Maximum file size in bytes (default 100MB)" }
+  allowed_types:    { type: json, description: "List of allowed MIME types (empty = allow all)" }
+  public_url_base:  { type: string, description: "Base URL for public file access (optional)" }
+
+actions:
+  put:
+    description: Store a file
+    input:
+      - { name: key, type: string, required: true, description: "Storage key/path" }
+      - { name: data, type: bytes, required: true, description: "File content" }
+      - { name: content_type, type: string, default: "application/octet-stream" }
+
+  get:
+    description: Retrieve a file
+    input:
+      - { name: key, type: string, required: true }
+    output:
+      - { name: data, type: bytes }
+      - { name: content_type, type: string }
+
+  delete:
+    description: Delete a file
+    input:
+      - { name: key, type: string, required: true }
+
+  exists:
+    description: Check if file exists
+    input:
+      - { name: key, type: string, required: true }
+
+  list:
+    description: List files with prefix
+    input:
+      - { name: prefix, type: string, default: "" }
+      - { name: limit, type: int, default: 100 }
+    output:
+      - { name: objects, type: json, description: "List of storage objects with key, size, content_type, last_modified" }
+
+  get_url:
+    description: Get URL to access file (for serving via web server)
+    input:
+      - { name: key, type: string, required: true }
+      - { name: expires_in, type: int, default: 3600, description: "URL validity in seconds (not enforced for disk)" }
+
+  put_stream:
+    description: Store a large file from a stream
+    input:
+      - { name: key, type: string, required: true }
+      - { name: content_type, type: string, default: "application/octet-stream" }
+    # Stream is passed programmatically
+
+  stats:
+    description: Get storage statistics
+    output:
+      - { name: total_files, type: int }
+      - { name: total_size, type: int }
+      - { name: base_path, type: string }
+
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /api/storage
+      endpoints:
+        - { action: stats, method: GET, path: "/stats" }
+        - { action: list, method: GET, path: "/list" }
+
+  cli:
+    serve:
+      enabled: true
+      command: storage
+      commands:
+        - action: stats
+        - action: list

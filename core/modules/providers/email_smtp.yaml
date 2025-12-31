@@ -1,0 +1,73 @@
+# SMTP Email Provider Module
+# Implements the email capability using SMTP
+module: email_smtp
+
+meta:
+  description: SMTP email integration for transactional emails
+  implements: [email]
+  icon: mail
+  display_name: SMTP Email
+
+schema:
+  enabled:    { type: bool, default: false, description: "Whether SMTP is the active email provider" }
+  host:       { type: string, required: true, description: "SMTP server hostname" }
+  port:       { type: int, default: 587, description: "SMTP server port (587 for TLS, 465 for SSL)" }
+  username:   { type: string, description: "SMTP username for authentication" }
+  password:   { type: secret, description: "SMTP password for authentication" }
+  from_email: { type: email, required: true, description: "Default sender email address" }
+  from_name:  { type: string, description: "Default sender display name" }
+  tls_mode:   { type: enum, values: [none, starttls, tls], default: starttls, description: "TLS mode for SMTP connection" }
+  timeout:    { type: int, default: 30, description: "Connection timeout in seconds" }
+
+actions:
+  test_connection:
+    description: Verify SMTP connection and credentials
+    # Implementation connects to SMTP server and authenticates
+
+  send:
+    description: Send a single email
+    input:
+      - { name: to, type: email, required: true }
+      - { name: subject, type: string, required: true }
+      - { name: body_html, type: string }
+      - { name: body_text, type: string }
+      - { name: from_email, type: email, description: "Override default sender" }
+      - { name: from_name, type: string }
+      - { name: reply_to, type: email }
+      - { name: cc, type: json, description: "Array of CC email addresses" }
+      - { name: bcc, type: json, description: "Array of BCC email addresses" }
+
+  send_template:
+    description: Send email using a template
+    input:
+      - { name: to, type: email, required: true }
+      - { name: template_id, type: string, required: true }
+      - { name: variables, type: json, description: "Template variables" }
+      - { name: from_email, type: email }
+      - { name: from_name, type: string }
+
+  send_bulk:
+    description: Send to multiple recipients
+    input:
+      - { name: recipients, type: json, required: true, description: "Array of email addresses" }
+      - { name: subject, type: string, required: true }
+      - { name: body_html, type: string }
+      - { name: body_text, type: string }
+
+channels:
+  cli:
+    serve:
+      enabled: true
+      command: email
+      commands:
+        - action: test_connection
+        - action: send
+          flags:
+            - { param: to, required: true }
+            - { param: subject, required: true }
+            - { param: body_text }
+
+hooks:
+  # Log all sent emails for debugging
+  after_send:
+    - emit: email.sent

@@ -39,9 +39,18 @@
                     <label for="status" class="form-label">Status</label>
                     <select id="status" name="status" class="form-input">
                         <option value="active" {{if eq .FormUser.Status "active"}}selected{{end}}>Active</option>
+                        <option value="pending" {{if eq .FormUser.Status "pending"}}selected{{end}}>Pending Verification</option>
                         <option value="suspended" {{if eq .FormUser.Status "suspended"}}selected{{end}}>Suspended</option>
                     </select>
                 </div>
+
+                {{if and .IsEdit (eq .FormUser.Status "pending")}}
+                <div class="alert alert-warning mb-4">
+                    <strong>Pending Verification</strong>
+                    <p class="mt-1">This user has not verified their email. You can manually verify them by changing their status to Active above, or click the button below.</p>
+                    <button type="submit" name="status" value="active" class="btn btn-primary mt-2" style="width: auto;">Verify &amp; Activate User</button>
+                </div>
+                {{end}}
 
                 <div class="form-actions">
                     <a href="/users" class="btn btn-secondary">Cancel</a>
@@ -51,4 +60,31 @@
         </div>
     </div>
 </div>
+{{end}}
+
+{{define "panel-docs"}}
+<div class="panel-section">
+    <h3>{{if .IsEdit}}Edit User{{else}}Create User{{end}}</h3>
+    <p>{{if .IsEdit}}Update this user's plan or status.{{else}}Add a new API consumer who can access your gateway.{{end}}</p>
+</div>
+
+<div class="panel-section">
+    <h4>Fields</h4>
+    <ul class="panel-list">
+        <li><strong>Email</strong> - Unique identifier (cannot be changed after creation)</li>
+        <li><strong>Plan</strong> - Determines rate limits and monthly quota</li>
+        <li><strong>Status</strong> - Active users can make API requests; suspended users cannot</li>
+    </ul>
+</div>
+
+{{if .IsEdit}}
+<div class="panel-section">
+    <h4>Tips</h4>
+    <ul class="panel-list">
+        <li>Changing plans takes effect immediately</li>
+        <li>Suspending a user blocks all their API keys</li>
+        <li>Deleting a user also revokes their keys</li>
+    </ul>
+</div>
+{{end}}
 {{end}}

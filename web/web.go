@@ -4,6 +4,7 @@
 package web
 
 import (
+	"context"
 	"embed"
 	"fmt"
 	"html/template"
@@ -51,12 +52,18 @@ type Handler struct {
 	routes        ports.RouteStore
 	upstreams     ports.UpstreamStore
 	plans         ports.PlanStore
+	settings      ports.SettingsStore
+	authTokens    ports.TokenStore
+	emailSender   ports.EmailSender
 	appSettings   AppSettings
 	logger        zerolog.Logger
 	hasher        ports.Hasher
-	isSetup       func() bool // Returns true if initial setup is complete
+	isSetup       func() bool                        // Returns true if initial setup is complete
+	onPlanChange  func(ctx context.Context) error    // Callback for plan changes (reloads proxy)
+	onRouteChange func(ctx context.Context) error    // Callback for route changes (reloads routes)
 	exprValidator ExprValidator
 	routeTester   RouteTester
+	startTime     time.Time                          // Server start time for uptime tracking
 }
 
 // Deps contains dependencies for the web handler.
@@ -67,11 +74,16 @@ type Deps struct {
 	Routes        ports.RouteStore
 	Upstreams     ports.UpstreamStore
 	Plans         ports.PlanStore
+	Settings      ports.SettingsStore
+	AuthTokens    ports.TokenStore
+	EmailSender   ports.EmailSender
 	AppSettings   AppSettings
 	Logger        zerolog.Logger
 	Hasher        ports.Hasher
 	JWTSecret     string
 	IsSetup       func() bool
+	OnPlanChange  func(ctx context.Context) error // Callback when plans are created/updated
+	OnRouteChange func(ctx context.Context) error // Callback when routes are created/updated
 	ExprValidator ExprValidator
 	RouteTester   RouteTester
 }
@@ -93,12 +105,18 @@ func NewHandler(deps Deps) (*Handler, error) {
 		routes:        deps.Routes,
 		upstreams:     deps.Upstreams,
 		plans:         deps.Plans,
+		settings:      deps.Settings,
+		authTokens:    deps.AuthTokens,
+		emailSender:   deps.EmailSender,
 		appSettings:   deps.AppSettings,
 		logger:        deps.Logger,
 		hasher:        deps.Hasher,
 		isSetup:       deps.IsSetup,
+		onPlanChange:  deps.OnPlanChange,
+		onRouteChange: deps.OnRouteChange,
 		exprValidator: deps.ExprValidator,
 		routeTester:   deps.RouteTester,
+		startTime:     time.Now(),
 	}, nil
 }
 
@@ -120,6 +138,16 @@ func (h *Handler) Router() chi.Router {
 	r.Get("/login", h.LoginPage)
 	r.Post("/login", h.LoginSubmit)
 	r.Post("/logout", h.Logout)
+
+	// Forgot password (no auth required)
+	r.Get("/forgot-password", h.ForgotPasswordPage)
+	r.Post("/forgot-password", h.ForgotPasswordSubmit)
+	r.Get("/reset-password", h.ResetPasswordPage)
+	r.Post("/reset-password", h.ResetPasswordSubmit)
+
+	// Legal pages (no auth required)
+	r.Get("/terms", h.TermsPage)
+	r.Get("/privacy", h.PrivacyPage)
 
 	// Protected pages (require auth)
 	r.Group(func(r chi.Router) {
@@ -171,6 +199,7 @@ func (h *Handler) Router() chi.Router {
 
 		// Settings
 		r.Get("/settings", h.SettingsPage)
+		r.Post("/settings", h.SettingsUpdate)
 
 		// System Status
 		r.Get("/system", h.HealthPage)
@@ -372,5 +401,5 @@ func formatDuration(n float64, unit string) string {
 	if i == 1 {
 		return "1 " + unit + " ago"
 	}
-	return string(rune('0'+i%10)) + " " + unit + "s ago"
+	return fmt.Sprintf("%d %ss ago", i, unit)
 }

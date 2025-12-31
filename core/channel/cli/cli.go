@@ -202,7 +202,8 @@ func (c *Channel) buildCreateCommand(mod convention.Derived, action convention.D
 		if input.Required {
 			usage += " (required)"
 		}
-		cmd.Flags().String(input.Name, input.Default, usage)
+		defaultStr, _ := input.Default.(string)
+		cmd.Flags().String(input.Name, defaultStr, usage)
 		if input.Required {
 			cmd.MarkFlagRequired(input.Name)
 		}
@@ -330,7 +331,8 @@ func (c *Channel) buildCustomCommand(mod convention.Derived, action convention.D
 
 	// Add flags for each input
 	for _, input := range action.Input {
-		cmd.Flags().String(input.Name, input.Default, input.Name)
+		defaultStr, _ := input.Default.(string)
+		cmd.Flags().String(input.Name, defaultStr, input.Name)
 	}
 
 	return cmd

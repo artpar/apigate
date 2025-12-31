@@ -24,6 +24,8 @@ import (
 	"github.com/artpar/apigate/adapters/payment"
 	"github.com/artpar/apigate/adapters/sqlite"
 	"github.com/artpar/apigate/app"
+	"github.com/artpar/apigate/core/capability"
+	capAdapters "github.com/artpar/apigate/core/capability/adapters"
 	"github.com/artpar/apigate/domain/plan"
 	"github.com/artpar/apigate/domain/settings"
 	"github.com/artpar/apigate/ports"
@@ -49,6 +51,9 @@ type App struct {
 	HTTPServer *http.Server
 	Metrics    *metrics.Collector
 	Settings   *app.SettingsService
+
+	// Capability container (DI for pluggable providers)
+	Capabilities *capability.Container
 
 	// Services
 	proxyService     *app.ProxyService
@@ -106,6 +111,17 @@ func NewWithConfig(cfg Config) (*App, error) {
 	if s.GetBool("metrics.enabled") {
 		a.Metrics = metrics.New()
 		logger.Info().Msg("prometheus metrics enabled")
+	}
+
+	// Initialize capability container (DI for pluggable providers)
+	capContainer, err := NewCapabilityContainer(CapabilityConfig{
+		Settings: s,
+		Logger:   logger,
+	})
+	if err != nil {
+		logger.Warn().Err(err).Msg("failed to initialize capability container")
+	} else {
+		a.Capabilities = capContainer
 	}
 
 	// Initialize module runtime if root command provided
@@ -230,6 +246,9 @@ func (a *App) initHTTPServer() error {
 	// Wire router reloader for hook-triggered reloads
 	SetRouterReloader(a.routeService)
 
+	// Wire plan reloader for hook-triggered plan reloads
+	SetPlanReloader(a)
+
 	// Create and wire transform service
 	a.transformService = app.NewTransformService()
 	a.proxyService.SetTransformService(a.transformService)
@@ -250,6 +269,24 @@ func (a *App) initHTTPServer() error {
 	usageStore := sqlite.NewUsageStore(a.DB)
 	planStore := sqlite.NewPlanStore(a.DB)
 	bcryptHasher := hasher.NewBcrypt(0)
+	sessionStore := sqlite.NewSessionStore(a.DB)
+	tokenStore := sqlite.NewTokenStore(a.DB)
+
+	// Create email sender (used by both admin and portal)
+	emailSender, err := email.NewSender(s)
+	if err != nil {
+		a.Logger.Warn().Err(err).Msg("failed to create email sender, email features disabled")
+		emailSender = email.NewNoopSender()
+	}
+	a.emailSender = emailSender
+
+	// Register email provider with capability container
+	if a.Capabilities != nil {
+		emailAdapter := capAdapters.WrapEmail("default", emailSender)
+		if err := a.Capabilities.RegisterEmail("default", emailAdapter, true); err != nil {
+			a.Logger.Debug().Err(err).Msg("email already registered in capability container")
+		}
+	}
 
 	// Create admin handler
 	adminHandler := admin.NewHandler(admin.Deps{
@@ -265,12 +302,15 @@ func (a *App) initHTTPServer() error {
 
 	// Create web UI handler
 	webHandler, err := web.NewHandler(web.Deps{
-		Users:     deps.Users,
-		Keys:      deps.Keys,
-		Usage:     usageStore,
-		Routes:    routeStore,
-		Upstreams: upstreamStore,
-		Plans:     planStore,
+		Users:       deps.Users,
+		Keys:        deps.Keys,
+		Usage:       usageStore,
+		Routes:      routeStore,
+		Upstreams:   upstreamStore,
+		Plans:       planStore,
+		Settings:    a.Settings.Store(),
+		AuthTokens:  tokenStore,
+		EmailSender: emailSender,
 		AppSettings: web.AppSettings{
 			UpstreamURL:     s.Get(settings.KeyUpstreamURL),
 			UpstreamTimeout: s.GetOrDefault(settings.KeyUpstreamTimeout, "30s"),
@@ -287,6 +327,15 @@ func (a *App) initHTTPServer() error {
 			users, err := deps.Users.List(context.Background(), 1, 0)
 			return err == nil && len(users) > 0
 		},
+		OnPlanChange: func(ctx context.Context) error {
+			return a.ReloadPlans(ctx)
+		},
+		OnRouteChange: func(ctx context.Context) error {
+			if a.routeService != nil {
+				return a.routeService.Reload(ctx)
+			}
+			return nil
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("create web handler: %w", err)
@@ -295,25 +344,15 @@ func (a *App) initHTTPServer() error {
 	// Create user portal handler (if enabled)
 	var portalRouter http.Handler
 	if s.GetBool(settings.KeyPortalEnabled) {
-		// Create email sender
-		emailSender, err := email.NewSender(s)
-		if err != nil {
-			a.Logger.Warn().Err(err).Msg("failed to create email sender, portal email features disabled")
-			emailSender = email.NewNoopSender()
-		}
-		a.emailSender = emailSender
-
-		// Create session and token stores
-		sessionStore := sqlite.NewSessionStore(a.DB)
-		tokenStore := sqlite.NewTokenStore(a.DB)
-
 		portalHandler, err := web.NewPortalHandler(web.PortalDeps{
 			Users:       deps.Users,
 			Keys:        deps.Keys,
 			Usage:       usageStore,
+			Plans:       planStore,
 			Sessions:    sessionStore,
 			AuthTokens:  tokenStore,
 			EmailSender: emailSender,
+			Settings:    a.Settings.Store(),
 			Logger:      a.Logger,
 			Hasher:      bcryptHasher,
 			IDGen:       deps.IDGen,
@@ -335,6 +374,22 @@ func (a *App) initHTTPServer() error {
 		paymentProvider = payment.NewNoopProvider()
 	}
 	a.paymentProvider = paymentProvider
+
+	// Register payment provider with capability container
+	if a.Capabilities != nil {
+		paymentAdapter := capAdapters.WrapPayment(paymentProvider)
+		if err := a.Capabilities.RegisterPayment("default", paymentAdapter, true); err != nil {
+			a.Logger.Debug().Err(err).Msg("payment already registered in capability container")
+		}
+	}
+
+	// Register hasher with capability container
+	if a.Capabilities != nil {
+		hasherAdapter := capAdapters.WrapHasher("bcrypt", bcryptHasher)
+		if err := a.Capabilities.RegisterHasher("bcrypt", hasherAdapter, true); err != nil {
+			a.Logger.Debug().Err(err).Msg("hasher already registered in capability container")
+		}
+	}
 
 	// Create router
 	routerCfg := apihttp.RouterConfig{
@@ -561,6 +616,13 @@ func (a *App) Shutdown() error {
 		a.upstream.Close()
 	}
 
+	// Close capability container (releases provider resources)
+	if a.Capabilities != nil {
+		if err := a.Capabilities.Close(); err != nil {
+			a.Logger.Error().Err(err).Msg("capability container close error")
+		}
+	}
+
 	// Close database
 	if a.DB != nil {
 		if err := a.DB.Close(); err != nil {
@@ -593,6 +655,39 @@ func (a *App) Reload() error {
 	}
 
 	a.Logger.Info().Msg("settings reloaded from database")
+	return nil
+}
+
+// ReloadPlans reloads only the plans from the database into the proxy service.
+// This is called by the reload_plans hook after plan create/update/delete.
+func (a *App) ReloadPlans(ctx context.Context) error {
+	a.Logger.Info().Msg("ReloadPlans called")
+
+	if a.proxyService == nil {
+		a.Logger.Warn().Msg("ReloadPlans: proxyService is nil")
+		return nil
+	}
+
+	s := a.Settings.Get()
+	plans := a.loadPlans(ctx)
+
+	// Log loaded plans for debugging
+	for _, p := range plans {
+		a.Logger.Info().
+			Str("id", p.ID).
+			Str("name", p.Name).
+			Int64("requests_per_month", p.RequestsPerMonth).
+			Msg("loaded plan")
+	}
+
+	a.proxyService.UpdateConfig(
+		plans,
+		nil, // endpoints - keep existing
+		s.GetInt(settings.KeyRateLimitBurstTokens, 5),
+		s.GetInt(settings.KeyRateLimitWindowSecs, 60),
+	)
+
+	a.Logger.Info().Int("count", len(plans)).Msg("plans reloaded from database")
 	return nil
 }
 

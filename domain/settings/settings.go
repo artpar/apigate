@@ -104,11 +104,12 @@ const (
 	KeyPaymentLemonWebhookSecret = "payment.lemonsqueezy.webhook_secret"
 
 	// Auth settings
-	KeyAuthMode       = "auth.mode"
-	KeyAuthHeader     = "auth.header"
-	KeyAuthJWTSecret  = "auth.jwt_secret"
-	KeyAuthKeyPrefix  = "auth.key_prefix"
-	KeyAuthSessionTTL = "auth.session_ttl"
+	KeyAuthMode                     = "auth.mode"
+	KeyAuthHeader                   = "auth.header"
+	KeyAuthJWTSecret                = "auth.jwt_secret"
+	KeyAuthKeyPrefix                = "auth.key_prefix"
+	KeyAuthSessionTTL               = "auth.session_ttl"
+	KeyAuthRequireEmailVerification = "auth.require_email_verification"
 
 	// Rate limit settings
 	KeyRateLimitEnabled     = "ratelimit.enabled"
@@ -151,12 +152,13 @@ func IsSensitive(key string) bool {
 // Defaults returns default values for settings.
 func Defaults() Settings {
 	return Settings{
-		KeyServerHost:          "0.0.0.0",
-		KeyServerPort:          "8080",
-		KeyServerReadTimeout:   "30s",
-		KeyServerWriteTimeout:  "60s",
-		KeyPortalEnabled:       "false",
-		KeyPortalAppName:       "APIGate",
+		KeyServerHost:                   "0.0.0.0",
+		KeyServerPort:                   "8080",
+		KeyServerReadTimeout:            "30s",
+		KeyServerWriteTimeout:           "60s",
+		KeyPortalEnabled:                "true",
+		KeyPortalAppName:                "APIGate",
+		KeyAuthRequireEmailVerification: "false",
 		KeyEmailProvider:       "none",
 		KeyPaymentProvider:     "none",
 		KeyAuthMode:            "local",

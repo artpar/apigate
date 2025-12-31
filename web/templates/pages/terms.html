@@ -1,0 +1,40 @@
+{{define "content"}}
+<div class="login-container">
+    <div class="card" style="max-width: 800px; margin: 0 auto;">
+        <div class="card-header">
+            <h1>Terms of Service</h1>
+        </div>
+        <div class="card-body" style="padding: 2rem;">
+            <p class="text-muted mb-4">Last updated: {{.LastUpdated}}</p>
+
+            <h2 class="mb-2">1. Acceptance of Terms</h2>
+            <p class="mb-4">By accessing and using this API gateway service, you agree to be bound by these Terms of Service and all applicable laws and regulations.</p>
+
+            <h2 class="mb-2">2. API Usage</h2>
+            <p class="mb-4">You are granted a limited, non-exclusive license to use the API services according to your selected plan. API keys are personal and should not be shared.</p>
+
+            <h2 class="mb-2">3. Rate Limits and Quotas</h2>
+            <p class="mb-4">Your API usage is subject to the rate limits and quotas defined by your plan. Exceeding these limits may result in temporary service restrictions.</p>
+
+            <h2 class="mb-2">4. Acceptable Use</h2>
+            <p class="mb-4">You agree not to use the service for any unlawful purpose or in any way that could damage, disable, or impair the service.</p>
+
+            <h2 class="mb-2">5. Service Availability</h2>
+            <p class="mb-4">We strive for high availability but do not guarantee uninterrupted service. Scheduled maintenance will be communicated in advance when possible.</p>
+
+            <h2 class="mb-2">6. Data and Privacy</h2>
+            <p class="mb-4">Your use of the API is also governed by our <a href="/privacy">Privacy Policy</a>.</p>
+
+            <h2 class="mb-2">7. Termination</h2>
+            <p class="mb-4">We reserve the right to terminate or suspend access to the service for violations of these terms.</p>
+
+            <h2 class="mb-2">8. Changes to Terms</h2>
+            <p class="mb-4">We may modify these terms at any time. Continued use of the service after changes constitutes acceptance of the new terms.</p>
+
+            <div class="text-center mt-4">
+                <a href="/portal/" class="btn btn-secondary">Back to Portal</a>
+            </div>
+        </div>
+    </div>
+</div>
+{{end}}

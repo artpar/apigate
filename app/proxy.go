@@ -386,7 +386,12 @@ func (s *ProxyService) Handle(ctx context.Context, req proxy.Request) HandleResu
 	}
 
 	// 17. Update last used (async I/O)
-	go s.keys.UpdateLastUsed(ctx, matchedKey.ID, now)
+	// Use background context since request context may be cancelled
+	go func() {
+		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		s.keys.UpdateLastUsed(bgCtx, matchedKey.ID, now)
+	}()
 
 	// 18. Add rate limit and quota headers to response (PURE)
 	if resp.Headers == nil {
@@ -628,7 +633,12 @@ func (s *ProxyService) HandleStreaming(ctx context.Context, req proxy.Request, s
 	}
 
 	// Update last used
-	go s.keys.UpdateLastUsed(ctx, matchedKey.ID, now)
+	// Use background context since request context may be cancelled
+	go func() {
+		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		s.keys.UpdateLastUsed(bgCtx, matchedKey.ID, now)
+	}()
 
 	// Return streaming context with modified request and upstream
 	return StreamingHandleResult{

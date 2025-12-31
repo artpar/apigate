@@ -1,0 +1,117 @@
+# Storage Capability Interface
+# Any module that implements this capability must provide these actions
+capability: storage
+
+description: |
+  Storage capability provides persistent data storage.
+  This is the primary database interface for all entity modules.
+
+schema:
+  enabled: { type: bool, default: false, description: "Whether this storage provider is active" }
+
+# Actions that implementing modules MUST provide
+actions:
+  # CRUD Operations
+  create:
+    description: Insert a new record
+    input:
+      - { name: table, type: string, required: true }
+      - { name: data, type: map, required: true }
+    output:
+      - { name: id, type: string }
+
+  get:
+    description: Get a record by ID
+    input:
+      - { name: table, type: string, required: true }
+      - { name: id, type: string, required: true }
+    output:
+      - { name: record, type: map }
+      - { name: found, type: bool }
+
+  update:
+    description: Update an existing record
+    input:
+      - { name: table, type: string, required: true }
+      - { name: id, type: string, required: true }
+      - { name: data, type: map, required: true }
+    output:
+      - { name: updated, type: bool }
+
+  delete:
+    description: Delete a record
+    input:
+      - { name: table, type: string, required: true }
+      - { name: id, type: string, required: true }
+    output:
+      - { name: deleted, type: bool }
+
+  # Query Operations
+  list:
+    description: List records with optional filtering
+    input:
+      - { name: table, type: string, required: true }
+      - { name: filter, type: map, description: "Field conditions" }
+      - { name: order_by, type: string }
+      - { name: order_dir, type: enum, values: [asc, desc], default: asc }
+      - { name: limit, type: int, default: 100 }
+      - { name: offset, type: int, default: 0 }
+    output:
+      - { name: records, type: list, of: map }
+      - { name: total, type: int }
+
+  find_by:
+    description: Find records by field value
+    input:
+      - { name: table, type: string, required: true }
+      - { name: field, type: string, required: true }
+      - { name: value, type: any, required: true }
+    output:
+      - { name: records, type: list, of: map }
+
+  count:
+    description: Count records matching filter
+    input:
+      - { name: table, type: string, required: true }
+      - { name: filter, type: map }
+    output:
+      - { name: count, type: int }
+
+  # Schema Operations
+  create_table:
+    description: Create a table from module schema
+    input:
+      - { name: table, type: string, required: true }
+      - { name: schema, type: map, required: true }
+
+  migrate:
+    description: Run pending migrations
+    input:
+      - { name: migrations, type: list, of: map }
+
+  # Transaction Support
+  begin_tx:
+    description: Start a transaction
+    output:
+      - { name: tx_id, type: string }
+
+  commit_tx:
+    description: Commit a transaction
+    input:
+      - { name: tx_id, type: string, required: true }
+
+  rollback_tx:
+    description: Rollback a transaction
+    input:
+      - { name: tx_id, type: string, required: true }
+
+  # Utility
+  test_connection:
+    description: Verify database connection
+    output:
+      - { name: valid, type: bool }
+      - { name: error, type: string }
+
+meta:
+  icon: database
+  display_name: Storage Provider

@@ -21,13 +21,37 @@ type RouterReloader interface {
 	Reload(ctx context.Context) error
 }
 
+// PlanReloader is an interface for components that can reload plan configurations.
+// This is implemented by the bootstrap App to reload proxy service plans.
+type PlanReloader interface {
+	ReloadPlans(ctx context.Context) error
+}
+
 // routerReloader holds the router reloader instance (set after bootstrap).
 var routerReloader RouterReloader
+
+// planReloader holds the plan reloader instance (set after bootstrap).
+var planReloader PlanReloader
 
 // SetRouterReloader sets the router reloader for the reload_router function.
 // This should be called after the route service is initialized.
 func SetRouterReloader(r RouterReloader) {
 	routerReloader = r
+}
+
+// SetPlanReloader sets the plan reloader for the reload_plans function.
+// This should be called after the app is initialized.
+func SetPlanReloader(r PlanReloader) {
+	planReloader = r
+}
+
+// TriggerPlanReload triggers a reload of plans in the proxy service.
+// This can be called from other packages (like web setup) when plans are created directly.
+func TriggerPlanReload(ctx context.Context) error {
+	if planReloader == nil {
+		return nil
+	}
+	return planReloader.ReloadPlans(ctx)
 }
 
 // RegisterHooks registers all module hooks with the runtime.
@@ -87,8 +111,21 @@ func registerBuiltinFunctions(rt *runtime.Runtime, logger zerolog.Logger) {
 		return nil
 	})
 
+	// reload_plans - reloads plans into proxy service after plan changes
+	rt.RegisterFunction("reload_plans", func(ctx context.Context, event runtime.HookEvent) error {
+		logger.Info().
+			Str("module", event.Module).
+			Str("action", event.Action).
+			Msg("reload_plans hook triggered")
+		if planReloader == nil {
+			logger.Warn().Msg("plan reloader not set, skipping reload")
+			return nil
+		}
+		return planReloader.ReloadPlans(ctx)
+	})
+
 	logger.Debug().
-		Int("count", 4).
+		Int("count", 5).
 		Msg("built-in functions registered")
 }
 

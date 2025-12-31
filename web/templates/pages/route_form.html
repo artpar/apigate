@@ -592,18 +592,18 @@ document.addEventListener('DOMContentLoaded', function() {
     <div class="panel-example">
         <div class="panel-example-header">curl</div>
         <div class="panel-example-code">curl -X {{if .Route.Methods}}{{.Route.Methods}}{{else}}GET{{end}} \
-  'http://localhost:8080{{.Route.PathPattern}}' \
-  -H 'Authorization: Bearer YOUR_API_KEY'</div>
+  'http://localhost:8080/your-endpoint' \
+  -H 'X-API-Key: YOUR_API_KEY'</div>
     </div>
 
     <div class="panel-example">
         <div class="panel-example-header">JavaScript</div>
         <div class="panel-example-code">const response = await fetch(
-  'http://localhost:8080{{.Route.PathPattern}}',
+  'http://localhost:8080/your-endpoint',
   {
     method: '{{if .Route.Methods}}{{.Route.Methods}}{{else}}GET{{end}}',
     headers: {
-      'Authorization': 'Bearer YOUR_API_KEY'
+      'X-API-Key': 'YOUR_API_KEY'
     }
   }
 );</div>

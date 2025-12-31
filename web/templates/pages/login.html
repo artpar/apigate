@@ -5,6 +5,9 @@
             <h1 class="login-title">Admin Login</h1>
         </div>
         <div class="login-body">
+            {{if .Success}}
+            <div class="alert alert-success mb-4">{{.Success}}</div>
+            {{end}}
             {{if .Error}}
             <div class="alert alert-error mb-4">{{.Error}}</div>
             {{end}}
@@ -19,6 +22,9 @@
                 </div>
                 <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 8px;">Sign In</button>
             </form>
+            <div class="text-center mt-4">
+                <a href="/forgot-password" class="link text-sm">Forgot password?</a>
+            </div>
         </div>
     </div>
 </div>

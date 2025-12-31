@@ -33,7 +33,7 @@ func Parse(data []byte) (Module, error) {
 	return mod, nil
 }
 
-// ParseDir parses all module definitions from a directory.
+// ParseDir parses all module definitions from a directory, including subdirectories.
 func ParseDir(dir string) ([]Module, error) {
 	var modules []Module
 
@@ -43,7 +43,15 @@ func ParseDir(dir string) ([]Module, error) {
 	}
 
 	for _, entry := range entries {
+		path := filepath.Join(dir, entry.Name())
+
 		if entry.IsDir() {
+			// Recursively parse subdirectories (e.g., providers/, capabilities/)
+			subModules, err := ParseDir(path)
+			if err != nil {
+				return nil, err
+			}
+			modules = append(modules, subModules...)
 			continue
 		}
 
@@ -52,7 +60,7 @@ func ParseDir(dir string) ([]Module, error) {
 			continue
 		}
 
-		mod, err := ParseFile(filepath.Join(dir, name))
+		mod, err := ParseFile(path)
 		if err != nil {
 			return nil, err
 		}
@@ -65,6 +73,11 @@ func ParseDir(dir string) ([]Module, error) {
 
 // Validate validates a module definition.
 func Validate(mod Module) error {
+	// Skip validation for capability interface definitions
+	if mod.IsCapability() {
+		return validateCapability(mod)
+	}
+
 	var errs []string
 
 	if mod.Name == "" {
@@ -98,6 +111,33 @@ func Validate(mod Module) error {
 
 		if err := validateAction(name, action, mod.Schema); err != nil {
 			errs = append(errs, err.Error())
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("validation errors:\n  - %s", strings.Join(errs, "\n  - "))
+	}
+
+	return nil
+}
+
+// validateCapability validates a capability interface definition.
+// Capability definitions have different rules - they define interfaces, not concrete modules.
+func validateCapability(mod Module) error {
+	var errs []string
+
+	if mod.Capability == "" {
+		errs = append(errs, "capability name is required")
+	}
+
+	if !isValidIdentifier(mod.Capability) {
+		errs = append(errs, fmt.Sprintf("capability name %q is not a valid identifier", mod.Capability))
+	}
+
+	// Validate action names (but don't validate output fields against schema)
+	for name := range mod.Actions {
+		if !isValidIdentifier(name) {
+			errs = append(errs, fmt.Sprintf("action name %q is not a valid identifier", name))
 		}
 	}
 
@@ -153,12 +193,7 @@ func validateAction(name string, action Action, schema map[string]Field) error {
 		}
 	}
 
-	// Validate output fields
-	for _, fieldName := range action.Output {
-		if _, ok := schema[fieldName]; !ok {
-			return fmt.Errorf("action %q: output field %q not in schema", name, fieldName)
-		}
-	}
+	// Note: Output fields don't need to be in schema - actions can define custom return structures
 
 	return nil
 }

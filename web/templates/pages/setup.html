@@ -42,6 +42,13 @@
             <p class="setup-step-desc">Create your administrator account to manage APIGate</p>
             <form action="/setup/step/1" method="POST" class="form">
                 <div class="form-group">
+                    <label for="admin_name" class="form-label">
+                        Your Name
+                        <span class="info-tooltip" data-tip="Your name as it will appear in the admin dashboard.">?</span>
+                    </label>
+                    <input type="text" id="admin_name" name="admin_name" required class="form-input" placeholder="John Smith" value="{{.AdminName}}">
+                </div>
+                <div class="form-group">
                     <label for="admin_email" class="form-label">
                         Your Email
                         <span class="info-tooltip" data-tip="You'll use this email to log into the admin dashboard. It won't be shared with your API users.">?</span>
@@ -65,40 +72,60 @@
             </form>
 
             {{else if eq .CurrentStep 2}}
-            <p class="setup-step-desc">Define how much customers can use your API. You can add more plans later.</p>
+            <p class="setup-step-desc">Define your pricing and usage limits. You can add more plans later.</p>
             <form action="/setup/step/2" method="POST" class="form">
                 <div class="form-group">
                     <label for="plan_name" class="form-label">
                         Plan Name
                         <span class="info-tooltip" data-tip="This is what your customers will see. Common examples: Free, Basic, Starter, Pro, Enterprise">?</span>
                     </label>
-                    <input type="text" id="plan_name" name="plan_name" required class="form-input" placeholder="Free" value="{{.PlanName}}">
+                    <input type="text" id="plan_name" name="plan_name" required class="form-input" placeholder="Starter" value="{{.PlanName}}">
                     <p class="form-hint">What should customers see? (e.g., Free, Starter, Pro)</p>
                 </div>
+
+                <h4 style="margin: 24px 0 12px 0; color: #374151;">Pricing</h4>
+                <div class="form-group">
+                    <label for="price_monthly" class="form-label">
+                        Monthly Price ($)
+                        <span class="info-tooltip" data-tip="How much to charge per month. Set to 0 for a free plan.">?</span>
+                    </label>
+                    <input type="number" id="price_monthly" name="price_monthly" class="form-input" value="{{if .PriceMonthly}}{{.PriceMonthly}}{{else}}0{{end}}" min="0" step="0.01">
+                    <p class="form-hint">Set to $0 for a free tier, or enter your monthly subscription price.</p>
+                </div>
+                <div class="form-group">
+                    <label for="overage_price" class="form-label">
+                        Overage Price ($ per 1000 requests)
+                        <span class="info-tooltip" data-tip="Optional: Charge per 1000 requests over the monthly limit. Leave at 0 to block requests when quota is exceeded.">?</span>
+                    </label>
+                    <input type="number" id="overage_price" name="overage_price" class="form-input" value="{{if .OveragePrice}}{{.OveragePrice}}{{else}}0{{end}}" min="0" step="0.01">
+                    <p class="form-hint">Leave at $0 to block requests when quota is exceeded.</p>
+                </div>
+
+                <h4 style="margin: 24px 0 12px 0; color: #374151;">Usage Limits</h4>
                 <div class="form-group">
                     <label for="rate_limit" class="form-label">
-                        Speed Limit
+                        Requests per Minute
                         <span class="info-tooltip" data-tip="How many requests can one user make per minute? This prevents anyone from overwhelming your API. 60/min is reasonable for most APIs.">?</span>
                     </label>
                     <input type="number" id="rate_limit" name="rate_limit" required class="form-input" value="{{if .RateLimit}}{{.RateLimit}}{{else}}60{{end}}" min="1">
-                    <p class="form-hint">Max requests per minute (prevents overload). 60 is a good default.</p>
+                    <p class="form-hint">Prevents API abuse. 60/min is a good starting point.</p>
                 </div>
                 <div class="form-group">
                     <label for="monthly_quota" class="form-label">
-                        Monthly Allowance
-                        <span class="info-tooltip" data-tip="Total requests a user can make in a calendar month. When they hit this limit, requests will be blocked until next month. 1,000 is typical for free tiers.">?</span>
+                        Monthly Request Limit
+                        <span class="info-tooltip" data-tip="Total requests a user can make in a calendar month. When they hit this limit, requests will be blocked (or charged overage) until next month.">?</span>
                     </label>
                     <input type="number" id="monthly_quota" name="monthly_quota" required class="form-input" value="{{if .MonthlyQuota}}{{.MonthlyQuota}}{{else}}1000{{end}}" min="1">
-                    <p class="form-hint">Total requests allowed per month. Start with 1,000 for a free tier.</p>
+                    <p class="form-hint">Total requests allowed per month. 1,000 is typical for free tiers.</p>
                 </div>
                 <div class="setup-help-tip">
-                    <strong>Not sure what to set?</strong>
-                    <p>Start with the defaults. You can create additional plans (like "Pro" with higher limits) from the dashboard anytime.</p>
+                    <strong>Tip: Start free, upgrade later</strong>
+                    <p>Many successful APIs start with a free tier to attract users. You can add paid plans like "Pro" with higher limits from the dashboard anytime.</p>
                 </div>
                 {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
                 <div class="setup-actions">
                     <a href="/setup/step/1" class="btn btn-secondary">Back</a>
-                    <button type="submit" class="btn btn-primary">Create Plan & Finish</button>
+                    <button type="submit" class="btn btn-primary">Create Plan & Continue</button>
                 </div>
             </form>
 

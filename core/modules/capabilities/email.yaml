@@ -1,0 +1,66 @@
+# Email Capability Interface
+# Any module that implements this capability must provide these actions
+capability: email
+
+description: |
+  Email capability handles sending transactional emails.
+  Used for welcome emails, password resets, usage alerts, etc.
+
+schema:
+  enabled:     { type: bool, default: false, description: "Whether this email provider is active" }
+  from_email:  { type: email, description: "Default sender email address" }
+  from_name:   { type: string, description: "Default sender name" }
+
+# Actions that implementing modules MUST provide
+actions:
+  send:
+    description: Send a single email
+    input:
+      - { name: to, type: email, required: true }
+      - { name: subject, type: string, required: true }
+      - { name: body_html, type: string }
+      - { name: body_text, type: string }
+      - { name: from_email, type: email, description: "Override default sender" }
+      - { name: from_name, type: string }
+      - { name: reply_to, type: email }
+    output:
+      - { name: message_id, type: string }
+
+  send_template:
+    description: Send email using a template
+    input:
+      - { name: to, type: email, required: true }
+      - { name: template_id, type: string, required: true }
+      - { name: variables, type: map, of: string }
+      - { name: from_email, type: email }
+      - { name: from_name, type: string }
+    output:
+      - { name: message_id, type: string }
+
+  send_bulk:
+    description: Send to multiple recipients
+    input:
+      - { name: recipients, type: list, of: email, required: true }
+      - { name: subject, type: string, required: true }
+      - { name: body_html, type: string }
+      - { name: body_text, type: string }
+    output:
+      - { name: sent_count, type: int }
+      - { name: failed_count, type: int }
+
+  test_connection:
+    description: Verify email configuration is valid
+    output:
+      - { name: valid, type: bool }
+      - { name: error, type: string }
+
+# Events this capability emits
+events:
+  - email.sent
+  - email.delivered
+  - email.bounced
+  - email.failed
+
+meta:
+  icon: mail
+  display_name: Email Provider

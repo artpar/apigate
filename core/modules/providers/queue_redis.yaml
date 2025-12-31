@@ -1,0 +1,149 @@
+# Redis Queue Provider Module
+# Implements the queue capability using Redis (BRPOPLPUSH pattern)
+# Suitable for production, distributed deployments with at-least-once delivery
+module: queue_redis
+
+meta:
+  description: Redis-backed queue for distributed and high-availability deployments
+  implements: [queue]
+  icon: database
+  display_name: Redis Queue
+
+schema:
+  enabled:            { type: bool, default: false, description: "Whether this queue provider is active" }
+  host:               { type: string, default: "localhost", description: "Redis server hostname" }
+  port:               { type: int, default: 6379, description: "Redis server port" }
+  password:           { type: secret, description: "Redis password (optional)" }
+  database:           { type: int, default: 1, description: "Redis database number (separate from cache)" }
+  prefix:             { type: string, default: "queue:", description: "Key prefix for queue data" }
+  default_retries:    { type: int, default: 3, description: "Default retry attempts for failed jobs" }
+  retry_delay:        { type: int, default: 60, description: "Delay in seconds between retries" }
+  job_timeout:        { type: int, default: 300, description: "Job visibility timeout in seconds" }
+  pool_size:          { type: int, default: 5, description: "Connection pool size" }
+  tls_enabled:        { type: bool, default: false, description: "Use TLS for Redis connection" }
+  dead_letter_queue:  { type: bool, default: true, description: "Move failed jobs to DLQ" }
+  metrics_enabled:    { type: bool, default: true, description: "Track queue metrics" }
+
+actions:
+  enqueue:
+    description: Add a job to a queue (LPUSH)
+    input:
+      - { name: queue, type: string, required: true, description: "Queue name" }
+      - { name: job_type, type: string, required: true, description: "Job type for routing" }
+      - { name: payload, type: json, required: true, description: "Job data" }
+      - { name: max_retries, type: int, description: "Override default retries" }
+      - { name: priority, type: int, default: 0, description: "Higher priority uses separate queue" }
+      - { name: unique_key, type: string, description: "Dedupe key to prevent duplicate jobs" }
+
+  enqueue_delayed:
+    description: Add a delayed job (ZADD with score = timestamp)
+    input:
+      - { name: queue, type: string, required: true }
+      - { name: job_type, type: string, required: true }
+      - { name: payload, type: json, required: true }
+      - { name: delay_seconds, type: int, required: true }
+
+  enqueue_batch:
+    description: Add multiple jobs atomically (pipeline)
+    input:
+      - { name: queue, type: string, required: true }
+      - { name: jobs, type: json, required: true, description: "Array of {job_type, payload}" }
+
+  dequeue:
+    description: Get next job (BRPOPLPUSH for reliable queue)
+    input:
+      - { name: queue, type: string, required: true }
+      - { name: timeout_seconds, type: int, default: 30 }
+    output:
+      - { name: job, type: json }
+
+  ack:
+    description: Acknowledge job completion (LREM from processing list)
+    input:
+      - { name: queue, type: string, required: true }
+      - { name: job_id, type: string, required: true }
+
+  nack:
+    description: Return job for retry or move to DLQ
+    input:
+      - { name: queue, type: string, required: true }
+      - { name: job_id, type: string, required: true }
+      - { name: error_message, type: string }
+      - { name: requeue_immediately, type: bool, default: false }
+
+  queue_length:
+    description: Get queue length (LLEN)
+    input:
+      - { name: queue, type: string, required: true }
+    output:
+      - { name: pending, type: int }
+      - { name: processing, type: int }
+      - { name: delayed, type: int }
+      - { name: dead, type: int }
+
+  list_queues:
+    description: List all queues (SCAN for queue:* keys)
+    output:
+      - { name: queues, type: json }
+
+  peek:
+    description: View jobs without removing (LRANGE)
+    input:
+      - { name: queue, type: string, required: true }
+      - { name: count, type: int, default: 10 }
+    output:
+      - { name: jobs, type: json }
+
+  retry_dead:
+    description: Requeue jobs from dead letter queue
+    input:
+      - { name: queue, type: string, required: true }
+      - { name: count, type: int, default: 10 }
+    confirm: true
+
+  purge:
+    description: Clear all jobs from a queue
+    input:
+      - { name: queue, type: string, required: true }
+      - { name: include_processing, type: bool, default: false }
+      - { name: include_dead, type: bool, default: false }
+    confirm: true
+
+  test_connection:
+    description: Verify Redis connection
+
+  stats:
+    description: Get queue system statistics
+    output:
+      - { name: total_queues, type: int }
+      - { name: total_pending, type: int }
+      - { name: total_processing, type: int }
+      - { name: total_delayed, type: int }
+      - { name: total_dead, type: int }
+      - { name: redis_memory, type: string }
+
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /api/queue
+      endpoints:
+        - { action: stats, method: GET, path: "/stats" }
+        - { action: list_queues, method: GET, path: "/queues" }
+        - { action: queue_length, method: GET, path: "/queues/:queue/length" }
+        - { action: peek, method: GET, path: "/queues/:queue/peek" }
+        - { action: test_connection, method: POST, path: "/test" }
+
+  cli:
+    serve:
+      enabled: true
+      command: queue
+      commands:
+        - action: stats
+        - action: list_queues
+        - action: test_connection
+        - action: peek
+        - action: retry_dead
+          confirm: "This will requeue dead jobs. Continue?"
+        - action: purge
+          confirm: "This will remove all jobs from the queue. Continue?"

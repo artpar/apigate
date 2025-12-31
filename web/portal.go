@@ -4,11 +4,13 @@ package web
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/artpar/apigate/adapters/auth"
 	domainAuth "github.com/artpar/apigate/domain/auth"
 	"github.com/artpar/apigate/domain/key"
+	"github.com/artpar/apigate/domain/settings"
 	"github.com/artpar/apigate/ports"
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog"
@@ -20,9 +22,11 @@ type PortalHandler struct {
 	users        ports.UserStore
 	keys         ports.KeyStore
 	usage        ports.UsageStore
+	plans        ports.PlanStore
 	sessions     ports.SessionStore
 	authTokens   ports.TokenStore
 	emailSender  ports.EmailSender
+	settings     ports.SettingsStore
 	logger       zerolog.Logger
 	hasher       ports.Hasher
 	idGen        ports.IDGenerator
@@ -37,9 +41,11 @@ type PortalDeps struct {
 	Users       ports.UserStore
 	Keys        ports.KeyStore
 	Usage       ports.UsageStore
+	Plans       ports.PlanStore
 	Sessions    ports.SessionStore
 	AuthTokens  ports.TokenStore
 	EmailSender ports.EmailSender
+	Settings    ports.SettingsStore
 	Logger      zerolog.Logger
 	Hasher      ports.Hasher
 	IDGen       ports.IDGenerator
@@ -60,9 +66,11 @@ func NewPortalHandler(deps PortalDeps) (*PortalHandler, error) {
 		users:       deps.Users,
 		keys:        deps.Keys,
 		usage:       deps.Usage,
+		plans:       deps.Plans,
 		sessions:    deps.Sessions,
 		authTokens:  deps.AuthTokens,
 		emailSender: deps.EmailSender,
+		settings:    deps.Settings,
 		logger:      deps.Logger,
 		hasher:      deps.Hasher,
 		idGen:       deps.IDGen,
@@ -98,10 +106,14 @@ func (h *PortalHandler) Router() chi.Router {
 		// API Keys
 		r.Get("/api-keys", h.APIKeysPage)
 		r.Post("/api-keys", h.CreateAPIKey)
-		r.Delete("/api-keys/{id}", h.RevokeAPIKey)
+		r.Post("/api-keys/{id}/revoke", h.RevokeAPIKey)
 
 		// Usage
 		r.Get("/usage", h.PortalUsagePage)
+
+		// Plans (upgrade/downgrade)
+		r.Get("/plans", h.PlansPage)
+		r.Post("/plans/change", h.ChangePlan)
 
 		// Account settings
 		r.Get("/settings", h.AccountSettingsPage)
@@ -215,8 +227,21 @@ func (h *PortalHandler) clearPortalCookie(w http.ResponseWriter) {
 // -----------------------------------------------------------------------------
 
 func (h *PortalHandler) SignupPage(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Find default plan to show user what they're signing up for
+	var defaultPlan *ports.Plan
+	if plans, err := h.plans.List(ctx); err == nil {
+		for _, p := range plans {
+			if p.IsDefault && p.Enabled {
+				defaultPlan = &p
+				break
+			}
+		}
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(h.renderSignupPage("", nil)))
+	w.Write([]byte(h.renderSignupPageWithPlan("", "", defaultPlan, nil)))
 }
 
 func (h *PortalHandler) SignupSubmit(w http.ResponseWriter, r *http.Request) {
@@ -233,12 +258,24 @@ func (h *PortalHandler) SignupSubmit(w http.ResponseWriter, r *http.Request) {
 		Name:     r.FormValue("name"),
 	}
 
+	// Helper to get default plan for error pages
+	getDefaultPlan := func() *ports.Plan {
+		if plans, err := h.plans.List(ctx); err == nil {
+			for _, p := range plans {
+				if p.IsDefault && p.Enabled {
+					return &p
+				}
+			}
+		}
+		return nil
+	}
+
 	// Validate
 	result := domainAuth.ValidateSignup(req)
 	if !result.Valid {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		w.Write([]byte(h.renderSignupPage(req.Email, result.Errors)))
+		w.Write([]byte(h.renderSignupPageWithPlan(req.Name, req.Email, getDefaultPlan(), result.Errors)))
 		return
 	}
 
@@ -246,7 +283,7 @@ func (h *PortalHandler) SignupSubmit(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.users.GetByEmail(ctx, req.Email); err == nil {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusConflict)
-		w.Write([]byte(h.renderSignupPage(req.Email, map[string]string{"email": "Email already registered"})))
+		w.Write([]byte(h.renderSignupPageWithPlan(req.Name, req.Email, getDefaultPlan(), map[string]string{"email": "Email already registered"})))
 		return
 	}
 
@@ -258,15 +295,40 @@ func (h *PortalHandler) SignupSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check if email verification is required
+	requireVerification := false
+	if h.settings != nil {
+		allSettings, err := h.settings.GetAll(ctx)
+		if err == nil {
+			requireVerification = allSettings.GetBool(settings.KeyAuthRequireEmailVerification)
+		}
+	}
+
 	// Create user
 	userID := h.idGen.New()
+	userStatus := "active" // Default to active when verification not required
+	if requireVerification {
+		userStatus = "pending" // Not active until email verified
+	}
+
+	// Find default plan for new users
+	defaultPlanID := "free" // fallback if no default plan configured
+	if plans, err := h.plans.List(ctx); err == nil {
+		for _, p := range plans {
+			if p.IsDefault {
+				defaultPlanID = p.ID
+				break
+			}
+		}
+	}
+
 	user := ports.User{
 		ID:           userID,
 		Email:        req.Email,
 		PasswordHash: passwordHash,
 		Name:         req.Name,
-		PlanID:       "free",
-		Status:       "pending", // Not active until email verified
+		PlanID:       defaultPlanID,
+		Status:       userStatus,
 		CreatedAt:    time.Now().UTC(),
 		UpdatedAt:    time.Now().UTC(),
 	}
@@ -277,23 +339,28 @@ func (h *PortalHandler) SignupSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate verification token
-	tokenResult := domainAuth.GenerateToken(userID, req.Email, domainAuth.TokenTypeEmailVerification, 24*time.Hour)
-	// Hash the raw token for storage
-	tokenWithHash := tokenResult.Token.WithHash(domainAuth.HashToken(tokenResult.RawToken))
+	// Only send verification email if required
+	if requireVerification {
+		// Generate verification token
+		tokenResult := domainAuth.GenerateToken(userID, req.Email, domainAuth.TokenTypeEmailVerification, 24*time.Hour)
+		// Hash the raw token for storage
+		tokenWithHash := tokenResult.Token.WithHash(domainAuth.HashToken(tokenResult.RawToken))
 
-	// Store token
-	if err := h.authTokens.Create(ctx, tokenWithHash); err != nil {
-		h.logger.Error().Err(err).Msg("failed to store verification token")
-	} else {
-		// Send verification email
-		if err := h.emailSender.SendVerification(ctx, req.Email, req.Name, tokenResult.RawToken); err != nil {
-			h.logger.Error().Err(err).Str("email", req.Email).Msg("failed to send verification email")
+		// Store token
+		if err := h.authTokens.Create(ctx, tokenWithHash); err != nil {
+			h.logger.Error().Err(err).Msg("failed to store verification token")
+		} else {
+			// Send verification email
+			if err := h.emailSender.SendVerification(ctx, req.Email, req.Name, tokenResult.RawToken); err != nil {
+				h.logger.Error().Err(err).Str("email", req.Email).Msg("failed to send verification email")
+			}
 		}
+		// Redirect to login with verification message
+		http.Redirect(w, r, "/portal/login?signup=success", http.StatusFound)
+	} else {
+		// Redirect to login with ready-to-login message
+		http.Redirect(w, r, "/portal/login?signup=ready", http.StatusFound)
 	}
-
-	// Redirect to success page
-	http.Redirect(w, r, "/portal/login?signup=success", http.StatusFound)
 }
 
 // -----------------------------------------------------------------------------
@@ -304,10 +371,16 @@ func (h *PortalHandler) PortalLoginPage(w http.ResponseWriter, r *http.Request) 
 	message := ""
 	messageType := ""
 
-	if r.URL.Query().Get("signup") == "success" {
+	switch r.URL.Query().Get("signup") {
+	case "success":
 		message = "Account created! Please check your email to verify your account."
 		messageType = "success"
-	} else if r.URL.Query().Get("verified") == "true" {
+	case "ready":
+		message = "Account created! You can now log in."
+		messageType = "success"
+	}
+
+	if r.URL.Query().Get("verified") == "true" {
 		message = "Email verified! You can now log in."
 		messageType = "success"
 	} else if r.URL.Query().Get("reset") == "success" {
@@ -674,8 +747,24 @@ func (h *PortalHandler) PortalDashboard(w http.ResponseWriter, r *http.Request) 
 		h.logger.Error().Err(err).Msg("failed to get usage")
 	}
 
+	// Get user's plan info
+	var planName string
+	var requestsPerMonth int64
+	var rateLimitPerMinute int
+	if h.plans != nil {
+		dbUser, err := h.users.Get(ctx, user.ID)
+		if err == nil && dbUser.PlanID != "" {
+			plan, err := h.plans.Get(ctx, dbUser.PlanID)
+			if err == nil {
+				planName = plan.Name
+				requestsPerMonth = plan.RequestsPerMonth
+				rateLimitPerMinute = plan.RateLimitPerMinute
+			}
+		}
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(h.renderDashboardPage(user, len(keys), summary.RequestCount)))
+	w.Write([]byte(h.renderDashboardPage(user, len(keys), summary.RequestCount, planName, requestsPerMonth, rateLimitPerMinute)))
 }
 
 // -----------------------------------------------------------------------------
@@ -692,8 +781,10 @@ func (h *PortalHandler) APIKeysPage(w http.ResponseWriter, r *http.Request) {
 		keys = nil
 	}
 
+	revokedMsg := r.URL.Query().Get("revoked") == "true"
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(h.renderAPIKeysPage(user, keys)))
+	w.Write([]byte(h.renderAPIKeysPage(user, keys, revokedMsg)))
 }
 
 func (h *PortalHandler) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
@@ -726,8 +817,45 @@ func (h *PortalHandler) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PortalHandler) RevokeAPIKey(w http.ResponseWriter, r *http.Request) {
-	// Placeholder - implement key revocation
-	http.Redirect(w, r, "/portal/api-keys", http.StatusFound)
+	ctx := r.Context()
+	user := getPortalUser(ctx)
+	keyID := chi.URLParam(r, "id")
+
+	if keyID == "" {
+		http.Error(w, "Key ID required", http.StatusBadRequest)
+		return
+	}
+
+	// Verify the key belongs to this user (security check)
+	keys, err := h.keys.ListByUser(ctx, user.ID)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to list user keys")
+		http.Error(w, "Failed to verify key ownership", http.StatusInternalServerError)
+		return
+	}
+
+	keyBelongsToUser := false
+	for _, k := range keys {
+		if k.ID == keyID {
+			keyBelongsToUser = true
+			break
+		}
+	}
+
+	if !keyBelongsToUser {
+		http.Error(w, "Key not found", http.StatusNotFound)
+		return
+	}
+
+	// Revoke the key
+	if err := h.keys.Revoke(ctx, keyID, time.Now().UTC()); err != nil {
+		h.logger.Error().Err(err).Str("key_id", keyID).Msg("failed to revoke key")
+		http.Error(w, "Failed to revoke key", http.StatusInternalServerError)
+		return
+	}
+
+	h.logger.Info().Str("key_id", keyID).Str("user_id", user.ID).Msg("API key revoked")
+	http.Redirect(w, r, "/portal/api-keys?revoked=true", http.StatusFound)
 }
 
 // -----------------------------------------------------------------------------
@@ -756,13 +884,60 @@ func (h *PortalHandler) PortalUsagePage(w http.ResponseWriter, r *http.Request) 
 
 func (h *PortalHandler) AccountSettingsPage(w http.ResponseWriter, r *http.Request) {
 	user := getPortalUser(r.Context())
+	success := ""
+	if r.URL.Query().Get("password") == "changed" {
+		success = "Password changed successfully"
+	} else if r.URL.Query().Get("profile") == "updated" {
+		success = "Profile updated successfully"
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(h.renderAccountSettingsPage(user, nil)))
+	w.Write([]byte(h.renderAccountSettingsPage(user, nil, success)))
 }
 
 func (h *PortalHandler) UpdateAccountSettings(w http.ResponseWriter, r *http.Request) {
-	// Placeholder - implement account update
-	http.Redirect(w, r, "/portal/settings", http.StatusFound)
+	ctx := r.Context()
+	portalUser := getPortalUser(ctx)
+
+	if err := r.ParseForm(); err != nil {
+		h.renderError(w, http.StatusBadRequest, "Invalid form data")
+		return
+	}
+
+	name := strings.TrimSpace(r.FormValue("name"))
+
+	// Validate name
+	errors := make(map[string]string)
+	if name == "" {
+		errors["name"] = "Name is required"
+	} else if len(name) < 2 {
+		errors["name"] = "Name must be at least 2 characters"
+	} else if len(name) > 100 {
+		errors["name"] = "Name must be less than 100 characters"
+	}
+
+	if len(errors) > 0 {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		w.Write([]byte(h.renderAccountSettingsPage(portalUser, errors, "")))
+		return
+	}
+
+	// Get user and update name
+	user, err := h.users.Get(ctx, portalUser.ID)
+	if err != nil {
+		h.renderError(w, http.StatusInternalServerError, "Failed to get user")
+		return
+	}
+
+	user.Name = name
+	user.UpdatedAt = time.Now().UTC()
+	if err := h.users.Update(ctx, user); err != nil {
+		h.logger.Error().Err(err).Msg("failed to update profile")
+		h.renderError(w, http.StatusInternalServerError, "Failed to update profile")
+		return
+	}
+
+	http.Redirect(w, r, "/portal/settings?profile=updated", http.StatusSeeOther)
 }
 
 func (h *PortalHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
@@ -787,14 +962,14 @@ func (h *PortalHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	if !result.Valid {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		w.Write([]byte(h.renderAccountSettingsPage(portalUser, result.Errors)))
+		w.Write([]byte(h.renderAccountSettingsPage(portalUser, result.Errors, "")))
 		return
 	}
 
 	if newPassword != confirmPassword {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		w.Write([]byte(h.renderAccountSettingsPage(portalUser, map[string]string{"confirm_password": "Passwords do not match"})))
+		w.Write([]byte(h.renderAccountSettingsPage(portalUser, map[string]string{"confirm_password": "Passwords do not match"}, "")))
 		return
 	}
 
@@ -808,7 +983,7 @@ func (h *PortalHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	if !h.hasher.Compare(user.PasswordHash, currentPassword) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(h.renderAccountSettingsPage(portalUser, map[string]string{"current_password": "Current password is incorrect"})))
+		w.Write([]byte(h.renderAccountSettingsPage(portalUser, map[string]string{"current_password": "Current password is incorrect"}, "")))
 		return
 	}
 
@@ -851,7 +1026,7 @@ func (h *PortalHandler) CloseAccount(w http.ResponseWriter, r *http.Request) {
 	if !h.hasher.Compare(dbUser.PasswordHash, password) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(h.renderAccountSettingsPage(user, map[string]string{"password": "Incorrect password"})))
+		w.Write([]byte(h.renderAccountSettingsPage(user, map[string]string{"password": "Incorrect password"}, "")))
 		return
 	}
 
@@ -871,6 +1046,120 @@ func (h *PortalHandler) CloseAccount(w http.ResponseWriter, r *http.Request) {
 
 	h.clearPortalCookie(w)
 	http.Redirect(w, r, "/portal/login?closed=true", http.StatusFound)
+}
+
+// -----------------------------------------------------------------------------
+// Plans (Upgrade/Downgrade)
+// -----------------------------------------------------------------------------
+
+func (h *PortalHandler) PlansPage(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := getPortalUser(ctx)
+
+	// Get current user details
+	dbUser, err := h.users.Get(ctx, user.ID)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to get user")
+		h.renderError(w, http.StatusInternalServerError, "Failed to load account")
+		return
+	}
+
+	// Get all enabled plans
+	allPlans, err := h.plans.List(ctx)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to list plans")
+		h.renderError(w, http.StatusInternalServerError, "Failed to load plans")
+		return
+	}
+
+	// Filter to enabled plans only
+	var plans []ports.Plan
+	var currentPlan *ports.Plan
+	for _, p := range allPlans {
+		if p.Enabled {
+			planCopy := p
+			plans = append(plans, planCopy)
+			if p.ID == dbUser.PlanID {
+				currentPlan = &planCopy
+			}
+		}
+	}
+
+	// Check for success/error messages
+	success := ""
+	errorMsg := ""
+	if r.URL.Query().Get("changed") == "true" {
+		success = "Your plan has been changed successfully."
+	}
+	if r.URL.Query().Get("error") == "payment" {
+		errorMsg = "Payment is required for this plan. Please contact support."
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(h.renderPlansPage(user, plans, currentPlan, success, errorMsg)))
+}
+
+func (h *PortalHandler) ChangePlan(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := getPortalUser(ctx)
+
+	if err := r.ParseForm(); err != nil {
+		http.Redirect(w, r, "/portal/plans?error=invalid", http.StatusFound)
+		return
+	}
+
+	newPlanID := r.FormValue("plan_id")
+	if newPlanID == "" {
+		http.Redirect(w, r, "/portal/plans?error=invalid", http.StatusFound)
+		return
+	}
+
+	// Get the new plan
+	newPlan, err := h.plans.Get(ctx, newPlanID)
+	if err != nil || !newPlan.Enabled {
+		http.Redirect(w, r, "/portal/plans?error=invalid", http.StatusFound)
+		return
+	}
+
+	// Get current user
+	dbUser, err := h.users.Get(ctx, user.ID)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to get user for plan change")
+		http.Redirect(w, r, "/portal/plans?error=internal", http.StatusFound)
+		return
+	}
+
+	// If the new plan has a price > 0, check for payment integration
+	// For now, we allow free plan changes and require payment integration for paid plans
+	if newPlan.PriceMonthly > 0 {
+		// Check if we have payment settings configured
+		allSettings, _ := h.settings.GetAll(ctx)
+		stripeKey := allSettings.Get("payment.stripe.secret_key")
+		paddleKey := allSettings.Get("payment.paddle.api_key")
+		lemonKey := allSettings.Get("payment.lemonsqueezy.api_key")
+
+		if stripeKey == "" && paddleKey == "" && lemonKey == "" {
+			// No payment provider configured - redirect with message
+			http.Redirect(w, r, "/portal/plans?error=payment", http.StatusFound)
+			return
+		}
+
+		// TODO: Create checkout session with payment provider
+		// For now, just update the plan (would be integrated with webhooks)
+		h.logger.Info().Str("user_id", user.ID).Str("new_plan", newPlanID).Int64("price", newPlan.PriceMonthly).Msg("paid plan change requested - payment integration needed")
+	}
+
+	// Update user's plan
+	dbUser.PlanID = newPlanID
+	dbUser.UpdatedAt = time.Now().UTC()
+	if err := h.users.Update(ctx, dbUser); err != nil {
+		h.logger.Error().Err(err).Msg("failed to update user plan")
+		http.Redirect(w, r, "/portal/plans?error=internal", http.StatusFound)
+		return
+	}
+
+	h.logger.Info().Str("user_id", user.ID).Str("old_plan", dbUser.PlanID).Str("new_plan", newPlanID).Msg("user changed plan")
+	http.Redirect(w, r, "/portal/plans?changed=true", http.StatusFound)
 }
 
 // -----------------------------------------------------------------------------

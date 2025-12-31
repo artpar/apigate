@@ -384,8 +384,8 @@ func coreAPIKeyModule() schema.Module {
 			"name":       {Type: schema.FieldTypeString, Default: "", Description: "Human-readable label for this key"},
 			"scopes":     {Type: schema.FieldTypeJSON, Description: "Array of permission scopes granted to this key"},
 			"expires_at": {Type: schema.FieldTypeTimestamp, Description: "When this key expires and becomes invalid"},
-			"revoked_at": {Type: schema.FieldTypeTimestamp, Description: "When this key was manually revoked"},
-			"last_used":  {Type: schema.FieldTypeTimestamp, Description: "Timestamp of most recent API call with this key"},
+			"revoked_at": {Type: schema.FieldTypeTimestamp, Internal: true, Description: "When this key was manually revoked"},
+			"last_used":  {Type: schema.FieldTypeTimestamp, Internal: true, Description: "Timestamp of most recent API call with this key"},
 		},
 		Actions: map[string]schema.Action{
 			"revoke": {Set: map[string]string{"revoked_at": "${NOW}"}, Description: "Revoke an API key", Confirm: true},

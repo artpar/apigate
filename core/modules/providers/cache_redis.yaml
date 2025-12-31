@@ -1,0 +1,91 @@
+# Redis Cache Provider Module
+# Implements the cache capability using Redis
+module: cache_redis
+
+meta:
+  description: Redis cache for distributed and high-performance deployments
+  implements: [cache]
+  icon: database
+  display_name: Redis Cache
+
+schema:
+  enabled:     { type: bool, default: false, description: "Whether this cache provider is active" }
+  host:        { type: string, default: "localhost", description: "Redis server hostname" }
+  port:        { type: int, default: 6379, description: "Redis server port" }
+  password:    { type: secret, description: "Redis password (optional)" }
+  database:    { type: int, default: 0, description: "Redis database number (0-15)" }
+  prefix:      { type: string, default: "apigate:", description: "Key prefix for namespacing" }
+  default_ttl: { type: int, default: 3600, description: "Default TTL in seconds (0 = no expiry)" }
+  pool_size:   { type: int, default: 10, description: "Connection pool size" }
+  tls_enabled: { type: bool, default: false, description: "Use TLS for Redis connection" }
+
+actions:
+  test_connection:
+    description: Verify Redis connection
+    # Implementation sends PING command
+
+  get:
+    description: Get a value by key
+    input:
+      - { name: key, type: string, required: true }
+
+  set:
+    description: Set a value with optional TTL
+    input:
+      - { name: key, type: string, required: true }
+      - { name: value, type: bytes, required: true }
+      - { name: ttl_seconds, type: int, default: 0 }
+
+  delete:
+    description: Delete a key
+    input:
+      - { name: key, type: string, required: true }
+
+  exists:
+    description: Check if key exists
+    input:
+      - { name: key, type: string, required: true }
+
+  increment:
+    description: Atomically increment a counter (INCR command)
+    input:
+      - { name: key, type: string, required: true }
+      - { name: delta, type: int, default: 1 }
+      - { name: ttl_seconds, type: int, default: 0 }
+
+  get_multi:
+    description: Get multiple values (MGET command)
+    input:
+      - { name: keys, type: json, required: true, description: "Array of keys" }
+
+  set_multi:
+    description: Set multiple values (MSET command)
+    input:
+      - { name: entries, type: json, required: true, description: "Object of key:value pairs" }
+      - { name: ttl_seconds, type: int, default: 0 }
+
+  flush:
+    description: Clear all keys with prefix (SCAN + DEL)
+    confirm: true
+
+  stats:
+    description: Get Redis server info
+
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /api/cache
+      endpoints:
+        - { action: stats, method: GET, path: "/stats" }
+        - { action: test_connection, method: POST, path: "/test" }
+
+  cli:
+    serve:
+      enabled: true
+      command: cache
+      commands:
+        - action: stats
+        - action: test_connection
+        - action: flush
+          confirm: "This will clear all cached data. Continue?"

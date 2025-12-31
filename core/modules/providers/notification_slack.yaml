@@ -1,0 +1,69 @@
+# Slack Notification Provider Module
+# Implements the notification capability using Slack webhooks/API
+module: notification_slack
+
+meta:
+  description: Slack notifications for team alerts and updates
+  implements: [notification]
+  icon: message-circle
+  display_name: Slack Notifications
+
+schema:
+  enabled:           { type: bool, default: false, description: "Whether this notification provider is active" }
+  webhook_url:       { type: secret, description: "Slack Incoming Webhook URL (simple integration)" }
+  bot_token:         { type: secret, description: "Slack Bot Token (for API access, optional)" }
+  default_channel:   { type: string, default: "#general", description: "Default channel for notifications" }
+  username:          { type: string, default: "APIGate", description: "Bot display name" }
+  icon_emoji:        { type: string, default: ":robot_face:", description: "Bot icon emoji" }
+  icon_url:          { type: string, description: "Bot icon URL (overrides emoji)" }
+  rate_limit:        { type: int, default: 1, description: "Min seconds between messages to same channel" }
+  batch_window:      { type: int, default: 5, description: "Seconds to batch similar notifications" }
+
+actions:
+  send:
+    description: Send a notification
+    input:
+      - { name: channel, type: string, description: "Channel override (#channel or @user)" }
+      - { name: title, type: string, required: true, description: "Notification title" }
+      - { name: message, type: string, required: true, description: "Notification body" }
+      - { name: severity, type: string, default: "info", description: "info, warning, error, critical" }
+      - { name: fields, type: json, description: "Additional key-value fields" }
+      - { name: thread_ts, type: string, description: "Reply to thread" }
+
+  send_batch:
+    description: Send multiple notifications (batched to reduce API calls)
+    input:
+      - { name: notifications, type: json, required: true, description: "Array of notification objects" }
+
+  send_rich:
+    description: Send a rich message with blocks
+    input:
+      - { name: channel, type: string }
+      - { name: blocks, type: json, required: true, description: "Slack Block Kit blocks" }
+      - { name: attachments, type: json, description: "Legacy attachments" }
+      - { name: text, type: string, description: "Fallback text" }
+
+  test_connection:
+    description: Send test message to verify configuration
+
+  list_channels:
+    description: List available channels (requires bot token)
+    output:
+      - { name: channels, type: json }
+
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /api/notifications/slack
+      endpoints:
+        - { action: test_connection, method: POST, path: "/test" }
+        - { action: list_channels, method: GET, path: "/channels" }
+
+  cli:
+    serve:
+      enabled: true
+      command: notify slack
+      commands:
+        - action: test_connection
+        - action: list_channels

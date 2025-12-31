@@ -43,3 +43,34 @@
     <p>One plan can be marked as "default" - new users are automatically assigned to this plan when they sign up.</p>
 </div>
 {{end}}
+
+{{define "panel-reference"}}
+<div class="panel-section">
+    <h3>Plans API</h3>
+    <p>Manage plans programmatically.</p>
+</div>
+
+<div class="panel-section">
+    <h4>Create Plan</h4>
+    <pre class="panel-code">POST /mod/plan
+Content-Type: application/json
+
+{
+  "id": "pro",
+  "name": "Pro",
+  "rate_limit": 600,
+  "monthly_quota": 100000,
+  "price_monthly": 29.99
+}</pre>
+</div>
+
+<div class="panel-section">
+    <h4>List Plans</h4>
+    <pre class="panel-code">GET /mod/plan</pre>
+</div>
+
+<div class="panel-section">
+    <h4>Update Plan</h4>
+    <pre class="panel-code">PUT /mod/plan/{plan_id}</pre>
+</div>
+{{end}}

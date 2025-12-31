@@ -1,0 +1,98 @@
+# Auth Capability Interface
+# Any module that implements this capability must provide these actions
+capability: auth
+
+description: |
+  Auth capability handles authentication and authorization.
+  Includes token generation/validation and password hashing.
+
+schema:
+  enabled: { type: bool, default: false, description: "Whether this auth provider is active" }
+
+# Actions that implementing modules MUST provide
+actions:
+  # Token Management
+  generate_token:
+    description: Generate an authentication token
+    input:
+      - { name: user_id, type: string, required: true }
+      - { name: claims, type: map, description: "Additional claims to include" }
+      - { name: ttl_seconds, type: int, default: 86400, description: "Token lifetime" }
+    output:
+      - { name: token, type: string }
+      - { name: expires_at, type: datetime }
+
+  validate_token:
+    description: Validate and decode a token
+    input:
+      - { name: token, type: string, required: true }
+    output:
+      - { name: valid, type: bool }
+      - { name: user_id, type: string }
+      - { name: claims, type: map }
+      - { name: error, type: string }
+
+  revoke_token:
+    description: Revoke a token (if supported)
+    input:
+      - { name: token, type: string, required: true }
+
+  # Password Hashing
+  hash_password:
+    description: Hash a password for storage
+    input:
+      - { name: password, type: secret, required: true }
+    output:
+      - { name: hash, type: string }
+
+  verify_password:
+    description: Verify a password against a hash
+    input:
+      - { name: password, type: secret, required: true }
+      - { name: hash, type: string, required: true }
+    output:
+      - { name: valid, type: bool }
+
+  # API Key Validation
+  validate_api_key:
+    description: Validate an API key
+    input:
+      - { name: key, type: string, required: true }
+    output:
+      - { name: valid, type: bool }
+      - { name: key_id, type: string }
+      - { name: user_id, type: string }
+      - { name: plan_id, type: string }
+
+  # Session Management (optional, for web auth)
+  create_session:
+    description: Create a user session
+    input:
+      - { name: user_id, type: string, required: true }
+      - { name: metadata, type: map }
+    output:
+      - { name: session_id, type: string }
+
+  get_session:
+    description: Get session data
+    input:
+      - { name: session_id, type: string, required: true }
+    output:
+      - { name: user_id, type: string }
+      - { name: metadata, type: map }
+      - { name: valid, type: bool }
+
+  destroy_session:
+    description: Destroy a session
+    input:
+      - { name: session_id, type: string, required: true }
+
+  test_connection:
+    description: Verify auth configuration
+    output:
+      - { name: valid, type: bool }
+      - { name: error, type: string }
+
+meta:
+  icon: shield
+  display_name: Auth Provider

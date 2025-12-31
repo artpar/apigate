@@ -9,6 +9,13 @@ type Module struct {
 	// Plural form is derived by convention.
 	Name string `yaml:"module"`
 
+	// Capability indicates this is a capability interface definition.
+	// Capability files define the interface that implementing modules must provide.
+	Capability string `yaml:"capability,omitempty"`
+
+	// Description for documentation (used in capability definitions).
+	Description string `yaml:"description,omitempty"`
+
 	// Schema defines the data fields owned by this module.
 	Schema map[string]Field `yaml:"schema"`
 
@@ -36,6 +43,20 @@ type ModuleMeta struct {
 
 	// Depends lists other modules this one depends on.
 	Depends []string `yaml:"depends,omitempty"`
+
+	// Implements declares which capability interface this module provides.
+	// e.g., "payment", "email", "cache", "storage", "auth"
+	// A module can implement multiple capabilities.
+	Implements []string `yaml:"implements,omitempty"`
+
+	// Icon for UI display.
+	Icon string `yaml:"icon,omitempty"`
+
+	// DisplayName for UI display.
+	DisplayName string `yaml:"display_name,omitempty"`
+
+	// Plural name for the module.
+	Plural string `yaml:"plural,omitempty"`
 }
 
 // Hook defines an event handler.
@@ -71,4 +92,9 @@ type Hook struct {
 
 	// Conditional execution
 	When string `yaml:"when,omitempty"`
+}
+
+// IsCapability returns true if this is a capability interface definition.
+func (m Module) IsCapability() bool {
+	return m.Capability != ""
 }

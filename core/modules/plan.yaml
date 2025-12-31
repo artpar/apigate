@@ -116,12 +116,17 @@ hooks:
   before_set_default:
     - call: clear_other_defaults
 
-  # Sync to payment provider when plan changes
+  # Sync to payment provider when plan changes, then reload plans into proxy
   after_create:
     - call: sync_to_stripe
+    - call: reload_plans
 
   after_update:
     - call: sync_to_stripe
+    - call: reload_plans
+
+  after_delete:
+    - call: reload_plans
 
 meta:
   description: Pricing plans with rate limits and billing

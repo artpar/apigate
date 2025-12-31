@@ -50,6 +50,10 @@ type Runtime struct {
 	// events bus for "emit:" hooks
 	events *events.Bus
 
+	// capabilities tracks which modules implement which capabilities
+	// e.g., "payment" -> ["payment_stripe", "payment_paddle"]
+	capabilities map[string][]string
+
 	// logger for hook system
 	logger zerolog.Logger
 
@@ -157,16 +161,17 @@ type HookEvent struct {
 // New creates a new runtime.
 func New(storage Storage, config Config) *Runtime {
 	r := &Runtime{
-		registry:  registry.New(),
-		storage:   storage,
-		analytics: config.Analytics,
-		validator: validation.New(make(map[string]convention.Derived)),
-		channels:  make(map[string]Channel),
-		hooks:     &HookDispatcher{handlers: make(map[string][]HookHandler)},
-		functions: NewFunctionRegistry(),
-		events:    events.NewBus(config.Logger),
-		logger:    config.Logger,
-		config:    config,
+		registry:     registry.New(),
+		storage:      storage,
+		analytics:    config.Analytics,
+		validator:    validation.New(make(map[string]convention.Derived)),
+		channels:     make(map[string]Channel),
+		hooks:        &HookDispatcher{handlers: make(map[string][]HookHandler)},
+		functions:    NewFunctionRegistry(),
+		events:       events.NewBus(config.Logger),
+		capabilities: make(map[string][]string),
+		logger:       config.Logger,
+		config:       config,
 	}
 
 	// Initialize exporter registry with analytics store
@@ -226,6 +231,15 @@ func (r *Runtime) LoadModule(mod schema.Module) error {
 		if err := ch.Register(derived); err != nil {
 			return fmt.Errorf("register %q with channel %q: %w", mod.Name, ch.Name(), err)
 		}
+	}
+
+	// Register capabilities from meta.implements
+	for _, capability := range mod.Meta.Implements {
+		r.capabilities[capability] = append(r.capabilities[capability], mod.Name)
+		r.logger.Debug().
+			Str("module", mod.Name).
+			Str("capability", capability).
+			Msg("registered capability provider")
 	}
 
 	// Update validator with all modules
@@ -676,6 +690,98 @@ func (d *HookDispatcher) OnHook(module, action, phase string, handler HookHandle
 // Registry returns the module registry.
 func (r *Runtime) Registry() *registry.Registry {
 	return r.registry
+}
+
+// GetModulesWithCapability returns all modules that implement a capability.
+// e.g., GetModulesWithCapability("payment") -> ["payment_stripe", "payment_paddle"]
+func (r *Runtime) GetModulesWithCapability(capability string) []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.capabilities[capability]
+}
+
+// GetCapabilities returns all registered capabilities and their providers.
+func (r *Runtime) GetCapabilities() map[string][]string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	// Return a copy to prevent modification
+	result := make(map[string][]string, len(r.capabilities))
+	for k, v := range r.capabilities {
+		providers := make([]string, len(v))
+		copy(providers, v)
+		result[k] = providers
+	}
+	return result
+}
+
+// HasCapability checks if any module provides a capability.
+func (r *Runtime) HasCapability(capability string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.capabilities[capability]) > 0
+}
+
+// GetEnabledProvider returns the first enabled provider for a capability.
+// Multiple providers can be registered but only one should have enabled=true.
+// Returns empty string if no enabled provider found.
+func (r *Runtime) GetEnabledProvider(ctx context.Context, capability string) string {
+	r.mu.RLock()
+	providers := r.capabilities[capability]
+	r.mu.RUnlock()
+
+	for _, moduleName := range providers {
+		// Get the provider's settings to check if enabled
+		if r.storage == nil {
+			continue
+		}
+
+		settings, _, err := r.storage.List(ctx, moduleName, ListOptions{Limit: 1})
+		if err != nil || len(settings) == 0 {
+			continue
+		}
+
+		// Check the enabled field
+		if enabled, ok := settings[0]["enabled"].(bool); ok && enabled {
+			return moduleName
+		}
+		// Also check int (SQLite stores bool as int)
+		if enabled, ok := settings[0]["enabled"].(int64); ok && enabled == 1 {
+			return moduleName
+		}
+	}
+
+	return ""
+}
+
+// GetAllEnabledProviders returns all enabled providers for a capability.
+// Useful when multiple providers can be active simultaneously.
+func (r *Runtime) GetAllEnabledProviders(ctx context.Context, capability string) []string {
+	r.mu.RLock()
+	providers := r.capabilities[capability]
+	r.mu.RUnlock()
+
+	var enabled []string
+	for _, moduleName := range providers {
+		if r.storage == nil {
+			continue
+		}
+
+		settings, _, err := r.storage.List(ctx, moduleName, ListOptions{Limit: 1})
+		if err != nil || len(settings) == 0 {
+			continue
+		}
+
+		// Check the enabled field
+		if e, ok := settings[0]["enabled"].(bool); ok && e {
+			enabled = append(enabled, moduleName)
+		}
+		if e, ok := settings[0]["enabled"].(int64); ok && e == 1 {
+			enabled = append(enabled, moduleName)
+		}
+	}
+
+	return enabled
 }
 
 // OnHook registers a hook handler on the runtime.

@@ -5,6 +5,8 @@
         <a href="/users/new" class="btn btn-primary">Create User</a>
     </div>
 
+    <p class="page-desc">Manage API consumers. Each user can have multiple API keys and is assigned a plan with rate limits.</p>
+
     <div class="card">
         <div class="card-body flush" id="users-table" hx-get="/partials/users" hx-trigger="load" hx-swap="innerHTML">
             <div class="table-empty">Loading users...</div>
@@ -40,5 +42,45 @@
 <div class="panel-section">
     <h4>User Plans</h4>
     <p>Each user is assigned a plan that controls their rate limits and monthly quota. You can change a user's plan at any time from the edit page.</p>
+</div>
+{{end}}
+
+{{define "panel-reference"}}
+<div class="panel-section">
+    <h3>Users API</h3>
+    <p>Manage users programmatically.</p>
+</div>
+
+<div class="panel-section">
+    <h4>Create User</h4>
+    <pre class="panel-code">POST /mod/user
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "password": "securepassword",
+  "plan_id": "free"
+}</pre>
+</div>
+
+<div class="panel-section">
+    <h4>List Users</h4>
+    <pre class="panel-code">GET /mod/user</pre>
+</div>
+
+<div class="panel-section">
+    <h4>Update User</h4>
+    <pre class="panel-code">PUT /mod/user/{user_id}
+Content-Type: application/json
+
+{
+  "plan_id": "pro",
+  "status": "active"
+}</pre>
+</div>
+
+<div class="panel-section">
+    <h4>Delete User</h4>
+    <pre class="panel-code">DELETE /mod/user/{user_id}</pre>
 </div>
 {{end}}

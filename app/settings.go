@@ -106,3 +106,8 @@ func (s *SettingsService) GetByPrefix(prefix string) settings.Settings {
 	}
 	return result
 }
+
+// Store returns the underlying settings store for direct access.
+func (s *SettingsService) Store() ports.SettingsStore {
+	return s.store
+}

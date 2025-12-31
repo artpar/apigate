@@ -334,3 +334,40 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 {{end}}
+
+{{define "panel-docs"}}
+<div class="panel-section">
+    <h3>{{if .IsNew}}Create Upstream{{else}}Edit Upstream{{end}}</h3>
+    <p>{{if .IsNew}}Configure a backend API service that routes can forward requests to.{{else}}Update this upstream's connection and authentication settings.{{end}}</p>
+</div>
+
+<div class="panel-section">
+    <h4>Key Concepts</h4>
+    <ul class="panel-list">
+        <li><strong>Base URL</strong> - Root URL of the backend (no trailing slash)</li>
+        <li><strong>Auth Type</strong> - How to authenticate with the upstream API</li>
+        <li><strong>Timeout</strong> - Max wait time for responses (increase for LLMs)</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>Environment Variables</h4>
+    <p>Use <code>${ENV_VAR}</code> syntax in auth values to reference environment variables securely. Never store API keys directly.</p>
+</div>
+
+{{if .IsNew}}
+<div class="panel-section">
+    <h4>Quick Start</h4>
+    <p>Select a provider template above to pre-fill common settings, or configure manually for custom APIs.</p>
+</div>
+{{else}}
+<div class="panel-section">
+    <h4>Tips</h4>
+    <ul class="panel-list">
+        <li>Disable to prevent routes from using this upstream</li>
+        <li>Increase timeout for slow APIs (LLMs need 60-120s)</li>
+        <li>Changes take effect immediately</li>
+    </ul>
+</div>
+{{end}}
+{{end}}

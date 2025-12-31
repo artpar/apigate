@@ -1,0 +1,125 @@
+# Stripe Payment Provider Module
+# Implements the payment capability for Stripe integration
+# Multiple instances can be created (e.g., stripe_prod, stripe_test)
+module: payment_stripe
+
+meta:
+  description: Stripe payment integration for subscription billing
+  implements: [payment]
+  icon: credit-card
+  display_name: Stripe
+  depends: [provider_mapping]
+
+schema:
+  # Instance identification
+  name:           { type: string, required: true, unique: true, lookup: true, description: "Instance name (e.g., stripe_prod, stripe_test)" }
+  description:    { type: string, description: "Description of this instance (e.g., Production account)" }
+
+  # Connection settings
+  secret_key:     { type: secret, required: true, description: "Stripe secret key (sk_live_... or sk_test_...)" }
+  publishable_key: { type: string, description: "Stripe publishable key (pk_live_... or pk_test_...)" }
+  webhook_secret: { type: secret, description: "Stripe webhook signing secret (whsec_...)" }
+
+  # Instance state
+  enabled:        { type: bool, default: false, description: "Whether this instance is active" }
+  is_default:     { type: bool, default: false, description: "Whether this is the default payment provider" }
+
+actions:
+  # Test connection to Stripe
+  test_connection:
+    description: Verify Stripe credentials are valid
+    # Implementation will call Stripe API to validate key
+
+  # Customer Management
+  create_customer:
+    description: Create a Stripe customer for a user
+    input:
+      - { name: user_id, type: ref, to: user, required: true }
+      - { name: email, type: email, required: true }
+      - { name: name, type: string }
+    # Implementation calls POST /v1/customers
+    # Stores customer ID in provider_mapping(stripe, user, user_id) = customer_id
+
+  delete_customer:
+    description: Delete a Stripe customer
+    input:
+      - { name: user_id, type: ref, to: user, required: true }
+    # Implementation deletes from Stripe and removes mapping
+
+  # Price/Product Management
+  create_price:
+    description: Create a Stripe price for a plan
+    input:
+      - { name: plan_id, type: ref, to: plan, required: true }
+    # Implementation calls POST /v1/prices
+    # Stores price ID in provider_mapping(stripe, plan, plan_id) = price_id
+
+  update_price:
+    description: Update Stripe price (activate/deactivate)
+    input:
+      - { name: plan_id, type: ref, to: plan, required: true }
+      - { name: active, type: bool, required: true }
+
+  # Subscription Management
+  create_subscription:
+    description: Create a Stripe subscription
+    input:
+      - { name: user_id, type: ref, to: user, required: true }
+      - { name: plan_id, type: ref, to: plan, required: true }
+    # Looks up customer_id and price_id from provider_mapping
+    # Stores subscription_id in provider_mapping
+
+  cancel_subscription:
+    description: Cancel a Stripe subscription
+    input:
+      - { name: user_id, type: ref, to: user, required: true }
+      - { name: at_period_end, type: bool, default: true }
+
+  # Usage Billing
+  report_usage:
+    description: Report usage for metered billing
+    input:
+      - { name: user_id, type: ref, to: user, required: true }
+      - { name: quantity, type: int, required: true }
+
+  # Webhook Processing
+  handle_webhook:
+    description: Process Stripe webhook event
+    input:
+      - { name: payload, type: bytes, required: true }
+      - { name: signature, type: string, required: true }
+
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /webhooks
+      endpoints:
+        - { action: handle_webhook, method: POST, path: "/stripe" }
+
+    consume:
+      stripe:
+        base: https://api.stripe.com/v1
+        auth:
+          type: bearer
+          # Uses setting from this module's schema
+          bearer: ${self.secret_key}
+        methods:
+          list_customers:
+            method: GET
+            path: /customers
+          create_customer:
+            method: POST
+            path: /customers
+          create_price:
+            method: POST
+            path: /prices
+          create_subscription:
+            method: POST
+            path: /subscriptions
+
+hooks:
+  # When this module is enabled, sync all plans
+  after_update:
+    - call: sync_all_plans
+      when: "enabled == true"

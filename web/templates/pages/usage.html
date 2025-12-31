@@ -74,7 +74,7 @@
                     {{range .UsageData}}
                     <tr>
                         <td class="cell-primary">{{.UserEmail}}</td>
-                        <td class="cell-mono text-muted">{{maskKey .KeyID}}</td>
+                        <td class="cell-mono text-muted">{{.KeyPrefix}}****</td>
                         <td>{{.RequestCount}}</td>
                         <td class="text-muted">{{timeAgo .LastUsed}}</td>
                     </tr>

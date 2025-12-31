@@ -1,0 +1,40 @@
+{{define "content"}}
+<div class="login-container">
+    <div class="card" style="max-width: 800px; margin: 0 auto;">
+        <div class="card-header">
+            <h1>Privacy Policy</h1>
+        </div>
+        <div class="card-body" style="padding: 2rem;">
+            <p class="text-muted mb-4">Last updated: {{.LastUpdated}}</p>
+
+            <h2 class="mb-2">1. Information We Collect</h2>
+            <p class="mb-4">We collect information you provide directly (name, email, password) and information generated through your use of the service (API usage statistics, request logs).</p>
+
+            <h2 class="mb-2">2. How We Use Your Information</h2>
+            <p class="mb-4">We use your information to provide and improve the service, enforce rate limits and quotas, send service notifications, and respond to your requests.</p>
+
+            <h2 class="mb-2">3. API Request Data</h2>
+            <p class="mb-4">We log API request metadata (timestamps, endpoints, response codes) for analytics and debugging. Request/response bodies are not stored unless explicitly configured.</p>
+
+            <h2 class="mb-2">4. Data Security</h2>
+            <p class="mb-4">We implement industry-standard security measures to protect your data. Passwords are hashed using secure algorithms. API keys are stored securely.</p>
+
+            <h2 class="mb-2">5. Data Retention</h2>
+            <p class="mb-4">Account information is retained while your account is active. Usage data may be retained for analytics purposes as per your plan's data retention policy.</p>
+
+            <h2 class="mb-2">6. Third-Party Services</h2>
+            <p class="mb-4">We may use third-party services for payment processing and email delivery. These services have their own privacy policies.</p>
+
+            <h2 class="mb-2">7. Your Rights</h2>
+            <p class="mb-4">You can access, update, or delete your account information at any time through your account settings. Contact us for data export requests.</p>
+
+            <h2 class="mb-2">8. Contact</h2>
+            <p class="mb-4">For privacy-related questions or concerns, please contact the service administrator.</p>
+
+            <div class="text-center mt-4">
+                <a href="/portal/" class="btn btn-secondary">Back to Portal</a>
+            </div>
+        </div>
+    </div>
+</div>
+{{end}}

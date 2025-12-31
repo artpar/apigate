@@ -1,0 +1,124 @@
+# S3 Storage Provider Module
+# Implements the storage capability using S3-compatible object storage
+# Works with AWS S3, MinIO, DigitalOcean Spaces, Backblaze B2, Cloudflare R2
+module: storage_s3
+
+meta:
+  description: S3-compatible object storage for scalable and distributed deployments
+  implements: [storage]
+  icon: cloud
+  display_name: S3 Storage
+
+schema:
+  enabled:           { type: bool, default: false, description: "Whether this storage provider is active" }
+  endpoint:          { type: string, description: "S3 endpoint URL (leave empty for AWS S3)" }
+  region:            { type: string, default: "us-east-1", description: "AWS region" }
+  bucket:            { type: string, required: true, description: "S3 bucket name" }
+  access_key:        { type: secret, description: "AWS Access Key ID" }
+  secret_key:        { type: secret, description: "AWS Secret Access Key" }
+  prefix:            { type: string, default: "", description: "Key prefix for all objects" }
+  use_path_style:    { type: bool, default: false, description: "Use path-style URLs (required for MinIO)" }
+  public_bucket:     { type: bool, default: false, description: "Bucket allows public access" }
+  default_acl:       { type: string, default: "private", description: "Default ACL: private, public-read, etc." }
+  max_file_size:     { type: int, default: 5368709120, description: "Maximum file size in bytes (default 5GB)" }
+  multipart_threshold: { type: int, default: 104857600, description: "Size threshold for multipart upload (100MB)" }
+  cdn_url:           { type: string, description: "CDN URL for public access (CloudFront, etc.)" }
+  signed_url_expiry: { type: int, default: 3600, description: "Default signed URL expiry in seconds" }
+
+actions:
+  put:
+    description: Store an object
+    input:
+      - { name: key, type: string, required: true, description: "Object key/path" }
+      - { name: data, type: bytes, required: true, description: "Object content" }
+      - { name: content_type, type: string, default: "application/octet-stream" }
+      - { name: metadata, type: json, description: "Custom metadata key-value pairs" }
+      - { name: acl, type: string, description: "Object ACL (overrides default)" }
+
+  get:
+    description: Retrieve an object
+    input:
+      - { name: key, type: string, required: true }
+    output:
+      - { name: data, type: bytes }
+      - { name: content_type, type: string }
+      - { name: metadata, type: json }
+
+  delete:
+    description: Delete an object
+    input:
+      - { name: key, type: string, required: true }
+
+  exists:
+    description: Check if object exists (HEAD request)
+    input:
+      - { name: key, type: string, required: true }
+
+  list:
+    description: List objects with prefix
+    input:
+      - { name: prefix, type: string, default: "" }
+      - { name: limit, type: int, default: 1000 }
+      - { name: continuation_token, type: string, description: "Token for pagination" }
+    output:
+      - { name: objects, type: json }
+      - { name: next_token, type: string }
+      - { name: is_truncated, type: bool }
+
+  get_url:
+    description: Get pre-signed URL for object access
+    input:
+      - { name: key, type: string, required: true }
+      - { name: expires_in, type: int, default: 3600, description: "URL validity in seconds" }
+      - { name: for_upload, type: bool, default: false, description: "Generate upload URL instead of download" }
+
+  put_stream:
+    description: Store large object using multipart upload
+    input:
+      - { name: key, type: string, required: true }
+      - { name: content_type, type: string, default: "application/octet-stream" }
+      - { name: metadata, type: json }
+
+  copy:
+    description: Copy object within bucket or across buckets
+    input:
+      - { name: source_key, type: string, required: true }
+      - { name: dest_key, type: string, required: true }
+      - { name: dest_bucket, type: string, description: "Destination bucket (default: same bucket)" }
+
+  delete_batch:
+    description: Delete multiple objects
+    input:
+      - { name: keys, type: json, required: true, description: "Array of keys to delete" }
+    confirm: true
+
+  test_connection:
+    description: Verify S3 connection and bucket access
+
+  stats:
+    description: Get storage statistics
+    output:
+      - { name: bucket, type: string }
+      - { name: region, type: string }
+      - { name: object_count, type: int }
+
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /api/storage
+      endpoints:
+        - { action: stats, method: GET, path: "/stats" }
+        - { action: list, method: GET, path: "/list" }
+        - { action: test_connection, method: POST, path: "/test" }
+
+  cli:
+    serve:
+      enabled: true
+      command: storage
+      commands:
+        - action: stats
+        - action: test_connection
+        - action: list
+        - action: delete_batch
+          confirm: "This will delete multiple objects. Continue?"

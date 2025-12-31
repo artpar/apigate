@@ -123,17 +123,23 @@ type ActionInput struct {
 	// Type of the input.
 	Type schema.FieldType
 
+	// To specifies the target module for ref type inputs.
+	To string
+
 	// Required indicates this input must be provided.
 	Required bool
 
 	// Default value.
-	Default string
+	Default any
 
 	// Prompt indicates CLI should prompt for this value.
 	Prompt bool
 
 	// PromptText is the prompt message.
 	PromptText string
+
+	// Description for documentation.
+	Description string
 }
 
 // Derive expands a minimal module definition into a fully-derived form.
@@ -318,13 +324,15 @@ func deriveCustomActionInputs(inputs []schema.ActionInput) []ActionInput {
 		}
 
 		result[i] = ActionInput{
-			Name:       name,
-			Field:      input.Field,
-			Type:       schema.FieldType(input.Type),
-			Required:   input.Required,
-			Default:    input.Default,
-			Prompt:     input.Prompt,
-			PromptText: input.PromptText,
+			Name:        name,
+			Field:       input.Field,
+			Type:        schema.FieldType(input.Type),
+			To:          input.To,
+			Required:    input.Required,
+			Default:     input.Default,
+			Prompt:      input.Prompt,
+			PromptText:  input.PromptText,
+			Description: input.Description,
 		}
 	}
 	return result

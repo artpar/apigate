@@ -58,6 +58,10 @@ func (s *UsageStore) RecordBatch(ctx context.Context, events []usage.Event) erro
 
 // GetSummary returns aggregated usage for a period.
 func (s *UsageStore) GetSummary(ctx context.Context, userID string, start, end time.Time) (usage.Summary, error) {
+	// Format times as ISO8601 strings for SQLite comparison
+	// Convert to UTC since timestamps are stored in UTC
+	startStr := start.UTC().Format("2006-01-02 15:04:05")
+	endStr := end.UTC().Format("2006-01-02 15:04:05")
 	row := s.db.QueryRowContext(ctx, `
 		SELECT
 			COUNT(*) as request_count,
@@ -67,8 +71,8 @@ func (s *UsageStore) GetSummary(ctx context.Context, userID string, start, end t
 			COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END), 0) as error_count,
 			CAST(COALESCE(AVG(latency_ms), 0) AS INTEGER) as avg_latency
 		FROM usage_events
-		WHERE user_id = ? AND timestamp >= ? AND timestamp < ?
-	`, userID, start, end)
+		WHERE user_id = ? AND datetime(timestamp) >= datetime(?) AND datetime(timestamp) < datetime(?)
+	`, userID, startStr, endStr)
 
 	var summary usage.Summary
 	summary.UserID = userID

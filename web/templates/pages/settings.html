@@ -4,33 +4,231 @@
         <h1 class="page-title">Settings</h1>
     </div>
 
+    {{if .Success}}
+    <div class="alert alert-success mb-4">{{.Success}}</div>
+    {{end}}
+    {{if .Error}}
+    <div class="alert alert-error mb-4">{{.Error}}</div>
+    {{end}}
+
+    <!-- Editable Settings -->
+    <form action="/settings" method="POST">
+        <div class="card mb-4">
+            <!-- Customer Portal Settings -->
+            <div class="card-body" style="border-bottom: 1px solid #e5e7eb;">
+                <h3 class="card-title mb-4">Customer Portal</h3>
+                <p class="text-muted mb-4">Allow customers to self-register, manage API keys, and view usage.</p>
+                <div class="form">
+                    <div class="form-group">
+                        <label class="form-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" name="portal_enabled" {{if .Settings.PortalEnabled}}checked{{end}} style="width: 18px; height: 18px;">
+                            Enable Customer Portal
+                        </label>
+                        <p class="form-hint">When enabled, customers can sign up at <code>/portal/</code></p>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="portal_app_name">Application Name</label>
+                        <input type="text" id="portal_app_name" name="portal_app_name" class="form-input" value="{{.Settings.PortalAppName}}" placeholder="APIGate">
+                        <p class="form-hint">Shown in portal header and emails</p>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="portal_base_url">Portal Base URL</label>
+                        <input type="text" id="portal_base_url" name="portal_base_url" class="form-input" value="{{.Settings.PortalBaseURL}}" placeholder="https://api.example.com">
+                        <p class="form-hint">Used for email links. Leave empty to auto-detect.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Authentication Settings -->
+            <div class="card-body" style="border-bottom: 1px solid #e5e7eb;">
+                <h3 class="card-title mb-4">Customer Authentication</h3>
+                <div class="form">
+                    <div class="form-group">
+                        <label class="form-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" name="require_email_verification" {{if .Settings.RequireEmailVerification}}checked{{end}} style="width: 18px; height: 18px;">
+                            Require Email Verification
+                        </label>
+                        <p class="form-hint">When enabled, customers must verify their email before accessing the portal. Requires email provider configuration.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Email Provider Settings -->
+            <div class="card-body" style="border-bottom: 1px solid #e5e7eb;">
+                <h3 class="card-title mb-4">Email Provider</h3>
+                <p class="text-muted mb-4">Configure email delivery for verification emails and notifications.</p>
+                <div class="form">
+                    <div class="form-group">
+                        <label class="form-label" for="email_provider">Provider</label>
+                        <select id="email_provider" name="email_provider" class="form-input">
+                            <option value="none" {{if eq .Settings.EmailProvider "none"}}selected{{end}}>None (Disabled)</option>
+                            <option value="smtp" {{if eq .Settings.EmailProvider "smtp"}}selected{{end}}>SMTP</option>
+                            <option value="sendgrid" {{if eq .Settings.EmailProvider "sendgrid"}}selected{{end}}>SendGrid</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="email_from_address">From Address</label>
+                        <input type="email" id="email_from_address" name="email_from_address" class="form-input" value="{{.Settings.EmailFromAddress}}" placeholder="noreply@example.com">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="email_from_name">From Name</label>
+                        <input type="text" id="email_from_name" name="email_from_name" class="form-input" value="{{.Settings.EmailFromName}}" placeholder="My API">
+                    </div>
+                </div>
+
+                <!-- SMTP Settings -->
+                <div style="background: #f9fafb; padding: 16px; border-radius: 8px; margin-top: 16px;">
+                    <h4 style="margin: 0 0 12px 0; font-size: 14px; font-weight: 600; color: #374151;">SMTP Settings</h4>
+                    <div class="form">
+                        <div style="display: grid; grid-template-columns: 1fr 120px; gap: 12px; margin-bottom: 12px;">
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label class="form-label" for="smtp_host">Host</label>
+                                <input type="text" id="smtp_host" name="smtp_host" class="form-input" value="{{.Settings.SMTPHost}}" placeholder="smtp.example.com">
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label class="form-label" for="smtp_port">Port</label>
+                                <input type="number" id="smtp_port" name="smtp_port" class="form-input" value="{{.Settings.SMTPPort}}" placeholder="587">
+                            </div>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label class="form-label" for="smtp_username">Username</label>
+                            <input type="text" id="smtp_username" name="smtp_username" class="form-input" value="{{.Settings.SMTPUsername}}" placeholder="username">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label class="form-label" for="smtp_password">Password</label>
+                            <input type="password" id="smtp_password" name="smtp_password" class="form-input" value="{{.Settings.SMTPPassword}}" placeholder="Enter password to change">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label class="form-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="checkbox" name="smtp_use_tls" {{if .Settings.SMTPUseTLS}}checked{{end}} style="width: 18px; height: 18px;">
+                                Use TLS
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SendGrid Settings -->
+                <div style="background: #f9fafb; padding: 16px; border-radius: 8px; margin-top: 12px;">
+                    <h4 style="margin: 0 0 12px 0; font-size: 14px; font-weight: 600; color: #374151;">SendGrid</h4>
+                    <div class="form">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label class="form-label" for="sendgrid_api_key">API Key</label>
+                            <input type="password" id="sendgrid_api_key" name="sendgrid_api_key" class="form-input" value="{{.Settings.SendGridAPIKey}}" placeholder="SG.xxxx...">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Payment Provider Settings -->
+            <div class="card-body" style="border-bottom: 1px solid #e5e7eb;">
+                <h3 class="card-title mb-4">Payment Providers</h3>
+                <p class="text-muted mb-4">Configure payment integration for paid plans. You only need to set up one provider.</p>
+
+                <!-- Stripe -->
+                <div style="background: #f9fafb; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
+                    <h4 style="margin: 0 0 12px 0; font-size: 14px; font-weight: 600; color: #374151;">
+                        <span style="display: inline-block; width: 20px; height: 20px; background: #635bff; color: white; border-radius: 4px; text-align: center; line-height: 20px; font-size: 12px; margin-right: 8px;">S</span>
+                        Stripe
+                    </h4>
+                    <div class="form">
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label class="form-label" for="stripe_secret_key">Secret Key</label>
+                            <input type="password" id="stripe_secret_key" name="stripe_secret_key" class="form-input" value="{{.Settings.StripeSecretKey}}" placeholder="sk_live_... or sk_test_...">
+                            <p class="form-hint">Found in Stripe Dashboard → Developers → API Keys</p>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label class="form-label" for="stripe_webhook_secret">Webhook Secret</label>
+                            <input type="password" id="stripe_webhook_secret" name="stripe_webhook_secret" class="form-input" value="{{.Settings.StripeWebhookSecret}}" placeholder="whsec_...">
+                            <p class="form-hint">Create a webhook endpoint at <code>/webhooks/stripe</code></p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Paddle -->
+                <div style="background: #f9fafb; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
+                    <h4 style="margin: 0 0 12px 0; font-size: 14px; font-weight: 600; color: #374151;">
+                        <span style="display: inline-block; width: 20px; height: 20px; background: #2e6ed5; color: white; border-radius: 4px; text-align: center; line-height: 20px; font-size: 12px; margin-right: 8px;">P</span>
+                        Paddle
+                    </h4>
+                    <div class="form">
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label class="form-label" for="paddle_vendor_id">Vendor ID</label>
+                            <input type="text" id="paddle_vendor_id" name="paddle_vendor_id" class="form-input" value="{{.Settings.PaddleVendorID}}" placeholder="123456">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label class="form-label" for="paddle_api_key">API Key</label>
+                            <input type="password" id="paddle_api_key" name="paddle_api_key" class="form-input" value="{{.Settings.PaddleAPIKey}}" placeholder="Your Paddle API Key">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label class="form-label" for="paddle_webhook_secret">Webhook Secret</label>
+                            <input type="password" id="paddle_webhook_secret" name="paddle_webhook_secret" class="form-input" value="{{.Settings.PaddleWebhookSecret}}" placeholder="pdl_...">
+                            <p class="form-hint">Webhook endpoint: <code>/webhooks/paddle</code></p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- LemonSqueezy -->
+                <div style="background: #f9fafb; padding: 16px; border-radius: 8px;">
+                    <h4 style="margin: 0 0 12px 0; font-size: 14px; font-weight: 600; color: #374151;">
+                        <span style="display: inline-block; width: 20px; height: 20px; background: #ffc233; color: #1a1a1a; border-radius: 4px; text-align: center; line-height: 20px; font-size: 12px; margin-right: 8px;">L</span>
+                        LemonSqueezy
+                    </h4>
+                    <div class="form">
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label class="form-label" for="lemon_api_key">API Key</label>
+                            <input type="password" id="lemon_api_key" name="lemon_api_key" class="form-input" value="{{.Settings.LemonAPIKey}}" placeholder="Your LemonSqueezy API Key">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label class="form-label" for="lemon_webhook_secret">Webhook Secret</label>
+                            <input type="password" id="lemon_webhook_secret" name="lemon_webhook_secret" class="form-input" value="{{.Settings.LemonWebhookSecret}}" placeholder="Your signing secret">
+                            <p class="form-hint">Webhook endpoint: <code>/webhooks/lemonsqueezy</code></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card-body">
+                <button type="submit" class="btn btn-primary">Save Settings</button>
+            </div>
+        </div>
+    </form>
+
+    <!-- Read-only Settings -->
     <div class="card">
-        <!-- Upstream Configuration -->
         <div class="card-body" style="border-bottom: 1px solid #e5e7eb;">
             <h3 class="card-title mb-4">Upstream API</h3>
+            <p class="text-muted mb-4">Configured via environment variables.</p>
             <div class="form">
                 <div class="form-group">
                     <label class="form-label">URL</label>
-                    <div class="form-input" style="background: #f9fafb;">{{.Settings.UpstreamURL}}</div>
+                    <div class="form-input" style="background: #f9fafb;">
+                        {{if .Settings.UpstreamURL}}{{.Settings.UpstreamURL}}{{else}}<span class="text-muted" style="font-style: italic;">Not configured (using per-route upstreams)</span>{{end}}
+                    </div>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Timeout</label>
-                    <div class="form-input" style="background: #f9fafb;">{{.Settings.UpstreamTimeout}}</div>
+                    <div class="form-input" style="background: #f9fafb;">
+                        {{if .Settings.UpstreamTimeout}}{{.Settings.UpstreamTimeout}}{{else}}<span class="text-muted" style="font-style: italic;">30s (default)</span>{{end}}
+                    </div>
                 </div>
             </div>
         </div>
 
         <!-- Authentication -->
         <div class="card-body" style="border-bottom: 1px solid #e5e7eb;">
-            <h3 class="card-title mb-4">Authentication</h3>
+            <h3 class="card-title mb-4">API Authentication</h3>
             <div class="form">
                 <div class="form-group">
                     <label class="form-label">Mode</label>
-                    <div class="form-input" style="background: #f9fafb;">{{.Settings.AuthMode}}</div>
+                    <div class="form-input" style="background: #f9fafb;">
+                        {{if .Settings.AuthMode}}{{.Settings.AuthMode}}{{else}}<span class="text-muted" style="font-style: italic;">local (default)</span>{{end}}
+                    </div>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Header Name</label>
-                    <div class="form-input" style="background: #f9fafb;">{{.Settings.AuthHeader}}</div>
+                    <div class="form-input" style="background: #f9fafb;">
+                        {{if .Settings.AuthHeader}}{{.Settings.AuthHeader}}{{else}}<span class="text-muted" style="font-style: italic;">X-API-Key (default)</span>{{end}}
+                    </div>
                 </div>
             </div>
         </div>
@@ -41,7 +239,9 @@
             <div class="form">
                 <div class="form-group">
                     <label class="form-label">Strategy</label>
-                    <div class="form-input" style="background: #f9fafb;">{{.Settings.RateLimitStrategy}}</div>
+                    <div class="form-input" style="background: #f9fafb;">
+                        {{if .Settings.RateLimitStrategy}}{{.Settings.RateLimitStrategy}}{{else}}<span class="text-muted" style="font-style: italic;">sliding-window (default)</span>{{end}}
+                    </div>
                 </div>
             </div>
         </div>
@@ -52,14 +252,84 @@
             <div class="form">
                 <div class="form-group">
                     <label class="form-label">DSN</label>
-                    <div class="form-input cell-mono" style="background: #f9fafb;">{{.Settings.DatabaseDSN}}</div>
+                    <div class="form-input cell-mono" style="background: #f9fafb;">
+                        {{if .Settings.DatabaseDSN}}{{.Settings.DatabaseDSN}}{{else}}<span class="text-muted" style="font-style: italic;">SQLite (in-memory)</span>{{end}}
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
     <div class="alert alert-info mt-4">
-        Settings are configured via environment variables or config file. Changes require a server restart.
+        <strong>Note:</strong> Some settings (Upstream, Rate Limiting, Database) are configured via environment variables and require a server restart to change.
     </div>
+</div>
+{{end}}
+
+{{define "panel-docs"}}
+<div class="panel-section">
+    <h3>Settings Overview</h3>
+    <p>View your APIGate configuration. These settings are read-only and configured via environment variables.</p>
+</div>
+
+<div class="panel-section">
+    <h4>Upstream API</h4>
+    <ul class="panel-list">
+        <li><strong>URL</strong> - Default backend API server. Can be overridden per-route.</li>
+        <li><strong>Timeout</strong> - Maximum time to wait for upstream response.</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>Authentication</h4>
+    <ul class="panel-list">
+        <li><strong>Mode</strong> - <code>local</code> (built-in) or <code>remote</code> (external service)</li>
+        <li><strong>Header Name</strong> - HTTP header where API key is expected</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>Environment Variables</h4>
+    <ul class="panel-list">
+        <li><code>APIGATE_UPSTREAM_URL</code></li>
+        <li><code>APIGATE_UPSTREAM_TIMEOUT</code></li>
+        <li><code>APIGATE_AUTH_MODE</code></li>
+        <li><code>APIGATE_AUTH_HEADER</code></li>
+        <li><code>DATABASE_DSN</code></li>
+    </ul>
+</div>
+{{end}}
+
+{{define "panel-reference"}}
+<div class="panel-section">
+    <h3>Configuration Reference</h3>
+    <p>Complete list of environment variables for APIGate.</p>
+</div>
+
+<div class="panel-section">
+    <h4>Upstream Settings</h4>
+    <ul class="panel-list">
+        <li><code>APIGATE_UPSTREAM_URL</code> - Default backend URL</li>
+        <li><code>APIGATE_UPSTREAM_TIMEOUT</code> - Request timeout (e.g., "30s")</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>Authentication</h4>
+    <ul class="panel-list">
+        <li><code>APIGATE_AUTH_MODE</code> - "local" or "remote"</li>
+        <li><code>APIGATE_AUTH_HEADER</code> - Header name for API key</li>
+        <li><code>APIGATE_JWT_SECRET</code> - Secret for admin JWT tokens</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>Database</h4>
+    <ul class="panel-list">
+        <li><code>DATABASE_DSN</code> - Connection string</li>
+    </ul>
+    <p class="text-sm text-muted">Examples:</p>
+    <pre class="code-block">sqlite://data.db
+postgres://user:pass@host/db</pre>
 </div>
 {{end}}

@@ -1,0 +1,105 @@
+# In-Memory Queue Provider Module
+# Implements the queue capability using an in-process queue
+# Suitable for development, testing, and single-instance deployments
+module: queue_memory
+
+meta:
+  description: In-memory queue for development and single-server deployments
+  implements: [queue]
+  icon: inbox
+  display_name: Memory Queue
+
+schema:
+  enabled:            { type: bool, default: false, description: "Whether this queue provider is active" }
+  max_queue_size:     { type: int, default: 10000, description: "Maximum jobs per queue" }
+  default_retries:    { type: int, default: 3, description: "Default retry attempts for failed jobs" }
+  retry_delay:        { type: int, default: 60, description: "Delay in seconds between retries" }
+  job_timeout:        { type: int, default: 300, description: "Job processing timeout in seconds" }
+  persist_on_shutdown: { type: bool, default: false, description: "Persist queue state to disk on shutdown" }
+  persist_path:       { type: string, default: "./data/queue", description: "Path for queue persistence" }
+
+actions:
+  enqueue:
+    description: Add a job to a queue
+    input:
+      - { name: queue, type: string, required: true, description: "Queue name" }
+      - { name: job_type, type: string, required: true, description: "Job type for routing" }
+      - { name: payload, type: json, required: true, description: "Job data" }
+      - { name: max_retries, type: int, description: "Override default retries" }
+      - { name: priority, type: int, default: 0, description: "Higher priority processed first" }
+
+  enqueue_delayed:
+    description: Add a job to be processed after a delay
+    input:
+      - { name: queue, type: string, required: true }
+      - { name: job_type, type: string, required: true }
+      - { name: payload, type: json, required: true }
+      - { name: delay_seconds, type: int, required: true }
+
+  dequeue:
+    description: Get next job from queue (blocking)
+    input:
+      - { name: queue, type: string, required: true }
+      - { name: timeout_seconds, type: int, default: 30 }
+    output:
+      - { name: job, type: json, description: "Job with id, type, payload, retries" }
+
+  ack:
+    description: Acknowledge successful job completion
+    input:
+      - { name: queue, type: string, required: true }
+      - { name: job_id, type: string, required: true }
+
+  nack:
+    description: Return job to queue for retry
+    input:
+      - { name: queue, type: string, required: true }
+      - { name: job_id, type: string, required: true }
+      - { name: error_message, type: string, description: "Reason for failure" }
+
+  queue_length:
+    description: Get number of pending jobs
+    input:
+      - { name: queue, type: string, required: true }
+    output:
+      - { name: length, type: int }
+      - { name: processing, type: int, description: "Jobs currently being processed" }
+
+  list_queues:
+    description: List all active queues
+    output:
+      - { name: queues, type: json, description: "Array of queue names with stats" }
+
+  purge:
+    description: Clear all jobs from a queue
+    input:
+      - { name: queue, type: string, required: true }
+    confirm: true
+
+  stats:
+    description: Get queue system statistics
+    output:
+      - { name: total_queues, type: int }
+      - { name: total_jobs, type: int }
+      - { name: processing_jobs, type: int }
+      - { name: failed_jobs, type: int }
+
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /api/queue
+      endpoints:
+        - { action: stats, method: GET, path: "/stats" }
+        - { action: list_queues, method: GET, path: "/queues" }
+        - { action: queue_length, method: GET, path: "/queues/:queue/length" }
+
+  cli:
+    serve:
+      enabled: true
+      command: queue
+      commands:
+        - action: stats
+        - action: list_queues
+        - action: purge
+          confirm: "This will remove all jobs from the queue. Continue?"

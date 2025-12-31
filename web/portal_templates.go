@@ -7,12 +7,17 @@ import (
 
 	"github.com/artpar/apigate/domain/key"
 	"github.com/artpar/apigate/domain/usage"
+	"github.com/artpar/apigate/ports"
 )
 
 // Portal HTML templates - simple inline templates for the user portal.
 // These are separate from the admin templates to keep the portal lightweight.
 
-func (h *PortalHandler) renderSignupPage(email string, errors map[string]string) string {
+func (h *PortalHandler) renderSignupPage(name, email string, errors map[string]string) string {
+	return h.renderSignupPageWithPlan(name, email, nil, errors)
+}
+
+func (h *PortalHandler) renderSignupPageWithPlan(name, email string, defaultPlan *ports.Plan, errors map[string]string) string {
 	errorHTML := ""
 	if len(errors) > 0 {
 		var msgs []string
@@ -20,6 +25,33 @@ func (h *PortalHandler) renderSignupPage(email string, errors map[string]string)
 			msgs = append(msgs, msg)
 		}
 		errorHTML = fmt.Sprintf(`<div class="alert alert-error">%s</div>`, strings.Join(msgs, "<br>"))
+	}
+
+	// Plan info section
+	planInfoHTML := ""
+	if defaultPlan != nil {
+		priceDisplay := "Free"
+		if defaultPlan.PriceMonthly > 0 {
+			priceDisplay = fmt.Sprintf("$%.2f/month", float64(defaultPlan.PriceMonthly)/100)
+		}
+		quotaDisplay := "Unlimited requests"
+		if defaultPlan.RequestsPerMonth > 0 {
+			if defaultPlan.RequestsPerMonth >= 1000 {
+				quotaDisplay = fmt.Sprintf("%.0fK requests/month", float64(defaultPlan.RequestsPerMonth)/1000)
+			} else {
+				quotaDisplay = fmt.Sprintf("%d requests/month", defaultPlan.RequestsPerMonth)
+			}
+		}
+		planInfoHTML = fmt.Sprintf(`
+            <div style="background: #f0f9ff; border: 1px solid #bae6fd; padding: 12px 16px; border-radius: 6px; margin-bottom: 20px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <strong style="color: #0369a1;">%s Plan</strong>
+                        <span style="color: #0284c7; font-size: 13px; margin-left: 8px;">%s</span>
+                    </div>
+                    <span style="font-weight: 500; color: #0369a1;">%s</span>
+                </div>
+            </div>`, defaultPlan.Name, quotaDisplay, priceDisplay)
 	}
 
 	return fmt.Sprintf(`
@@ -39,10 +71,11 @@ func (h *PortalHandler) renderSignupPage(email string, errors map[string]string)
                 <p>Create your account</p>
             </div>
             %s
+            %s
             <form method="POST" action="/portal/signup" class="auth-form">
                 <div class="form-group">
                     <label for="name">Name</label>
-                    <input type="text" id="name" name="name" required autofocus>
+                    <input type="text" id="name" name="name" value="%s" required autofocus>
                 </div>
                 <div class="form-group">
                     <label for="email">Email</label>
@@ -53,6 +86,15 @@ func (h *PortalHandler) renderSignupPage(email string, errors map[string]string)
                     <input type="password" id="password" name="password" required minlength="8">
                     <small>At least 8 characters with uppercase, lowercase, and number</small>
                 </div>
+                <div class="form-group" style="margin-top: 16px;">
+                    <label style="display: flex; align-items: flex-start; gap: 8px; cursor: pointer; font-weight: normal;">
+                        <input type="checkbox" name="agree_tos" required style="margin-top: 3px;">
+                        <span style="font-size: 13px; color: #4b5563;">
+                            I agree to the <a href="/terms" target="_blank" style="color: #2563eb;">Terms of Service</a>
+                            and <a href="/privacy" target="_blank" style="color: #2563eb;">Privacy Policy</a>
+                        </span>
+                    </label>
+                </div>
                 <button type="submit" class="btn btn-primary btn-block">Create Account</button>
             </form>
             <div class="auth-footer">
@@ -61,7 +103,7 @@ func (h *PortalHandler) renderSignupPage(email string, errors map[string]string)
         </div>
     </div>
 </body>
-</html>`, h.appName, portalCSS, h.appName, errorHTML, email)
+</html>`, h.appName, portalCSS, h.appName, planInfoHTML, errorHTML, name, email)
 }
 
 func (h *PortalHandler) renderLoginPage(email, message, messageType string, errors map[string]string) string {
@@ -200,7 +242,55 @@ func (h *PortalHandler) renderResetPasswordPage(token string, errors map[string]
 </html>`, h.appName, portalCSS, h.appName, errorHTML, token)
 }
 
-func (h *PortalHandler) renderDashboardPage(user *PortalUser, keyCount int, requestCount int64) string {
+func (h *PortalHandler) renderDashboardPage(user *PortalUser, keyCount int, requestCount int64, planName string, requestsPerMonth int64, rateLimitPerMinute int) string {
+	// Calculate quota usage
+	quotaSection := ""
+	if requestsPerMonth > 0 {
+		usagePercent := float64(requestCount) / float64(requestsPerMonth) * 100
+		if usagePercent > 100 {
+			usagePercent = 100
+		}
+		progressColor := "#22c55e" // green
+		if usagePercent > 80 {
+			progressColor = "#f59e0b" // amber
+		}
+		if usagePercent > 95 {
+			progressColor = "#ef4444" // red
+		}
+		quotaSection = fmt.Sprintf(`
+        <div class="card" style="margin-bottom: 24px; padding: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <div>
+                    <strong>Monthly Quota</strong>
+                    <span style="color: #666; font-size: 14px;"> - %s Plan</span>
+                </div>
+                <div style="font-size: 14px; color: #666;">
+                    %d / %d requests (%.1f%%)
+                </div>
+            </div>
+            <div style="background: #e5e7eb; border-radius: 4px; height: 8px; overflow: hidden;">
+                <div style="background: %s; height: 100%%; width: %.1f%%; transition: width 0.3s;"></div>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-top: 12px; font-size: 13px; color: #666;">
+                <span>Rate limit: %d requests/minute</span>
+                <span>%d requests remaining</span>
+            </div>
+        </div>`, planName, requestCount, requestsPerMonth, usagePercent, progressColor, usagePercent, rateLimitPerMinute, requestsPerMonth-requestCount)
+	} else if planName != "" {
+		quotaSection = fmt.Sprintf(`
+        <div class="card" style="margin-bottom: 24px; padding: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <strong>%s Plan</strong>
+                    <span style="color: #22c55e; font-size: 14px;"> - Unlimited requests</span>
+                </div>
+                <div style="font-size: 14px; color: #666;">
+                    Rate limit: %d requests/minute
+                </div>
+            </div>
+        </div>`, planName, rateLimitPerMinute)
+	}
+
 	return fmt.Sprintf(`
 <!DOCTYPE html>
 <html lang="en">
@@ -217,6 +307,7 @@ func (h *PortalHandler) renderDashboardPage(user *PortalUser, keyCount int, requ
             <h1>Dashboard</h1>
             <p>Welcome back, %s!</p>
         </div>
+        %s
         <div class="stats-grid">
             <div class="stat-card">
                 <div class="stat-value">%d</div>
@@ -246,17 +337,21 @@ func (h *PortalHandler) renderDashboardPage(user *PortalUser, keyCount int, requ
         </div>
     </main>
 </body>
-</html>`, h.appName, portalCSS, h.renderPortalNav(user), user.Name, keyCount, requestCount)
+</html>`, h.appName, portalCSS, h.renderPortalNav(user), user.Name, quotaSection, keyCount, requestCount)
 }
 
-func (h *PortalHandler) renderAPIKeysPage(user *PortalUser, keys []key.Key) string {
+func (h *PortalHandler) renderAPIKeysPage(user *PortalUser, keys []key.Key, revokedMsg bool) string {
 	keyRows := ""
 	for _, k := range keys {
 		status := "Active"
 		statusClass := "status-active"
+		revokeBtn := ""
 		if k.RevokedAt != nil {
 			status = "Revoked"
 			statusClass = "status-revoked"
+			revokeBtn = "-" // Already revoked
+		} else {
+			revokeBtn = fmt.Sprintf(`<form method="POST" action="/portal/api-keys/%s/revoke" style="display:inline" onsubmit="return confirm('Are you sure you want to revoke this API key? This cannot be undone.')"><button type="submit" class="btn btn-sm btn-danger">Revoke</button></form>`, k.ID)
 		}
 		keyRows += fmt.Sprintf(`
             <tr>
@@ -264,18 +359,18 @@ func (h *PortalHandler) renderAPIKeysPage(user *PortalUser, keys []key.Key) stri
                 <td><code>%s****</code></td>
                 <td><span class="%s">%s</span></td>
                 <td>%s</td>
-                <td>
-                    <form method="POST" action="/portal/api-keys/%s" style="display:inline">
-                        <input type="hidden" name="_method" value="DELETE">
-                        <button type="submit" class="btn btn-sm btn-danger">Revoke</button>
-                    </form>
-                </td>
+                <td>%s</td>
             </tr>
-        `, k.Name, k.Prefix, statusClass, status, k.CreatedAt.Format("Jan 2, 2006"), k.ID)
+        `, k.Name, k.Prefix, statusClass, status, k.CreatedAt.Format("Jan 2, 2006"), revokeBtn)
 	}
 
 	if keyRows == "" {
 		keyRows = `<tr><td colspan="5" class="text-center">No API keys yet</td></tr>`
+	}
+
+	successMsg := ""
+	if revokedMsg {
+		successMsg = `<div class="alert alert-success" style="background: #d4edda; border: 1px solid #c3e6cb; color: #155724; padding: 12px 16px; border-radius: 6px; margin-bottom: 16px;">API key has been revoked successfully.</div>`
 	}
 
 	return fmt.Sprintf(`
@@ -290,6 +385,7 @@ func (h *PortalHandler) renderAPIKeysPage(user *PortalUser, keys []key.Key) stri
 <body>
     %s
     <main class="main-content">
+        %s
         <div class="page-header">
             <h1>API Keys</h1>
             <button class="btn btn-primary" onclick="document.getElementById('create-modal').style.display='block'">Create New Key</button>
@@ -333,7 +429,7 @@ func (h *PortalHandler) renderAPIKeysPage(user *PortalUser, keys []key.Key) stri
         </div>
     </div>
 </body>
-</html>`, h.appName, portalCSS, h.renderPortalNav(user), keyRows)
+</html>`, h.appName, portalCSS, h.renderPortalNav(user), successMsg, keyRows)
 }
 
 func (h *PortalHandler) renderKeyCreatedPage(w http.ResponseWriter, user *PortalUser, rawKey, keyName string) {
@@ -369,13 +465,25 @@ func (h *PortalHandler) renderKeyCreatedPage(w http.ResponseWriter, user *Portal
             <p class="key-warning">
                 ⚠️ Store this key securely. It provides access to your API and cannot be recovered if lost.
             </p>
+
+            <div style="margin-top: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e9ecef;">
+                <h3 style="margin: 0 0 12px 0; font-size: 16px;">How to Use Your API Key</h3>
+                <p style="margin: 0 0 12px 0; color: #6c757d; font-size: 14px;">Include your API key in the <code style="background: #e9ecef; padding: 2px 6px; border-radius: 4px;">X-API-Key</code> header with every request:</p>
+                <div style="background: #1e1e1e; color: #d4d4d4; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 13px; overflow-x: auto;">
+                    <div style="color: #6a9955;">## Example request with curl</div>
+                    <div>curl -H "X-API-Key: <span style="color: #ce9178;">%s</span>" \</div>
+                    <div style="padding-left: 20px;">https://your-apigate-url/your-endpoint</div>
+                </div>
+                <p style="margin: 12px 0 0 0; color: #6c757d; font-size: 13px;">Replace <code style="background: #e9ecef; padding: 2px 6px; border-radius: 4px;">your-apigate-url</code> with this server's address and <code style="background: #e9ecef; padding: 2px 6px; border-radius: 4px;">your-endpoint</code> with the API path.</p>
+            </div>
+
             <div style="margin-top: 20px;">
                 <a href="/portal/api-keys" class="btn btn-secondary">Back to API Keys</a>
             </div>
         </div>
     </main>
 </body>
-</html>`, h.appName, portalCSS, h.renderPortalNav(user), displayName, rawKey)
+</html>`, h.appName, portalCSS, h.renderPortalNav(user), displayName, rawKey, rawKey)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(html))
@@ -421,7 +529,7 @@ func (h *PortalHandler) renderUsagePage(user *PortalUser, summary usage.Summary)
 </html>`, h.appName, portalCSS, h.renderPortalNav(user), summary.RequestCount, summary.ErrorCount, float64(summary.BytesIn)/1024, float64(summary.BytesOut)/1024)
 }
 
-func (h *PortalHandler) renderAccountSettingsPage(user *PortalUser, errors map[string]string) string {
+func (h *PortalHandler) renderAccountSettingsPage(user *PortalUser, errors map[string]string, success string) string {
 	errorHTML := ""
 	if len(errors) > 0 {
 		var msgs []string
@@ -429,6 +537,10 @@ func (h *PortalHandler) renderAccountSettingsPage(user *PortalUser, errors map[s
 			msgs = append(msgs, fmt.Sprintf("%s: %s", field, msg))
 		}
 		errorHTML = fmt.Sprintf(`<div class="alert alert-error">%s</div>`, strings.Join(msgs, "<br>"))
+	}
+	successHTML := ""
+	if success != "" {
+		successHTML = fmt.Sprintf(`<div class="alert alert-success">%s</div>`, success)
 	}
 
 	return fmt.Sprintf(`
@@ -447,9 +559,14 @@ func (h *PortalHandler) renderAccountSettingsPage(user *PortalUser, errors map[s
             <h1>Account Settings</h1>
         </div>
         %s
+        %s
         <div class="card">
             <h2>Profile</h2>
             <form method="POST" action="/portal/settings">
+                <div class="form-group">
+                    <label for="name">Name</label>
+                    <input type="text" id="name" name="name" value="%s" required minlength="2" maxlength="100">
+                </div>
                 <div class="form-group">
                     <label>Email</label>
                     <input type="email" value="%s" disabled>
@@ -491,7 +608,7 @@ func (h *PortalHandler) renderAccountSettingsPage(user *PortalUser, errors map[s
         </div>
     </main>
 </body>
-</html>`, h.appName, portalCSS, h.renderPortalNav(user), errorHTML, user.Email)
+</html>`, h.appName, portalCSS, h.renderPortalNav(user), successHTML, errorHTML, user.Name, user.Email)
 }
 
 func (h *PortalHandler) renderErrorPage(message string) string {
@@ -530,6 +647,7 @@ func (h *PortalHandler) renderPortalNav(user *PortalUser) string {
             <a href="/portal/dashboard">Dashboard</a>
             <a href="/portal/api-keys">API Keys</a>
             <a href="/portal/usage">Usage</a>
+            <a href="/portal/plans">Plans</a>
             <a href="/portal/settings">Settings</a>
         </div>
         <div class="nav-user">
@@ -540,6 +658,149 @@ func (h *PortalHandler) renderPortalNav(user *PortalUser) string {
         </div>
     </nav>
 `, h.appName, user.Email)
+}
+
+func (h *PortalHandler) renderPlansPage(user *PortalUser, plans []ports.Plan, currentPlan *ports.Plan, success, errorMsg string) string {
+	alertHTML := ""
+	if success != "" {
+		alertHTML = fmt.Sprintf(`<div class="alert alert-success">%s</div>`, success)
+	}
+	if errorMsg != "" {
+		alertHTML = fmt.Sprintf(`<div class="alert alert-error">%s</div>`, errorMsg)
+	}
+
+	currentPlanID := ""
+	if currentPlan != nil {
+		currentPlanID = currentPlan.ID
+	}
+
+	planCards := ""
+	for _, p := range plans {
+		isCurrent := p.ID == currentPlanID
+
+		// Format price
+		priceDisplay := "Free"
+		if p.PriceMonthly > 0 {
+			priceDisplay = fmt.Sprintf("$%.2f/mo", float64(p.PriceMonthly)/100)
+		}
+
+		// Format quota
+		quotaDisplay := "Unlimited"
+		if p.RequestsPerMonth > 0 {
+			if p.RequestsPerMonth >= 1000000 {
+				quotaDisplay = fmt.Sprintf("%.1fM requests/mo", float64(p.RequestsPerMonth)/1000000)
+			} else if p.RequestsPerMonth >= 1000 {
+				quotaDisplay = fmt.Sprintf("%.0fK requests/mo", float64(p.RequestsPerMonth)/1000)
+			} else {
+				quotaDisplay = fmt.Sprintf("%d requests/mo", p.RequestsPerMonth)
+			}
+		}
+
+		// Format rate limit
+		rateDisplay := fmt.Sprintf("%d req/min", p.RateLimitPerMinute)
+
+		// Format overage
+		overageDisplay := "Requests blocked"
+		if p.OveragePrice > 0 {
+			overageDisplay = fmt.Sprintf("$%.4f per extra request", float64(p.OveragePrice)/100)
+		}
+
+		// Current plan badge
+		currentBadge := ""
+		if isCurrent {
+			currentBadge = `<span style="display: inline-block; background: #22c55e; color: white; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; margin-left: 8px;">Current Plan</span>`
+		}
+
+		// Action button
+		actionBtn := ""
+		if isCurrent {
+			actionBtn = `<button class="btn" disabled style="background: #e5e7eb; color: #9ca3af; cursor: not-allowed;">Current Plan</button>`
+		} else if p.PriceMonthly > 0 {
+			// Paid plan - show upgrade button
+			actionBtn = fmt.Sprintf(`
+				<form method="POST" action="/portal/plans/change" onsubmit="return confirm('Change to %s plan?')">
+					<input type="hidden" name="plan_id" value="%s">
+					<button type="submit" class="btn btn-primary">Upgrade</button>
+				</form>`, p.Name, p.ID)
+		} else {
+			// Free plan - show downgrade button
+			actionBtn = fmt.Sprintf(`
+				<form method="POST" action="/portal/plans/change" onsubmit="return confirm('Change to %s plan? You will lose access to higher limits.')">
+					<input type="hidden" name="plan_id" value="%s">
+					<button type="submit" class="btn btn-secondary">Switch Plan</button>
+				</form>`, p.Name, p.ID)
+		}
+
+		// Card highlight for current plan
+		cardStyle := ""
+		if isCurrent {
+			cardStyle = "border: 2px solid #22c55e;"
+		}
+
+		planCards += fmt.Sprintf(`
+			<div class="plan-card" style="background: white; padding: 24px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); %s">
+				<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
+					<div>
+						<h3 style="margin: 0; font-size: 20px;">%s%s</h3>
+						<p style="margin: 4px 0 0 0; color: #6b7280; font-size: 14px;">%s</p>
+					</div>
+					<div style="text-align: right;">
+						<div style="font-size: 28px; font-weight: bold; color: #111827;">%s</div>
+					</div>
+				</div>
+				<div style="border-top: 1px solid #e5e7eb; padding-top: 16px; margin-bottom: 16px;">
+					<div style="display: grid; gap: 8px;">
+						<div style="display: flex; align-items: center; gap: 8px;">
+							<span style="color: #22c55e;">&#10003;</span>
+							<span>%s</span>
+						</div>
+						<div style="display: flex; align-items: center; gap: 8px;">
+							<span style="color: #22c55e;">&#10003;</span>
+							<span>%s rate limit</span>
+						</div>
+						<div style="display: flex; align-items: center; gap: 8px;">
+							<span style="color: #6b7280;">&#8226;</span>
+							<span style="color: #6b7280; font-size: 13px;">Over quota: %s</span>
+						</div>
+					</div>
+				</div>
+				<div>%s</div>
+			</div>
+		`, cardStyle, p.Name, currentBadge, p.Description, priceDisplay, quotaDisplay, rateDisplay, overageDisplay, actionBtn)
+	}
+
+	if planCards == "" {
+		planCards = `<div class="card" style="text-align: center; padding: 40px;"><p style="color: #6b7280;">No plans available at this time.</p></div>`
+	}
+
+	return fmt.Sprintf(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plans - %s</title>
+    <style>%s</style>
+</head>
+<body>
+    %s
+    <main class="main-content">
+        <div class="page-header">
+            <h1>Plans & Pricing</h1>
+            <p>Choose the plan that fits your needs</p>
+        </div>
+        %s
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px;">
+            %s
+        </div>
+        <div style="margin-top: 24px; padding: 16px; background: #f3f4f6; border-radius: 8px;">
+            <p style="margin: 0; color: #6b7280; font-size: 14px;">
+                Need a custom plan with higher limits? <a href="mailto:support@example.com" style="color: #3b82f6;">Contact us</a>
+            </p>
+        </div>
+    </main>
+</body>
+</html>`, h.appName, portalCSS, h.renderPortalNav(user), alertHTML, planCards)
 }
 
 // Portal CSS styles

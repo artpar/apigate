@@ -14,7 +14,7 @@ type Action struct {
 
 	// Output defines fields returned by this action.
 	// If nil, returns the full record.
-	Output []string `yaml:"output,omitempty"`
+	Output []ActionOutput `yaml:"output,omitempty"`
 
 	// Auth defines who can execute this action.
 	// Values: "public", "user", "admin", "owner", or combinations like "admin|owner"
@@ -28,6 +28,21 @@ type Action struct {
 	After  []string `yaml:"after,omitempty"`
 
 	// Description for documentation and help text.
+	Description string `yaml:"description,omitempty"`
+
+	// Internal indicates this action is for internal use only.
+	Internal bool `yaml:"internal,omitempty"`
+}
+
+// ActionOutput defines an output field for an action.
+type ActionOutput struct {
+	// Name of the output field.
+	Name string `yaml:"name,omitempty"`
+
+	// Type of the output field.
+	Type string `yaml:"type,omitempty"`
+
+	// Description for documentation.
 	Description string `yaml:"description,omitempty"`
 }
 
@@ -43,17 +58,23 @@ type ActionInput struct {
 	// Useful for special handling like "password" → hash before storing.
 	Type string `yaml:"type,omitempty"`
 
+	// To specifies the target module for ref type inputs.
+	To string `yaml:"to,omitempty"`
+
 	// Required indicates this input must be provided.
 	Required bool `yaml:"required,omitempty"`
 
 	// Default value if not provided.
-	Default string `yaml:"default,omitempty"`
+	Default any `yaml:"default,omitempty"`
 
 	// Prompt indicates CLI should prompt for this value if not provided.
 	Prompt bool `yaml:"prompt,omitempty"`
 
 	// PromptText is the prompt message (defaults to field name).
 	PromptText string `yaml:"prompt_text,omitempty"`
+
+	// Description for documentation.
+	Description string `yaml:"description,omitempty"`
 }
 
 // ActionType represents the type of action.

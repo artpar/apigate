@@ -15,10 +15,13 @@
 
     {{if not .ChecklistComplete}}
     <!-- Getting Started Checklist -->
-    <div class="card mb-4 checklist-card">
-        <div class="card-header">
-            <span class="card-title">Getting Started</span>
-            <span class="text-muted text-sm">Complete these steps to set up your API gateway</span>
+    <div class="card mb-4 checklist-card" style="border: 2px solid #10b981;">
+        <div class="card-header" style="background: #ecfdf5;">
+            <span class="card-title" style="color: #059669;">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline; vertical-align: middle; margin-right: 6px;"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                Getting Started
+            </span>
+            <span class="badge" style="background: #d1fae5; color: #059669;">{{.ChecklistProgress}} of {{.ChecklistTotal}} complete</span>
         </div>
         <div class="card-body">
             <div class="checklist">
@@ -36,8 +39,13 @@
                     <div class="checklist-content">
                         <div class="checklist-title">{{.Title}}</div>
                         <div class="checklist-desc">{{.Description}}</div>
+                        {{if and .Done .Summary}}
+                        <div class="checklist-summary text-muted text-sm">{{.Summary}}</div>
+                        {{end}}
                     </div>
-                    {{if not .Done}}
+                    {{if .Done}}
+                    <a href="{{.Link}}" class="link text-sm">View</a>
+                    {{else}}
                     <a href="{{.Link}}" class="btn btn-sm btn-primary">{{.LinkText}}</a>
                     {{end}}
                 </div>
@@ -47,8 +55,70 @@
     </div>
     {{end}}
 
+    {{if .PortalEnabled}}
+    <!-- Customer Portal Info -->
+    <div class="card mb-4" style="border: 2px solid #8b5cf6; background: #f5f3ff;">
+        <div class="card-header" style="background: #ede9fe;">
+            <span class="card-title" style="color: #7c3aed;">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline; vertical-align: middle; margin-right: 6px;"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                Customer Portal
+            </span>
+            <span class="badge" style="background: #ddd6fe; color: #7c3aed;">Enabled</span>
+        </div>
+        <div class="card-body">
+            <p class="text-sm mb-2">Share this link with your customers so they can self-register and manage their API keys:</p>
+            <div class="code-block" style="background: #1e293b; color: #e2e8f0; padding: 12px 16px; border-radius: 6px; font-family: monospace; font-size: 13px; overflow-x: auto; position: relative;">
+                <code id="portal-url">{{.PortalURL}}</code>
+                <button onclick="copyPortalURL()" class="btn btn-sm" style="position: absolute; right: 8px; top: 8px; background: #334155; color: white; border: none; padding: 4px 8px; font-size: 11px;">Copy</button>
+            </div>
+            <p class="text-muted text-sm mt-2">Customers can sign up, create API keys, and view their usage. <a href="/settings" class="link">Configure portal settings</a></p>
+        </div>
+    </div>
+    <script>
+    function copyPortalURL() {
+        const url = document.getElementById('portal-url').textContent;
+        navigator.clipboard.writeText(url).then(() => {
+            const btn = event.target;
+            btn.textContent = 'Copied!';
+            setTimeout(() => btn.textContent = 'Copy', 2000);
+        });
+    }
+    </script>
+    {{end}}
+
+    {{if and .TestCommand (not .HasAPIActivity)}}
+    <!-- Try Your API Section -->
+    <div class="card mb-4" style="border: 2px solid #3b82f6; background: #eff6ff;">
+        <div class="card-header">
+            <span class="card-title" style="color: #1d4ed8;">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline; vertical-align: middle; margin-right: 6px;"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                Try Your API
+            </span>
+            <span class="text-muted text-sm">Run this command to test your gateway</span>
+        </div>
+        <div class="card-body">
+            <p class="text-sm mb-2">Copy and run this command in your terminal:</p>
+            <div class="code-block" style="background: #1e293b; color: #e2e8f0; padding: 12px 16px; border-radius: 6px; font-family: monospace; font-size: 13px; overflow-x: auto; position: relative;">
+                <code id="test-command">{{.TestCommand}}</code>
+                <button onclick="copyTestCommand()" class="btn btn-sm" style="position: absolute; right: 8px; top: 8px; background: #334155; color: white; border: none; padding: 4px 8px; font-size: 11px;">Copy</button>
+            </div>
+            <p class="text-muted text-sm mt-2">After running, your request will appear in the activity log below.</p>
+        </div>
+    </div>
+    <script>
+    function copyTestCommand() {
+        const cmd = document.getElementById('test-command').textContent;
+        navigator.clipboard.writeText(cmd).then(() => {
+            const btn = event.target;
+            btn.textContent = 'Copied!';
+            setTimeout(() => btn.textContent = 'Copy', 2000);
+        });
+    }
+    </script>
+    {{end}}
+
     <!-- Stats -->
-    <div class="grid grid-3 mb-4" hx-get="/partials/stats" hx-trigger="load, every 30s" hx-swap="innerHTML">
+    <div class="grid grid-4 mb-4" hx-get="/partials/stats" hx-trigger="load, every 30s" hx-swap="innerHTML">
         {{template "stats" .Stats}}
     </div>
 
@@ -115,6 +185,15 @@
         <div class="stat-value">{{.RequestsToday}}</div>
     </div>
 </div>
+<div class="card">
+    <div class="stat">
+        <div class="stat-label">
+            Monthly Revenue
+            <span class="info-tooltip" data-tip="Monthly Recurring Revenue (MRR) based on active users and their plan prices.">?</span>
+        </div>
+        <div class="stat-value">${{printf "%.2f" .MRR}}</div>
+    </div>
+</div>
 {{end}}
 
 {{define "panel-docs"}}
@@ -144,5 +223,34 @@
 <div class="panel-section">
     <h4>Need Help?</h4>
     <p>Press <kbd>?</kbd> anytime to toggle this help panel, or <kbd>Esc</kbd> to close it.</p>
+</div>
+{{end}}
+
+{{define "panel-reference"}}
+<div class="panel-section">
+    <h3>API Reference</h3>
+    <p>Make authenticated requests to your API gateway.</p>
+</div>
+
+<div class="panel-section">
+    <h4>Authentication</h4>
+    <p>Include your API key in the request header:</p>
+    <pre class="code-block">X-API-Key: your_api_key_here</pre>
+</div>
+
+<div class="panel-section">
+    <h4>Example Request</h4>
+    <pre class="code-block">curl -H "X-API-Key: key_..." \
+  http://localhost:8080/your-endpoint</pre>
+</div>
+
+<div class="panel-section">
+    <h4>Response Codes</h4>
+    <ul class="panel-list">
+        <li><code>200</code> - Success</li>
+        <li><code>401</code> - Invalid or missing API key</li>
+        <li><code>429</code> - Rate limit exceeded</li>
+        <li><code>502</code> - Upstream error</li>
+    </ul>
 </div>
 {{end}}

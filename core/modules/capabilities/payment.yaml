@@ -1,0 +1,99 @@
+# Payment Capability Interface
+# Any module that implements this capability must provide these actions
+capability: payment
+
+description: |
+  Payment capability handles subscription billing, usage-based billing,
+  and customer management with external payment providers.
+
+# Required schema fields that implementing modules must store
+schema:
+  # Connection settings (implementing module defines specific fields)
+  enabled:        { type: bool, default: false, description: "Whether this payment provider is active" }
+
+# Actions that implementing modules MUST provide
+actions:
+  # Customer Management
+  create_customer:
+    description: Create a customer record in the payment provider
+    input:
+      - { name: user_id, type: ref, to: user, required: true }
+      - { name: email, type: email, required: true }
+      - { name: name, type: string }
+    output:
+      - { name: external_customer_id, type: string }
+
+  delete_customer:
+    description: Delete a customer record from the payment provider
+    input:
+      - { name: external_customer_id, type: string, required: true }
+
+  # Price/Product Management
+  create_price:
+    description: Create a price/product in the payment provider for a plan
+    input:
+      - { name: plan_id, type: ref, to: plan, required: true }
+      - { name: name, type: string, required: true }
+      - { name: amount_cents, type: int, required: true }
+      - { name: interval, type: enum, values: [month, year], default: month }
+    output:
+      - { name: external_price_id, type: string }
+
+  update_price:
+    description: Update price metadata (some providers don't allow amount changes)
+    input:
+      - { name: external_price_id, type: string, required: true }
+      - { name: active, type: bool }
+
+  # Subscription Management
+  create_subscription:
+    description: Create a subscription for a customer
+    input:
+      - { name: external_customer_id, type: string, required: true }
+      - { name: external_price_id, type: string, required: true }
+    output:
+      - { name: external_subscription_id, type: string }
+
+  cancel_subscription:
+    description: Cancel an active subscription
+    input:
+      - { name: external_subscription_id, type: string, required: true }
+      - { name: at_period_end, type: bool, default: true }
+
+  # Usage Billing (for overage)
+  report_usage:
+    description: Report usage for metered billing
+    input:
+      - { name: external_subscription_id, type: string, required: true }
+      - { name: quantity, type: int, required: true }
+      - { name: timestamp, type: datetime }
+
+  # Webhook Processing
+  handle_webhook:
+    description: Process incoming webhook from payment provider
+    input:
+      - { name: payload, type: bytes, required: true }
+      - { name: signature, type: string }
+    output:
+      - { name: event_type, type: string }
+      - { name: event_data, type: json }
+
+  # Connection Testing
+  test_connection:
+    description: Verify credentials are valid
+    output:
+      - { name: valid, type: bool }
+      - { name: error, type: string }
+
+# Events this capability emits
+events:
+  - payment.subscription.created
+  - payment.subscription.updated
+  - payment.subscription.cancelled
+  - payment.invoice.paid
+  - payment.invoice.failed
+  - payment.customer.created
+
+meta:
+  icon: credit-card
+  display_name: Payment Provider

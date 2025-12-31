@@ -1,0 +1,85 @@
+# Cache Capability Interface
+# Any module that implements this capability must provide these actions
+capability: cache
+
+description: |
+  Cache capability provides key-value storage with TTL support.
+  Used for rate limiting, session storage, and general caching.
+
+schema:
+  enabled: { type: bool, default: false, description: "Whether this cache provider is active" }
+
+# Actions that implementing modules MUST provide
+actions:
+  get:
+    description: Get a value by key
+    input:
+      - { name: key, type: string, required: true }
+    output:
+      - { name: value, type: bytes }
+      - { name: found, type: bool }
+
+  set:
+    description: Set a value with optional TTL
+    input:
+      - { name: key, type: string, required: true }
+      - { name: value, type: bytes, required: true }
+      - { name: ttl_seconds, type: int, default: 0, description: "0 = no expiry" }
+
+  delete:
+    description: Delete a key
+    input:
+      - { name: key, type: string, required: true }
+
+  exists:
+    description: Check if key exists
+    input:
+      - { name: key, type: string, required: true }
+    output:
+      - { name: exists, type: bool }
+
+  # Atomic operations for rate limiting
+  increment:
+    description: Atomically increment a counter
+    input:
+      - { name: key, type: string, required: true }
+      - { name: delta, type: int, default: 1 }
+      - { name: ttl_seconds, type: int, default: 0 }
+    output:
+      - { name: new_value, type: int }
+
+  # Batch operations
+  get_multi:
+    description: Get multiple values
+    input:
+      - { name: keys, type: list, of: string, required: true }
+    output:
+      - { name: values, type: map, of: bytes }
+
+  set_multi:
+    description: Set multiple values
+    input:
+      - { name: entries, type: map, of: bytes, required: true }
+      - { name: ttl_seconds, type: int, default: 0 }
+
+  # Maintenance
+  flush:
+    description: Clear all keys (use with caution)
+    confirm: true
+
+  stats:
+    description: Get cache statistics
+    output:
+      - { name: keys_count, type: int }
+      - { name: memory_bytes, type: int }
+      - { name: hit_rate, type: float }
+
+  test_connection:
+    description: Verify cache is accessible
+    output:
+      - { name: valid, type: bool }
+      - { name: error, type: string }
+
+meta:
+  icon: database
+  display_name: Cache Provider

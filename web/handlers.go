@@ -15,8 +15,10 @@ import (
 	"strings"
 	"time"
 
+	domainAuth "github.com/artpar/apigate/domain/auth"
 	"github.com/artpar/apigate/domain/key"
 	"github.com/artpar/apigate/domain/route"
+	"github.com/artpar/apigate/domain/settings"
 	"github.com/artpar/apigate/ports"
 	"github.com/go-chi/chi/v5"
 )
@@ -66,10 +68,12 @@ func (h *Handler) LoginPage(w http.ResponseWriter, r *http.Request) {
 
 	data := struct {
 		PageData
-		Error string
-		Email string
+		Error   string
+		Success string
+		Email   string
 	}{
 		PageData: h.newPageData(r.Context(), "Login"),
+		Success:  r.URL.Query().Get("success"),
 	}
 
 	h.render(w, "login", data)
@@ -119,8 +123,9 @@ func (h *Handler) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) renderLoginError(w http.ResponseWriter, r *http.Request, errMsg, email string) {
 	data := struct {
 		PageData
-		Error string
-		Email string
+		Error   string
+		Success string
+		Email   string
 	}{
 		PageData: h.newPageData(r.Context(), "Login"),
 		Error:    errMsg,
@@ -150,6 +155,261 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login", http.StatusFound)
 }
 
+// ForgotPasswordPage renders the forgot password form.
+func (h *Handler) ForgotPasswordPage(w http.ResponseWriter, r *http.Request) {
+	data := struct {
+		PageData
+		Error   string
+		Success string
+		Email   string
+	}{
+		PageData: h.newPageData(r.Context(), "Forgot Password"),
+	}
+	h.render(w, "forgot_password", data)
+}
+
+// ForgotPasswordSubmit handles forgot password form submission.
+func (h *Handler) ForgotPasswordSubmit(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	email := strings.TrimSpace(r.FormValue("email"))
+
+	// Validate email format
+	valid, errMsg := domainAuth.ValidatePasswordResetRequest(domainAuth.PasswordResetRequest{Email: email})
+	if !valid {
+		data := struct {
+			PageData
+			Error   string
+			Success string
+			Email   string
+		}{
+			PageData: h.newPageData(ctx, "Forgot Password"),
+			Error:    errMsg,
+			Email:    email,
+		}
+		h.render(w, "forgot_password", data)
+		return
+	}
+
+	// Look up user by email (don't reveal if user exists)
+	user, err := h.users.GetByEmail(ctx, email)
+	if err == nil && user.ID != "" && h.authTokens != nil && h.emailSender != nil {
+		// Generate reset token (1 hour expiry)
+		tokenResult := domainAuth.GenerateToken(user.ID, user.Email, domainAuth.TokenTypePasswordReset, 1*time.Hour)
+		tokenWithHash := tokenResult.Token.WithHash(domainAuth.HashToken(tokenResult.RawToken))
+
+		if err := h.authTokens.Create(ctx, tokenWithHash); err != nil {
+			h.logger.Error().Err(err).Msg("failed to store reset token")
+		} else if err := h.emailSender.SendPasswordReset(ctx, user.Email, user.Name, tokenResult.RawToken); err != nil {
+			h.logger.Error().Err(err).Msg("failed to send password reset email")
+		}
+	}
+
+	// Always show success message (don't reveal if user exists)
+	data := struct {
+		PageData
+		Error   string
+		Success string
+		Email   string
+	}{
+		PageData: h.newPageData(ctx, "Forgot Password"),
+		Success:  "If an account exists with that email, you will receive password reset instructions.",
+	}
+	h.render(w, "forgot_password", data)
+}
+
+// ResetPasswordPage renders the password reset form.
+func (h *Handler) ResetPasswordPage(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		http.Redirect(w, r, "/forgot-password", http.StatusFound)
+		return
+	}
+
+	data := struct {
+		PageData
+		Token  string
+		Errors map[string]string
+	}{
+		PageData: h.newPageData(r.Context(), "Reset Password"),
+		Token:    token,
+		Errors:   make(map[string]string),
+	}
+	h.render(w, "reset_password", data)
+}
+
+// ResetPasswordSubmit handles password reset form submission.
+func (h *Handler) ResetPasswordSubmit(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	rawToken := r.FormValue("token")
+	newPassword := r.FormValue("password")
+	confirmPassword := r.FormValue("confirm_password")
+
+	// Validate input
+	errors := make(map[string]string)
+	if rawToken == "" {
+		errors["token"] = "Reset token is required"
+	}
+	if newPassword == "" {
+		errors["password"] = "Password is required"
+	} else if len(newPassword) < 8 {
+		errors["password"] = "Password must be at least 8 characters"
+	}
+	if newPassword != confirmPassword {
+		errors["confirm_password"] = "Passwords do not match"
+	}
+
+	if len(errors) > 0 {
+		data := struct {
+			PageData
+			Token  string
+			Errors map[string]string
+		}{
+			PageData: h.newPageData(ctx, "Reset Password"),
+			Token:    rawToken,
+			Errors:   errors,
+		}
+		h.render(w, "reset_password", data)
+		return
+	}
+
+	// Verify token
+	if h.authTokens == nil {
+		errors["token"] = "Password reset is not configured"
+		data := struct {
+			PageData
+			Token  string
+			Errors map[string]string
+		}{
+			PageData: h.newPageData(ctx, "Reset Password"),
+			Token:    rawToken,
+			Errors:   errors,
+		}
+		h.render(w, "reset_password", data)
+		return
+	}
+
+	hash := domainAuth.HashToken(rawToken)
+	token, err := h.authTokens.GetByHash(ctx, hash)
+	if err != nil {
+		errors["token"] = "Invalid or expired reset link"
+		data := struct {
+			PageData
+			Token  string
+			Errors map[string]string
+		}{
+			PageData: h.newPageData(ctx, "Reset Password"),
+			Token:    rawToken,
+			Errors:   errors,
+		}
+		h.render(w, "reset_password", data)
+		return
+	}
+
+	if token.Type != domainAuth.TokenTypePasswordReset {
+		errors["token"] = "Invalid token type"
+	} else if token.ExpiresAt.Before(time.Now().UTC()) {
+		errors["token"] = "This reset link has expired. Please request a new one."
+	} else if token.UsedAt != nil {
+		errors["token"] = "This reset link has already been used"
+	}
+
+	if len(errors) > 0 {
+		data := struct {
+			PageData
+			Token  string
+			Errors map[string]string
+		}{
+			PageData: h.newPageData(ctx, "Reset Password"),
+			Token:    rawToken,
+			Errors:   errors,
+		}
+		h.render(w, "reset_password", data)
+		return
+	}
+
+	// Get user and update password
+	user, err := h.users.Get(ctx, token.UserID)
+	if err != nil {
+		errors["token"] = "User not found"
+		data := struct {
+			PageData
+			Token  string
+			Errors map[string]string
+		}{
+			PageData: h.newPageData(ctx, "Reset Password"),
+			Token:    rawToken,
+			Errors:   errors,
+		}
+		h.render(w, "reset_password", data)
+		return
+	}
+
+	// Hash and update password
+	hashedPassword, err := h.hasher.Hash(newPassword)
+	if err != nil {
+		errors["password"] = "Failed to update password"
+		data := struct {
+			PageData
+			Token  string
+			Errors map[string]string
+		}{
+			PageData: h.newPageData(ctx, "Reset Password"),
+			Token:    rawToken,
+			Errors:   errors,
+		}
+		h.render(w, "reset_password", data)
+		return
+	}
+
+	user.PasswordHash = hashedPassword
+	if err := h.users.Update(ctx, user); err != nil {
+		errors["password"] = "Failed to update password"
+		data := struct {
+			PageData
+			Token  string
+			Errors map[string]string
+		}{
+			PageData: h.newPageData(ctx, "Reset Password"),
+			Token:    rawToken,
+			Errors:   errors,
+		}
+		h.render(w, "reset_password", data)
+		return
+	}
+
+	// Mark token as used
+	if err := h.authTokens.MarkUsed(ctx, token.ID, time.Now().UTC()); err != nil {
+		h.logger.Error().Err(err).Msg("failed to mark token as used")
+	}
+
+	// Redirect to login with success message
+	http.Redirect(w, r, "/login?success=Password+reset+successfully.+Please+login+with+your+new+password.", http.StatusSeeOther)
+}
+
+// TermsPage renders the terms of service page.
+func (h *Handler) TermsPage(w http.ResponseWriter, r *http.Request) {
+	data := struct {
+		PageData
+		LastUpdated string
+	}{
+		PageData:    h.newPageData(r.Context(), "Terms of Service"),
+		LastUpdated: time.Now().Format("January 2, 2006"),
+	}
+	h.render(w, "terms", data)
+}
+
+// PrivacyPage renders the privacy policy page.
+func (h *Handler) PrivacyPage(w http.ResponseWriter, r *http.Request) {
+	data := struct {
+		PageData
+		LastUpdated string
+	}{
+		PageData:    h.newPageData(r.Context(), "Privacy Policy"),
+		LastUpdated: time.Now().Format("January 2, 2006"),
+	}
+	h.render(w, "privacy", data)
+}
+
 // ChecklistItem represents a single onboarding checklist item.
 type ChecklistItem struct {
 	Title       string
@@ -157,6 +417,7 @@ type ChecklistItem struct {
 	Done        bool
 	Link        string
 	LinkText    string
+	Summary     string // Shows what was configured when Done is true
 }
 
 // Dashboard renders the main dashboard.
@@ -180,23 +441,119 @@ func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Get first active API key for test command
+	var firstKeyValue string
+	for _, u := range users {
+		keys, _ := h.keys.ListByUser(ctx, u.ID)
+		for _, k := range keys {
+			if k.RevokedAt == nil {
+				firstKeyValue = k.Prefix + "..." // We don't have the full key, show prefix
+				break
+			}
+		}
+		if firstKeyValue != "" {
+			break
+		}
+	}
+
+	// Build test command if we have an active key
+	testCommand := ""
+	if activeKeys > 0 && !hasAPIActivity {
+		// Determine the gateway URL
+		gatewayURL := "http://localhost:8080"
+		if h.appSettings.UpstreamURL != "" {
+			gatewayURL = "http://localhost:8080"
+		}
+		testCommand = fmt.Sprintf("curl -H \"X-API-Key: YOUR_API_KEY\" %s/", gatewayURL)
+	}
+
+	// Load portal settings
+	portalEnabled := false
+	portalURL := ""
+	if h.settings != nil {
+		allSettings, err := h.settings.GetAll(ctx)
+		if err == nil {
+			portalEnabled = allSettings.GetBool(settings.KeyPortalEnabled)
+			baseURL := allSettings.Get(settings.KeyPortalBaseURL)
+			if baseURL != "" {
+				portalURL = baseURL + "/portal/"
+			} else {
+				// Auto-detect from request
+				scheme := "http"
+				if r.TLS != nil {
+					scheme = "https"
+				}
+				portalURL = fmt.Sprintf("%s://%s/portal/", scheme, r.Host)
+			}
+		}
+	}
+
+	// Calculate MRR
+	plans, _ := h.plans.List(ctx)
+	planPrices := make(map[string]int64)
+	for _, p := range plans {
+		planPrices[p.ID] = p.PriceMonthly
+	}
+	var mrr int64 // in cents
+	for _, u := range users {
+		if u.Status == "active" {
+			if price, ok := planPrices[u.PlanID]; ok {
+				mrr += price
+			}
+		}
+	}
+
 	data := struct {
 		PageData
 		Stats struct {
 			TotalUsers    int
 			ActiveKeys    int
 			RequestsToday int64
+			MRR           float64
 		}
 		Checklist         []ChecklistItem
 		ChecklistComplete bool
+		ChecklistProgress int
+		ChecklistTotal    int
+		TestCommand       string
+		HasAPIActivity    bool
+		PortalEnabled     bool
+		PortalURL         string
 	}{
 		PageData: h.newPageData(ctx, "Dashboard"),
 	}
 	data.CurrentPath = "/dashboard"
 	data.Stats.TotalUsers = len(users)
 	data.Stats.ActiveKeys = activeKeys
+	data.Stats.MRR = float64(mrr) / 100
+	data.TestCommand = testCommand
+	data.HasAPIActivity = hasAPIActivity
+	data.PortalEnabled = portalEnabled
+	data.PortalURL = portalURL
 
-	// Build checklist
+	// Build checklist with summaries for completed items
+
+	// Get upstream summary
+	upstreamSummary := ""
+	if len(upstreams) > 0 {
+		upstreamSummary = upstreams[0].Name
+		if len(upstreams) > 1 {
+			upstreamSummary = fmt.Sprintf("%s (+%d more)", upstreams[0].Name, len(upstreams)-1)
+		}
+	}
+
+	// Get route summary
+	routeSummary := ""
+	if len(routes) > 0 {
+		routeSummary = fmt.Sprintf("%d route(s) configured", len(routes))
+	}
+
+	// Get key summary
+	keySummary := ""
+	if activeKeys > 0 {
+		keySummary = fmt.Sprintf("%d active key(s)", activeKeys)
+	}
+
 	data.Checklist = []ChecklistItem{
 		{
 			Title:       "Create admin account",
@@ -204,6 +561,7 @@ func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 			Done:        true, // Always true if logged in
 			Link:        "/users",
 			LinkText:    "Manage users",
+			Summary:     fmt.Sprintf("%d user(s)", len(users)),
 		},
 		{
 			Title:       "Add an upstream API",
@@ -211,6 +569,7 @@ func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 			Done:        len(upstreams) > 0,
 			Link:        "/upstreams",
 			LinkText:    "Add upstream",
+			Summary:     upstreamSummary,
 		},
 		{
 			Title:       "Create a route",
@@ -218,6 +577,7 @@ func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 			Done:        len(routes) > 0,
 			Link:        "/routes",
 			LinkText:    "Create route",
+			Summary:     routeSummary,
 		},
 		{
 			Title:       "Generate an API key",
@@ -225,22 +585,26 @@ func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 			Done:        activeKeys > 0,
 			Link:        "/keys",
 			LinkText:    "Create key",
+			Summary:     keySummary,
 		},
 		{
 			Title:       "Make your first API call",
 			Description: "Test your gateway with a real request",
 			Done:        hasAPIActivity,
-			Link:        "/usage",
-			LinkText:    "View usage",
+			Link:        "/keys",
+			LinkText:    "Try it",
+			Summary:     "",
 		},
 	}
 
-	// Check if all items are complete
+	// Check if all items are complete and count progress
 	data.ChecklistComplete = true
+	data.ChecklistTotal = len(data.Checklist)
 	for _, item := range data.Checklist {
-		if !item.Done {
+		if item.Done {
+			data.ChecklistProgress++
+		} else {
 			data.ChecklistComplete = false
-			break
 		}
 	}
 
@@ -868,6 +1232,7 @@ func (h *Handler) UsagePage(w http.ResponseWriter, r *http.Request) {
 		UsageData []struct {
 			UserEmail    string
 			KeyID        string
+			KeyPrefix    string
 			RequestCount int64
 			LastUsed     time.Time
 		}
@@ -942,11 +1307,13 @@ func (h *Handler) UsagePage(w http.ResponseWriter, r *http.Request) {
 				data.UsageData = append(data.UsageData, struct {
 					UserEmail    string
 					KeyID        string
+					KeyPrefix    string
 					RequestCount int64
 					LastUsed     time.Time
 				}{
 					UserEmail:    u.Email,
 					KeyID:        k.ID,
+					KeyPrefix:    k.Prefix,
 					RequestCount: keyRequests,
 					LastUsed:     lastUsed,
 				})
@@ -964,18 +1331,50 @@ func (h *Handler) UsagePage(w http.ResponseWriter, r *http.Request) {
 
 // SettingsPage shows current settings.
 func (h *Handler) SettingsPage(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Load settings from database
+	allSettings, err := h.settings.GetAll(ctx)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to load settings")
+	}
+
 	data := struct {
 		PageData
 		Settings struct {
-			UpstreamURL       string
-			UpstreamTimeout   string
-			AuthMode          string
-			AuthHeader        string
-			RateLimitStrategy string
-			DatabaseDSN       string
+			UpstreamURL              string
+			UpstreamTimeout          string
+			AuthMode                 string
+			AuthHeader               string
+			RateLimitStrategy        string
+			DatabaseDSN              string
+			PortalEnabled            bool
+			PortalAppName            string
+			PortalBaseURL            string
+			RequireEmailVerification bool
+			// Email provider
+			EmailProvider    string
+			EmailFromAddress string
+			EmailFromName    string
+			SMTPHost         string
+			SMTPPort         string
+			SMTPUsername     string
+			SMTPPassword     string
+			SMTPUseTLS       bool
+			SendGridAPIKey   string
+			// Payment providers
+			StripeSecretKey      string
+			StripeWebhookSecret  string
+			PaddleVendorID       string
+			PaddleAPIKey         string
+			PaddleWebhookSecret  string
+			LemonAPIKey          string
+			LemonWebhookSecret   string
 		}
+		Success string
+		Error   string
 	}{
-		PageData: h.newPageData(r.Context(), "Settings"),
+		PageData: h.newPageData(ctx, "Settings"),
 	}
 	data.CurrentPath = "/settings"
 	data.Settings.UpstreamURL = h.appSettings.UpstreamURL
@@ -984,7 +1383,136 @@ func (h *Handler) SettingsPage(w http.ResponseWriter, r *http.Request) {
 	data.Settings.AuthHeader = h.appSettings.AuthHeader
 	data.Settings.DatabaseDSN = h.appSettings.DatabaseDSN
 
+	// Portal settings from database
+	data.Settings.PortalEnabled = allSettings.GetBool(settings.KeyPortalEnabled)
+	data.Settings.PortalAppName = allSettings.GetOrDefault(settings.KeyPortalAppName, "APIGate")
+	data.Settings.PortalBaseURL = allSettings.Get(settings.KeyPortalBaseURL)
+	data.Settings.RequireEmailVerification = allSettings.GetBool(settings.KeyAuthRequireEmailVerification)
+
+	// Email provider settings
+	data.Settings.EmailProvider = allSettings.GetOrDefault(settings.KeyEmailProvider, "none")
+	data.Settings.EmailFromAddress = allSettings.Get(settings.KeyEmailFromAddress)
+	data.Settings.EmailFromName = allSettings.Get(settings.KeyEmailFromName)
+	data.Settings.SMTPHost = allSettings.Get(settings.KeyEmailSMTPHost)
+	data.Settings.SMTPPort = allSettings.Get(settings.KeyEmailSMTPPort)
+	data.Settings.SMTPUsername = allSettings.Get(settings.KeyEmailSMTPUsername)
+	data.Settings.SMTPPassword = maskSecret(allSettings.Get(settings.KeyEmailSMTPPassword))
+	data.Settings.SMTPUseTLS = allSettings.GetBool(settings.KeyEmailSMTPUseTLS)
+	data.Settings.SendGridAPIKey = maskSecret(allSettings.Get(settings.KeyEmailSendGridKey))
+
+	// Payment provider settings (mask sensitive values for display)
+	data.Settings.StripeSecretKey = maskSecret(allSettings.Get(settings.KeyPaymentStripeSecretKey))
+	data.Settings.StripeWebhookSecret = maskSecret(allSettings.Get(settings.KeyPaymentStripeWebhookSecret))
+	data.Settings.PaddleVendorID = allSettings.Get(settings.KeyPaymentPaddleVendorID)
+	data.Settings.PaddleAPIKey = maskSecret(allSettings.Get(settings.KeyPaymentPaddleAPIKey))
+	data.Settings.PaddleWebhookSecret = maskSecret(allSettings.Get(settings.KeyPaymentPaddleWebhookSecret))
+	data.Settings.LemonAPIKey = maskSecret(allSettings.Get(settings.KeyPaymentLemonAPIKey))
+	data.Settings.LemonWebhookSecret = maskSecret(allSettings.Get(settings.KeyPaymentLemonWebhookSecret))
+
+	// Check for success/error messages in query params
+	data.Success = r.URL.Query().Get("success")
+	data.Error = r.URL.Query().Get("error")
+
 	h.render(w, "settings", data)
+}
+
+// maskSecret masks a secret value for display, showing only first/last 4 chars.
+func maskSecret(s string) string {
+	if len(s) <= 8 {
+		return s // Too short to mask meaningfully
+	}
+	return s[:4] + "..." + s[len(s)-4:]
+}
+
+// SettingsUpdate saves settings changes.
+func (h *Handler) SettingsUpdate(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	if err := r.ParseForm(); err != nil {
+		http.Redirect(w, r, "/settings?error=Invalid+form+data", http.StatusSeeOther)
+		return
+	}
+
+	// Get form values
+	portalEnabled := r.FormValue("portal_enabled") == "on"
+	portalAppName := strings.TrimSpace(r.FormValue("portal_app_name"))
+	portalBaseURL := strings.TrimSpace(r.FormValue("portal_base_url"))
+	requireEmailVerification := r.FormValue("require_email_verification") == "on"
+
+	// Validate
+	if portalAppName == "" {
+		portalAppName = "APIGate"
+	}
+
+	// Save settings
+	settingsToSave := map[string]string{
+		settings.KeyPortalEnabled:                boolToString(portalEnabled),
+		settings.KeyPortalAppName:                portalAppName,
+		settings.KeyAuthRequireEmailVerification: boolToString(requireEmailVerification),
+	}
+	if portalBaseURL != "" {
+		settingsToSave[settings.KeyPortalBaseURL] = portalBaseURL
+	}
+
+	// Email provider settings
+	emailProvider := strings.TrimSpace(r.FormValue("email_provider"))
+	if emailProvider == "" {
+		emailProvider = "none"
+	}
+	settingsToSave[settings.KeyEmailProvider] = emailProvider
+	settingsToSave[settings.KeyEmailFromAddress] = strings.TrimSpace(r.FormValue("email_from_address"))
+	settingsToSave[settings.KeyEmailFromName] = strings.TrimSpace(r.FormValue("email_from_name"))
+	settingsToSave[settings.KeyEmailSMTPHost] = strings.TrimSpace(r.FormValue("smtp_host"))
+	settingsToSave[settings.KeyEmailSMTPPort] = strings.TrimSpace(r.FormValue("smtp_port"))
+	settingsToSave[settings.KeyEmailSMTPUsername] = strings.TrimSpace(r.FormValue("smtp_username"))
+	settingsToSave[settings.KeyEmailSMTPUseTLS] = boolToString(r.FormValue("smtp_use_tls") == "on")
+
+	// Sensitive email settings - only save if provided (not masked/empty)
+	sensitiveEmailSettings := map[string]string{
+		settings.KeyEmailSMTPPassword: strings.TrimSpace(r.FormValue("smtp_password")),
+		settings.KeyEmailSendGridKey:  strings.TrimSpace(r.FormValue("sendgrid_api_key")),
+	}
+	for key, value := range sensitiveEmailSettings {
+		if value != "" && !strings.Contains(value, "...") {
+			settingsToSave[key] = value
+		}
+	}
+
+	// Payment provider settings - only save if provided (not masked/empty)
+	paymentSettings := map[string]string{
+		settings.KeyPaymentStripeSecretKey:     strings.TrimSpace(r.FormValue("stripe_secret_key")),
+		settings.KeyPaymentStripeWebhookSecret: strings.TrimSpace(r.FormValue("stripe_webhook_secret")),
+		settings.KeyPaymentPaddleVendorID:      strings.TrimSpace(r.FormValue("paddle_vendor_id")),
+		settings.KeyPaymentPaddleAPIKey:        strings.TrimSpace(r.FormValue("paddle_api_key")),
+		settings.KeyPaymentPaddleWebhookSecret: strings.TrimSpace(r.FormValue("paddle_webhook_secret")),
+		settings.KeyPaymentLemonAPIKey:         strings.TrimSpace(r.FormValue("lemon_api_key")),
+		settings.KeyPaymentLemonWebhookSecret:  strings.TrimSpace(r.FormValue("lemon_webhook_secret")),
+	}
+
+	// Only save payment settings if they don't look like masked values (contain "...")
+	for key, value := range paymentSettings {
+		if value != "" && !strings.Contains(value, "...") {
+			settingsToSave[key] = value
+		}
+	}
+
+	for key, value := range settingsToSave {
+		encrypted := settings.IsSensitive(key)
+		if err := h.settings.Set(ctx, key, value, encrypted); err != nil {
+			h.logger.Error().Err(err).Str("key", key).Msg("failed to save setting")
+			http.Redirect(w, r, "/settings?error=Failed+to+save+settings", http.StatusSeeOther)
+			return
+		}
+	}
+
+	http.Redirect(w, r, "/settings?success=Settings+saved.+Some+changes+may+require+a+server+restart.", http.StatusSeeOther)
+}
+
+func boolToString(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
 }
 
 // HealthPage shows system health.
@@ -1026,6 +1554,13 @@ func (h *Handler) HealthPage(w http.ResponseWriter, r *http.Request) {
 	}
 	data.CurrentPath = "/health"
 	data.Health.Status = "healthy"
+
+	// Build upstream message with better handling of empty URL
+	upstreamMsg := "Using per-route upstream configuration"
+	if h.appSettings.UpstreamURL != "" {
+		upstreamMsg = "Default upstream: " + h.appSettings.UpstreamURL
+	}
+
 	data.Health.Checks = []struct {
 		Name    string
 		Status  string
@@ -1033,7 +1568,7 @@ func (h *Handler) HealthPage(w http.ResponseWriter, r *http.Request) {
 		Latency string
 	}{
 		{Name: "Database", Status: "pass", Message: "Database connection healthy"},
-		{Name: "Upstream", Status: "pass", Message: "Upstream: " + h.appSettings.UpstreamURL},
+		{Name: "Upstream", Status: "pass", Message: upstreamMsg},
 		{Name: "Config", Status: "pass", Message: "Configuration valid"},
 	}
 	data.Health.System.GoVersion = runtime.Version()
@@ -1041,6 +1576,7 @@ func (h *Handler) HealthPage(w http.ResponseWriter, r *http.Request) {
 	data.Health.System.NumGoroutine = runtime.NumGoroutine()
 	data.Health.System.MemAlloc = formatBytes(memStats.Alloc)
 	data.Health.System.MemSys = formatBytes(memStats.Sys)
+	data.Health.System.Uptime = formatUptime(time.Since(h.startTime))
 	data.Health.Statistics.TotalUsers = len(users)
 	data.Health.Statistics.TotalKeys = totalKeys
 
@@ -1069,14 +1605,31 @@ func (h *Handler) PartialStats(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Calculate Monthly Recurring Revenue (MRR)
+	plans, _ := h.plans.List(ctx)
+	planPrices := make(map[string]int64)
+	for _, p := range plans {
+		planPrices[p.ID] = p.PriceMonthly
+	}
+	var mrr int64 // in cents
+	for _, u := range users {
+		if u.Status == "active" {
+			if price, ok := planPrices[u.PlanID]; ok {
+				mrr += price
+			}
+		}
+	}
+
 	data := struct {
 		TotalUsers    int
 		ActiveKeys    int
 		RequestsToday int64
+		MRR           float64 // in dollars
 	}{
 		TotalUsers:    len(users),
 		ActiveKeys:    activeKeys,
 		RequestsToday: requestsToday,
+		MRR:           float64(mrr) / 100,
 	}
 
 	h.renderPartial(w, "stats", data)
@@ -1094,10 +1647,19 @@ func (h *Handler) PartialUsers(w http.ResponseWriter, r *http.Request) {
 
 	users, _ := h.users.List(ctx, limit, 0)
 
+	// Build plan name lookup map
+	plans, _ := h.plans.List(ctx)
+	planNames := make(map[string]string)
+	for _, p := range plans {
+		planNames[p.ID] = p.Name
+	}
+
 	data := struct {
-		Users []ports.User
+		Users     []ports.User
+		PlanNames map[string]string
 	}{
-		Users: users,
+		Users:     users,
+		PlanNames: planNames,
 	}
 
 	h.renderPartial(w, "partial_users", data)
@@ -1108,6 +1670,12 @@ func (h *Handler) PartialKeys(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	users, _ := h.users.List(ctx, 1000, 0)
 
+	// Build user email map
+	userEmails := make(map[string]string)
+	for _, u := range users {
+		userEmails[u.ID] = u.Email
+	}
+
 	// Collect all keys
 	var keys []key.Key
 	for _, u := range users {
@@ -1116,9 +1684,11 @@ func (h *Handler) PartialKeys(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := struct {
-		Keys []key.Key
+		Keys       []key.Key
+		UserEmails map[string]string
 	}{
-		Keys: keys,
+		Keys:       keys,
+		UserEmails: userEmails,
 	}
 
 	h.renderPartial(w, "partial_keys", data)
@@ -1249,6 +1819,20 @@ func formatBytes(b uint64) string {
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
+func formatUptime(d time.Duration) string {
+	days := int(d.Hours()) / 24
+	hours := int(d.Hours()) % 24
+	minutes := int(d.Minutes()) % 60
+
+	if days > 0 {
+		return fmt.Sprintf("%dd %dh %dm", days, hours, minutes)
+	}
+	if hours > 0 {
+		return fmt.Sprintf("%dh %dm", hours, minutes)
+	}
+	return fmt.Sprintf("%dm", minutes)
+}
+
 // Setup handlers
 
 // SetupPage renders the setup wizard.
@@ -1283,15 +1867,46 @@ func (h *Handler) SetupSubmit(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) SetupStep(w http.ResponseWriter, r *http.Request) {
 	step, _ := strconv.Atoi(chi.URLParam(r, "step"))
 
+	// Validate step sequence - check cookie for highest completed step
+	highestCompleted := -1
+	if cookie, err := r.Cookie("setup_step"); err == nil {
+		highestCompleted, _ = strconv.Atoi(cookie.Value)
+	}
+
+	// If already set up AND not in active setup session, redirect to dashboard
+	// Active setup session = cookie exists with value < 3 (not fully complete)
+	if h.isSetup != nil && h.isSetup() {
+		if highestCompleted < 0 || highestCompleted >= 3 {
+			// No active setup session, redirect to dashboard
+			http.Redirect(w, r, "/dashboard", http.StatusFound)
+			return
+		}
+		// Active setup session - allow continuing
+	}
+
+	// Can only access step 0 freely, or steps where previous step is completed
+	if step > 0 && highestCompleted < step-1 {
+		// Redirect to the next uncompleted step
+		nextStep := highestCompleted + 1
+		if nextStep < 0 {
+			nextStep = 0
+		}
+		http.Redirect(w, r, fmt.Sprintf("/setup/step/%d", nextStep), http.StatusFound)
+		return
+	}
+
 	data := struct {
 		PageData
 		Steps        []string
 		CurrentStep  int
 		UpstreamURL  string
+		AdminName    string
 		AdminEmail   string
 		PlanName     string
 		RateLimit    int
 		MonthlyQuota int
+		PriceMonthly float64
+		OveragePrice float64
 		Error        string
 	}{
 		PageData:    h.newPageData(r.Context(), "Setup"),
@@ -1304,6 +1919,12 @@ func (h *Handler) SetupStep(w http.ResponseWriter, r *http.Request) {
 
 // SetupStepSubmit handles setup step submission.
 func (h *Handler) SetupStepSubmit(w http.ResponseWriter, r *http.Request) {
+	// If already set up, redirect to dashboard
+	if h.isSetup != nil && h.isSetup() {
+		http.Redirect(w, r, "/dashboard", http.StatusFound)
+		return
+	}
+
 	step, _ := strconv.Atoi(chi.URLParam(r, "step"))
 
 	switch step {
@@ -1387,10 +2008,20 @@ func (h *Handler) SetupStepSubmit(w http.ResponseWriter, r *http.Request) {
 			SameSite: http.SameSiteStrictMode,
 		})
 
+		// Track step completion for sequence validation
+		http.SetCookie(w, &http.Cookie{
+			Name:     "setup_step",
+			Value:    "0",
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteStrictMode,
+		})
+
 		http.Redirect(w, r, "/setup/step/1", http.StatusFound)
 		return
 	case 1:
 		// Create admin user
+		name := r.FormValue("admin_name")
 		email := r.FormValue("admin_email")
 		password := r.FormValue("admin_password")
 		confirm := r.FormValue("admin_password_confirm")
@@ -1409,9 +2040,10 @@ func (h *Handler) SetupStepSubmit(w http.ResponseWriter, r *http.Request) {
 		now := time.Now().UTC()
 		user := ports.User{
 			ID:           "admin",
+			Name:         name,
 			Email:        email,
 			PasswordHash: passwordHash,
-			PlanID:       "admin", // Will be updated in step 2
+			PlanID:       "free", // Default plan; will be updated in step 2 if custom plan created
 			Status:       "active",
 			CreatedAt:    now,
 			UpdatedAt:    now,
@@ -1437,6 +2069,15 @@ func (h *Handler) SetupStepSubmit(w http.ResponseWriter, r *http.Request) {
 			setModuleSessionCookie(w, user.ID, user.Email, user.Email, expiresAt)
 		}
 
+		// Track step completion for sequence validation
+		http.SetCookie(w, &http.Cookie{
+			Name:     "setup_step",
+			Value:    "1",
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteStrictMode,
+		})
+
 		http.Redirect(w, r, "/setup/step/2", http.StatusFound)
 		return
 	case 2:
@@ -1456,6 +2097,10 @@ func (h *Handler) SetupStepSubmit(w http.ResponseWriter, r *http.Request) {
 			monthlyQuota = 1000
 		}
 
+		// Parse pricing fields
+		priceMonthly, _ := strconv.ParseFloat(r.FormValue("price_monthly"), 64)
+		overagePrice, _ := strconv.ParseFloat(r.FormValue("overage_price"), 64)
+
 		now := time.Now().UTC()
 
 		// Create slug from plan name for ID
@@ -1467,6 +2112,8 @@ func (h *Handler) SetupStepSubmit(w http.ResponseWriter, r *http.Request) {
 			Description:        "Default plan created during setup",
 			RateLimitPerMinute: rateLimit,
 			RequestsPerMonth:   monthlyQuota,
+			PriceMonthly:       int64(priceMonthly * 100), // Convert to cents
+			OveragePrice:       int64(overagePrice * 100), // Convert to cents
 			IsDefault:          true,
 			Enabled:            true,
 			CreatedAt:          now,
@@ -1488,8 +2135,17 @@ func (h *Handler) SetupStepSubmit(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err := h.plans.Create(r.Context(), plan); err != nil {
-			h.renderSetupError(w, r, 2, "Failed to create plan: "+err.Error())
-			return
+			// If plan already exists (e.g., from default migration), update it instead
+			if strings.Contains(err.Error(), "UNIQUE constraint") || strings.Contains(err.Error(), "already exists") {
+				if updateErr := h.plans.Update(r.Context(), plan); updateErr != nil {
+					h.renderSetupError(w, r, 2, "Failed to update existing plan: "+updateErr.Error())
+					return
+				}
+				h.logger.Info().Str("plan_id", planID).Msg("updated existing plan during setup")
+			} else {
+				h.renderSetupError(w, r, 2, "Failed to create plan: "+err.Error())
+				return
+			}
 		}
 
 		// Trigger plan reload so proxy service picks up the new plan
@@ -1512,6 +2168,15 @@ func (h *Handler) SetupStepSubmit(w http.ResponseWriter, r *http.Request) {
 			_ = h.users.Update(r.Context(), adminUser)
 		}
 
+		// Track step completion for sequence validation
+		http.SetCookie(w, &http.Cookie{
+			Name:     "setup_step",
+			Value:    "2",
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteStrictMode,
+		})
+
 		http.Redirect(w, r, "/setup/step/3", http.StatusFound)
 		return
 	default:
@@ -1521,16 +2186,38 @@ func (h *Handler) SetupStepSubmit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) renderSetupError(w http.ResponseWriter, r *http.Request, step int, errMsg string) {
+	// Parse form values to preserve user input on error
+	rateLimit, _ := strconv.Atoi(r.FormValue("rate_limit"))
+	monthlyQuota, _ := strconv.Atoi(r.FormValue("monthly_quota"))
+	priceMonthly, _ := strconv.ParseFloat(r.FormValue("price_monthly"), 64)
+	overagePrice, _ := strconv.ParseFloat(r.FormValue("overage_price"), 64)
+
 	data := struct {
 		PageData
-		Steps       []string
-		CurrentStep int
-		Error       string
+		Steps        []string
+		CurrentStep  int
+		UpstreamURL  string
+		AdminName    string
+		AdminEmail   string
+		PlanName     string
+		RateLimit    int
+		MonthlyQuota int
+		PriceMonthly float64
+		OveragePrice float64
+		Error        string
 	}{
-		PageData:    h.newPageData(r.Context(), "Setup"),
-		Steps:       []string{"Connect Your API", "Create Account", "Set Up Pricing", "Ready!"},
-		CurrentStep: step,
-		Error:       errMsg,
+		PageData:     h.newPageData(r.Context(), "Setup"),
+		Steps:        []string{"Connect Your API", "Create Account", "Set Up Pricing", "Ready!"},
+		CurrentStep:  step,
+		UpstreamURL:  r.FormValue("upstream_url"),
+		AdminName:    r.FormValue("admin_name"),
+		AdminEmail:   r.FormValue("admin_email"),
+		PlanName:     r.FormValue("plan_name"),
+		RateLimit:    rateLimit,
+		MonthlyQuota: monthlyQuota,
+		PriceMonthly: priceMonthly,
+		OveragePrice: overagePrice,
+		Error:        errMsg,
 	}
 
 	h.render(w, "setup", data)

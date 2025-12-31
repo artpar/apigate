@@ -5,6 +5,8 @@
         <button onclick="document.getElementById('create-key-modal').classList.remove('hidden')" class="btn btn-primary">Create Key</button>
     </div>
 
+    <p class="page-desc">API keys authenticate requests to your gateway. Each key is tied to a user and inherits their plan limits.</p>
+
     <div class="card">
         <div class="card-body flush" id="keys-table" hx-get="/partials/keys" hx-trigger="load" hx-swap="innerHTML">
             <div class="table-empty">Loading keys...</div>
@@ -151,5 +153,35 @@ function showTab(tabName) {
         <li>Rotate keys regularly</li>
         <li>Revoke compromised keys immediately</li>
     </ul>
+</div>
+{{end}}
+
+{{define "panel-reference"}}
+<div class="panel-section">
+    <h3>Keys API</h3>
+    <p>Manage API keys programmatically.</p>
+</div>
+
+<div class="panel-section">
+    <h4>Create Key</h4>
+    <pre class="panel-code">POST /mod/api_key
+Content-Type: application/json
+
+{
+  "user_id": "user_id_here",
+  "name": "My API Key"
+}</pre>
+</div>
+
+<div class="panel-section">
+    <h4>List Keys</h4>
+    <pre class="panel-code">GET /mod/api_key</pre>
+    <p class="text-muted">Returns all API keys with masked values.</p>
+</div>
+
+<div class="panel-section">
+    <h4>Revoke Key</h4>
+    <pre class="panel-code">DELETE /mod/api_key/{key_id}</pre>
+    <p class="text-muted">Permanently disables the key.</p>
 </div>
 {{end}}

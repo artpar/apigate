@@ -87,8 +87,10 @@ func (p *Prompter) PromptForFields(mod convention.Derived, inputs []convention.A
 		}
 
 		// Use default if empty and available
-		if value == "" && input.Default != "" {
-			value = input.Default
+		if value == "" && input.Default != nil {
+			if defaultStr, ok := input.Default.(string); ok {
+				value = defaultStr
+			}
 		}
 
 		// Validate required

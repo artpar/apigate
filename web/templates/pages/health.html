@@ -10,6 +10,8 @@
         </div>
     </div>
 
+    <p class="page-desc">Monitor the health and performance of your APIGate instance.</p>
+
     <!-- Health Checks -->
     <div class="card mb-4">
         <div class="card-header">
@@ -21,7 +23,7 @@
                 <div class="activity-dot {{if eq .Status "pass"}}create{{else if eq .Status "warn"}}update{{else}}delete{{end}}"></div>
                 <div style="flex: 1;">
                     <div class="cell-primary">{{.Name}}</div>
-                    <div class="cell-secondary">{{.Message}}</div>
+                    <div class="cell-secondary">{{if .Message}}{{.Message}}{{else}}<span class="text-muted">No details</span>{{end}}</div>
                 </div>
                 {{if .Latency}}<span class="text-muted text-sm">{{.Latency}}</span>{{end}}
             </div>
@@ -58,7 +60,7 @@
                 </div>
                 <div>
                     <div class="text-muted text-sm">Uptime</div>
-                    <div class="cell-primary">{{.Health.System.Uptime}}</div>
+                    <div class="cell-primary">{{if .Health.System.Uptime}}{{.Health.System.Uptime}}{{else}}<span class="text-muted">-</span>{{end}}</div>
                 </div>
             </div>
         </div>
@@ -71,20 +73,97 @@
         </div>
         <div class="card-body">
             <div class="grid grid-3 text-center">
-                <div>
+                <a href="/users" class="stat-link">
                     <div class="text-muted text-sm">Total Users</div>
                     <div class="stat-value">{{.Health.Statistics.TotalUsers}}</div>
-                </div>
-                <div>
+                </a>
+                <a href="/keys" class="stat-link">
                     <div class="text-muted text-sm">Total Keys</div>
                     <div class="stat-value">{{.Health.Statistics.TotalKeys}}</div>
-                </div>
-                <div>
+                </a>
+                <div title="Active admin sessions">
                     <div class="text-muted text-sm">Active Sessions</div>
                     <div class="stat-value">{{.Health.Statistics.ActiveSessions}}</div>
                 </div>
             </div>
         </div>
     </div>
+</div>
+{{end}}
+
+{{define "panel-docs"}}
+<div class="panel-section">
+    <h3>System Health</h3>
+    <p>Monitor the health and performance of your APIGate instance.</p>
+</div>
+
+<div class="panel-section">
+    <h4>Health Checks</h4>
+    <ul class="panel-list">
+        <li><strong>Database</strong> - Verifies database connectivity</li>
+        <li><strong>Upstream</strong> - Shows configured upstream API status</li>
+        <li><strong>Config</strong> - Validates configuration integrity</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>Status Indicators</h4>
+    <ul class="panel-list">
+        <li><span style="color: #22c55e;">●</span> <strong>Pass</strong> - Component is healthy</li>
+        <li><span style="color: #f59e0b;">●</span> <strong>Warn</strong> - Component degraded but operational</li>
+        <li><span style="color: #ef4444;">●</span> <strong>Fail</strong> - Component is failing</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>System Metrics</h4>
+    <ul class="panel-list">
+        <li><strong>Goroutines</strong> - Active concurrent processes</li>
+        <li><strong>Memory</strong> - Current memory usage</li>
+        <li><strong>Uptime</strong> - Time since server started</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>Troubleshooting</h4>
+    <p>If checks are failing:</p>
+    <ul class="panel-list">
+        <li>Check database connection string</li>
+        <li>Verify upstream API is reachable</li>
+        <li>Review server logs for errors</li>
+    </ul>
+</div>
+{{end}}
+
+{{define "panel-reference"}}
+<div class="panel-section">
+    <h3>Health API</h3>
+    <p>Programmatic health check endpoints.</p>
+</div>
+
+<div class="panel-section">
+    <h4>Health Endpoint</h4>
+    <pre class="code-block">GET /health</pre>
+    <p class="text-sm text-muted">Returns JSON health status. No authentication required.</p>
+</div>
+
+<div class="panel-section">
+    <h4>Response Format</h4>
+    <pre class="code-block">{
+  "status": "healthy",
+  "checks": [
+    {"name": "Database", "status": "pass"},
+    {"name": "Upstream", "status": "pass"}
+  ]
+}</pre>
+</div>
+
+<div class="panel-section">
+    <h4>Status Values</h4>
+    <ul class="panel-list">
+        <li><code>"healthy"</code> - All checks passing</li>
+        <li><code>"degraded"</code> - Some checks warning</li>
+        <li><code>"unhealthy"</code> - Critical checks failing</li>
+    </ul>
 </div>
 {{end}}

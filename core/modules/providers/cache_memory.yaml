@@ -1,0 +1,73 @@
+# In-Memory Cache Provider Module
+# Implements the cache capability using in-memory storage
+module: cache_memory
+
+meta:
+  description: In-memory cache for development and single-instance deployments
+  implements: [cache]
+  icon: database
+  display_name: Memory Cache
+
+schema:
+  enabled:       { type: bool, default: true, description: "Whether this cache provider is active" }
+  max_size_mb:   { type: int, default: 100, description: "Maximum memory usage in megabytes" }
+  default_ttl:   { type: int, default: 3600, description: "Default TTL in seconds (0 = no expiry)" }
+  cleanup_interval: { type: int, default: 60, description: "How often to clean expired entries (seconds)" }
+
+actions:
+  test_connection:
+    description: Verify cache is working
+    # Always succeeds for memory cache
+
+  get:
+    description: Get a value by key
+    input:
+      - { name: key, type: string, required: true }
+
+  set:
+    description: Set a value with optional TTL
+    input:
+      - { name: key, type: string, required: true }
+      - { name: value, type: bytes, required: true }
+      - { name: ttl_seconds, type: int, default: 0 }
+
+  delete:
+    description: Delete a key
+    input:
+      - { name: key, type: string, required: true }
+
+  exists:
+    description: Check if key exists
+    input:
+      - { name: key, type: string, required: true }
+
+  increment:
+    description: Atomically increment a counter
+    input:
+      - { name: key, type: string, required: true }
+      - { name: delta, type: int, default: 1 }
+      - { name: ttl_seconds, type: int, default: 0 }
+
+  flush:
+    description: Clear all keys
+    confirm: true
+
+  stats:
+    description: Get cache statistics
+
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /api/cache
+      endpoints:
+        - { action: stats, method: GET, path: "/stats" }
+
+  cli:
+    serve:
+      enabled: true
+      command: cache
+      commands:
+        - action: stats
+        - action: flush
+          confirm: "This will clear all cached data. Continue?"

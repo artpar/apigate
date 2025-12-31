@@ -1,0 +1,91 @@
+# Provider Mapping Module
+# Stores relationships between local entities and external provider IDs
+# This replaces hardcoded fields like stripe_price_id in plan module
+module: provider_mapping
+
+meta:
+  description: Maps local entities to external provider IDs
+  icon: link
+  display_name: Provider Mappings
+  plural: Provider Mappings
+
+schema:
+  # Which provider (stripe, paddle, lemon, etc.)
+  provider:    { type: string, required: true, lookup: true, description: "Provider name (e.g., stripe, paddle, lemon)" }
+
+  # What type of entity (user, plan, subscription)
+  entity_type: { type: string, required: true, lookup: true, description: "Entity type (e.g., user, plan, subscription)" }
+
+  # Local entity ID
+  entity_id:   { type: string, required: true, lookup: true, description: "Local entity ID" }
+
+  # External ID from the provider
+  external_id: { type: string, required: true, description: "Provider's ID for this entity" }
+
+  # Optional metadata
+  metadata:    { type: json, description: "Additional provider-specific data" }
+
+actions:
+  # Get external ID for a local entity
+  lookup:
+    description: Get external ID for a local entity
+    input:
+      - { name: provider, type: string, required: true }
+      - { name: entity_type, type: string, required: true }
+      - { name: entity_id, type: string, required: true }
+
+  # Set external ID for a local entity
+  set_mapping:
+    description: Create or update mapping for a local entity
+    input:
+      - { name: provider, type: string, required: true }
+      - { name: entity_type, type: string, required: true }
+      - { name: entity_id, type: string, required: true }
+      - { name: external_id, type: string, required: true }
+      - { name: metadata, type: json }
+
+  # Remove mapping
+  remove_mapping:
+    description: Remove mapping for a local entity
+    input:
+      - { name: provider, type: string, required: true }
+      - { name: entity_type, type: string, required: true }
+      - { name: entity_id, type: string, required: true }
+
+  # Get all mappings for an entity (across all providers)
+  get_all_for_entity:
+    description: Get all provider mappings for a local entity
+    input:
+      - { name: entity_type, type: string, required: true }
+      - { name: entity_id, type: string, required: true }
+
+  # Get all mappings for a provider
+  get_all_for_provider:
+    description: Get all mappings for a specific provider
+    input:
+      - { name: provider, type: string, required: true }
+      - { name: entity_type, type: string }
+
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /api/provider-mappings
+      endpoints:
+        - { action: list, method: GET, path: "/" }
+        - { action: lookup, method: GET, path: "/{provider}/{entity_type}/{entity_id}" }
+        - { action: set_mapping, method: PUT, path: "/{provider}/{entity_type}/{entity_id}" }
+        - { action: remove_mapping, method: DELETE, path: "/{provider}/{entity_type}/{entity_id}" }
+
+  cli:
+    serve:
+      enabled: true
+      command: provider-mappings
+      commands:
+        - action: list
+          columns: [provider, entity_type, entity_id, external_id]
+        - action: lookup
+          args:
+            - { name: provider, required: true }
+            - { name: entity_type, required: true }
+            - { name: entity_id, required: true }

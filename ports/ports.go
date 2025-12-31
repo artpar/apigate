@@ -63,14 +63,16 @@ type KeyStore interface {
 }
 
 // User represents a user account.
+// Note: Provider-specific customer IDs are stored in provider_mapping module,
+// not in the User struct. Use ProviderMappingStore to lookup external IDs.
 type User struct {
 	ID           string
 	Email        string
 	PasswordHash []byte // bcrypt hash for web UI login (optional for API-only users)
 	Name         string
-	StripeID     string
 	PlanID       string
 	Status       string // "active", "suspended", "cancelled"
+	StripeID     string // Stripe customer ID for payment integration
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
@@ -135,15 +137,17 @@ type Plan struct {
 	RequestsPerMonth   int64
 	PriceMonthly       int64 // cents
 	OveragePrice       int64 // cents per request
-	StripePriceID      string
-	PaddlePriceID      string
-	LemonVariantID     string
 	IsDefault          bool
 	Enabled            bool
 	QuotaEnforceMode   QuotaEnforceMode // "hard", "warn", "soft" - defaults to "hard"
 	QuotaGracePct      float64          // Grace percentage before hard block (e.g., 0.05 = 5%)
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+
+	// Provider-specific price IDs for payment integration
+	StripePriceID  string // Stripe price ID (e.g., price_xxx)
+	PaddlePriceID  string // Paddle price ID
+	LemonVariantID string // LemonSqueezy variant ID
 }
 
 // UsageStore persists usage events and summaries.
@@ -540,4 +544,125 @@ type PaymentWebhookHandler interface {
 
 	// HandleInvoiceFailed handles failed invoice payment.
 	HandleInvoiceFailed(ctx context.Context, invoiceID, customerID string) error
+}
+
+// -----------------------------------------------------------------------------
+// Provider Mapping Ports
+// -----------------------------------------------------------------------------
+
+// ProviderMapping represents a mapping between local entities and external provider IDs.
+type ProviderMapping struct {
+	Provider   string            // e.g., "stripe", "paddle"
+	EntityType string            // e.g., "user", "plan", "subscription"
+	EntityID   string            // Local entity ID
+	ExternalID string            // Provider's ID for this entity
+	Metadata   map[string]string // Additional provider-specific data
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+// ProviderMappingStore persists mappings between local entities and external provider IDs.
+// This replaces hardcoded fields like stripe_id in User or stripe_price_id in Plan.
+type ProviderMappingStore interface {
+	// Get retrieves an external ID for a local entity.
+	Get(ctx context.Context, provider, entityType, entityID string) (ProviderMapping, error)
+
+	// Set creates or updates a mapping.
+	Set(ctx context.Context, m ProviderMapping) error
+
+	// Delete removes a mapping.
+	Delete(ctx context.Context, provider, entityType, entityID string) error
+
+	// ListByEntity returns all mappings for an entity across all providers.
+	ListByEntity(ctx context.Context, entityType, entityID string) ([]ProviderMapping, error)
+
+	// ListByProvider returns all mappings for a provider.
+	ListByProvider(ctx context.Context, provider, entityType string) ([]ProviderMapping, error)
+}
+
+// -----------------------------------------------------------------------------
+// Cache Capability Ports
+// -----------------------------------------------------------------------------
+
+// CacheProvider provides key-value caching with TTL support.
+// Implementations: memory, redis
+type CacheProvider interface {
+	// Name returns the provider instance name (e.g., "redis_prod").
+	Name() string
+
+	// Get retrieves a value by key. Returns nil, nil if not found.
+	Get(ctx context.Context, key string) ([]byte, error)
+
+	// Set stores a value with optional TTL (0 = no expiry).
+	Set(ctx context.Context, key string, value []byte, ttlSeconds int) error
+
+	// Delete removes a key.
+	Delete(ctx context.Context, key string) error
+
+	// Exists checks if a key exists.
+	Exists(ctx context.Context, key string) (bool, error)
+
+	// Increment atomically increments a counter, returns new value.
+	Increment(ctx context.Context, key string, delta int64, ttlSeconds int) (int64, error)
+
+	// GetMulti retrieves multiple values by keys.
+	GetMulti(ctx context.Context, keys []string) (map[string][]byte, error)
+
+	// SetMulti stores multiple key-value pairs.
+	SetMulti(ctx context.Context, entries map[string][]byte, ttlSeconds int) error
+
+	// Flush clears all keys (use with caution).
+	Flush(ctx context.Context) error
+
+	// Close releases any resources.
+	Close() error
+}
+
+// -----------------------------------------------------------------------------
+// Auth Capability Ports
+// -----------------------------------------------------------------------------
+
+// AuthProvider handles token generation and validation.
+// Implementations: jwt
+type AuthProvider interface {
+	// Name returns the provider name.
+	Name() string
+
+	// GenerateToken creates an authentication token.
+	GenerateToken(ctx context.Context, userID string, claims map[string]any, ttlSeconds int) (token string, expiresAt time.Time, err error)
+
+	// ValidateToken validates and decodes a token.
+	ValidateToken(ctx context.Context, token string) (userID string, claims map[string]any, err error)
+
+	// RevokeToken invalidates a token (if supported).
+	RevokeToken(ctx context.Context, token string) error
+}
+
+// -----------------------------------------------------------------------------
+// Capability Registry
+// -----------------------------------------------------------------------------
+
+// CapabilityRegistry provides access to capability providers.
+// Injected into services that need to use capabilities.
+type CapabilityRegistry interface {
+	// Payment returns the enabled payment provider, or nil if none.
+	Payment(ctx context.Context) PaymentProvider
+
+	// PaymentByName returns a specific payment provider instance.
+	PaymentByName(ctx context.Context, name string) PaymentProvider
+
+	// Email returns the enabled email provider, or nil if none.
+	Email(ctx context.Context) EmailSender
+
+	// EmailByName returns a specific email provider instance.
+	EmailByName(ctx context.Context, name string) EmailSender
+
+	// Cache returns the enabled cache provider.
+	Cache(ctx context.Context) CacheProvider
+
+	// CacheByName returns a specific cache provider instance.
+	CacheByName(ctx context.Context, name string) CacheProvider
+
+	// ProviderMapping returns the provider mapping store.
+	ProviderMapping() ProviderMappingStore
 }

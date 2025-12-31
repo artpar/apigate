@@ -7,14 +7,14 @@ schema:
 
   # Key data
   hash:       { type: secret, internal: true, description: "Cryptographic hash of the API key" }
-  prefix:     { type: string, lookup: true, description: "Visible key prefix for identification (e.g., ak_xxxxx)" }
+  prefix:     { type: string, lookup: true, immutable: true, description: "Visible key prefix for identification (e.g., ak_xxxxx)" }
   name:       { type: string, default: "", description: "Human-readable label for this key" }
   scopes:     { type: json, description: "Array of permission scopes granted to this key" }
 
-  # Lifecycle
+  # Lifecycle (internal - managed by system)
   expires_at: { type: timestamp, description: "When this key expires and becomes invalid" }
-  revoked_at: { type: timestamp, description: "When this key was manually revoked" }
-  last_used:  { type: timestamp, description: "Timestamp of most recent API call with this key" }
+  revoked_at: { type: timestamp, internal: true, description: "When this key was manually revoked" }
+  last_used:  { type: timestamp, internal: true, description: "Timestamp of most recent API call with this key" }
 
 actions:
   # List keys for a user
