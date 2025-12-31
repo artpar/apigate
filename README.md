@@ -273,6 +273,9 @@ Payment and email providers are configured via the Admin Dashboard settings.
 - **[System Architecture](docs/SYSTEM_ARCHITECTURE.md)** - Module system, capability architecture, data models, and deployment
 - **[Architecture (Patterns)](docs/ARCHITECTURE.md)** - Functional core/imperative shell pattern, testing strategies
 
+### Project Standards
+- **[Project Standards](PROJECT_STANDARDS.md)** - Core principles, quality gates, and release criteria (required reading)
+
 ### Additional Resources
 - **[Developer KT](docs/DEVELOPER_KT.md)** - Knowledge transfer for developers joining the project
 
