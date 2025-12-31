@@ -32,7 +32,7 @@ func (p *NoopProvider) CreateCustomer(ctx context.Context, email, name, userID s
 }
 
 // CreateCheckoutSession returns an error as payments are disabled.
-func (p *NoopProvider) CreateCheckoutSession(ctx context.Context, customerID, priceID, successURL, cancelURL string) (string, error) {
+func (p *NoopProvider) CreateCheckoutSession(ctx context.Context, customerID, priceID, successURL, cancelURL string, trialDays int) (string, error) {
 	return "", ErrPaymentsDisabled
 }
 

@@ -141,6 +141,7 @@ type Plan struct {
 	Enabled            bool
 	QuotaEnforceMode   QuotaEnforceMode // "hard", "warn", "soft" - defaults to "hard"
 	QuotaGracePct      float64          // Grace percentage before hard block (e.g., 0.05 = 5%)
+	TrialDays          int              // Number of trial days (0 = no trial)
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 
@@ -509,7 +510,8 @@ type PaymentProvider interface {
 	CreateCustomer(ctx context.Context, email, name, userID string) (customerID string, err error)
 
 	// CreateCheckoutSession creates a checkout session for subscription.
-	CreateCheckoutSession(ctx context.Context, customerID, priceID, successURL, cancelURL string) (sessionURL string, err error)
+	// trialDays specifies the number of trial days (0 = no trial).
+	CreateCheckoutSession(ctx context.Context, customerID, priceID, successURL, cancelURL string, trialDays int) (sessionURL string, err error)
 
 	// CreatePortalSession creates a customer portal session for managing subscription.
 	CreatePortalSession(ctx context.Context, customerID, returnURL string) (portalURL string, err error)

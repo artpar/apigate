@@ -26,6 +26,7 @@ import (
 	"github.com/artpar/apigate/app"
 	"github.com/artpar/apigate/core/capability"
 	capAdapters "github.com/artpar/apigate/core/capability/adapters"
+	"github.com/artpar/apigate/core/convention"
 	"github.com/artpar/apigate/domain/plan"
 	"github.com/artpar/apigate/domain/settings"
 	"github.com/artpar/apigate/ports"
@@ -341,6 +342,14 @@ func (a *App) initHTTPServer() error {
 		return fmt.Errorf("create web handler: %w", err)
 	}
 
+	// Create payment provider (if configured)
+	paymentProvider, err := payment.NewProvider(s)
+	if err != nil {
+		a.Logger.Warn().Err(err).Msg("failed to create payment provider")
+		paymentProvider = payment.NewNoopProvider()
+	}
+	a.paymentProvider = paymentProvider
+
 	// Create user portal handler (if enabled)
 	var portalRouter http.Handler
 	if s.GetBool(settings.KeyPortalEnabled) {
@@ -356,6 +365,7 @@ func (a *App) initHTTPServer() error {
 			Logger:      a.Logger,
 			Hasher:      bcryptHasher,
 			IDGen:       deps.IDGen,
+			Payment:     paymentProvider,
 			JWTSecret:   s.Get(settings.KeyAuthJWTSecret),
 			BaseURL:     s.Get(settings.KeyPortalBaseURL),
 			AppName:     s.GetOrDefault(settings.KeyPortalAppName, "APIGate"),
@@ -366,14 +376,6 @@ func (a *App) initHTTPServer() error {
 		portalRouter = portalHandler.Router()
 		a.Logger.Info().Msg("user portal enabled at /portal")
 	}
-
-	// Create payment provider (if configured)
-	paymentProvider, err := payment.NewProvider(s)
-	if err != nil {
-		a.Logger.Warn().Err(err).Msg("failed to create payment provider")
-		paymentProvider = payment.NewNoopProvider()
-	}
-	a.paymentProvider = paymentProvider
 
 	// Register payment provider with capability container
 	if a.Capabilities != nil {
@@ -391,6 +393,25 @@ func (a *App) initHTTPServer() error {
 		}
 	}
 
+	// Create developer documentation portal handler (always enabled for self-service)
+	docsHandler := web.NewDocsHandler(web.DocsDeps{
+		Modules: func() map[string]convention.Derived {
+			result := make(map[string]convention.Derived)
+			if a.ModuleRuntime != nil {
+				for _, mod := range a.ModuleRuntime.Modules() {
+					result[mod.Name] = convention.Derive(mod)
+				}
+			}
+			return result
+		},
+		Routes:   routeStore,
+		Settings: a.Settings.Store(),
+		Logger:   a.Logger,
+		AppName:  s.GetOrDefault(settings.KeyPortalAppName, "APIGate"),
+	})
+	docsRouter := docsHandler.Router()
+	a.Logger.Info().Msg("developer documentation portal enabled at /docs")
+
 	// Create router
 	routerCfg := apihttp.RouterConfig{
 		Metrics:       a.Metrics,
@@ -398,6 +419,7 @@ func (a *App) initHTTPServer() error {
 		AdminHandler:  adminHandler.Router(),
 		WebHandler:    webHandler.Router(),
 		PortalHandler: portalRouter,
+		DocsHandler:   docsRouter,
 	}
 
 	// Add module handler if runtime is initialized

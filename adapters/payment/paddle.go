@@ -60,7 +60,7 @@ func (p *PaddleProvider) CreateCustomer(ctx context.Context, email, name, userID
 }
 
 // CreateCheckoutSession creates a Paddle checkout link.
-func (p *PaddleProvider) CreateCheckoutSession(ctx context.Context, customerID, priceID, successURL, cancelURL string) (string, error) {
+func (p *PaddleProvider) CreateCheckoutSession(ctx context.Context, customerID, priceID, successURL, cancelURL string, trialDays int) (string, error) {
 	// Paddle uses client-side checkout with Paddle.js
 	// This would generate a Pay Link via their API
 	payload := map[string]interface{}{
@@ -70,6 +70,11 @@ func (p *PaddleProvider) CreateCheckoutSession(ctx context.Context, customerID, 
 		"customer_email":  customerID, // In practice, this would be the email
 		"passthrough":     fmt.Sprintf(`{"user_id": "%s"}`, customerID),
 		"return_url":      successURL,
+	}
+
+	// Add trial period if specified
+	if trialDays > 0 {
+		payload["trial_days"] = trialDays
 	}
 
 	resp, err := p.doRequest(ctx, "/product/generate_pay_link", payload)

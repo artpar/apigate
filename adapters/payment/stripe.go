@@ -55,7 +55,7 @@ func (p *StripeProvider) CreateCustomer(ctx context.Context, email, name, userID
 }
 
 // CreateCheckoutSession creates a Stripe Checkout session.
-func (p *StripeProvider) CreateCheckoutSession(ctx context.Context, customerID, priceID, successURL, cancelURL string) (string, error) {
+func (p *StripeProvider) CreateCheckoutSession(ctx context.Context, customerID, priceID, successURL, cancelURL string, trialDays int) (string, error) {
 	params := &stripe.CheckoutSessionParams{
 		Customer:   stripe.String(customerID),
 		SuccessURL: stripe.String(successURL),
@@ -67,6 +67,13 @@ func (p *StripeProvider) CreateCheckoutSession(ctx context.Context, customerID, 
 				Quantity: stripe.Int64(1),
 			},
 		},
+	}
+
+	// Add trial period if specified
+	if trialDays > 0 {
+		params.SubscriptionData = &stripe.CheckoutSessionSubscriptionDataParams{
+			TrialPeriodDays: stripe.Int64(int64(trialDays)),
+		}
 	}
 
 	s, err := checkoutsession.New(params)

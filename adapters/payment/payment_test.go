@@ -30,7 +30,13 @@ func TestNoopProvider_CreateCheckoutSession(t *testing.T) {
 	p := payment.NewNoopProvider()
 	ctx := context.Background()
 
-	_, err := p.CreateCheckoutSession(ctx, "cus_123", "price_abc", "https://success.com", "https://cancel.com")
+	_, err := p.CreateCheckoutSession(ctx, "cus_123", "price_abc", "https://success.com", "https://cancel.com", 0)
+	if err != payment.ErrPaymentsDisabled {
+		t.Errorf("expected ErrPaymentsDisabled, got %v", err)
+	}
+
+	// Test with trial days
+	_, err = p.CreateCheckoutSession(ctx, "cus_123", "price_abc", "https://success.com", "https://cancel.com", 14)
 	if err != payment.ErrPaymentsDisabled {
 		t.Errorf("expected ErrPaymentsDisabled, got %v", err)
 	}

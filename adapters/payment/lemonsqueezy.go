@@ -74,20 +74,30 @@ func (p *LemonSqueezyProvider) CreateCustomer(ctx context.Context, email, name, 
 }
 
 // CreateCheckoutSession creates a LemonSqueezy checkout.
-func (p *LemonSqueezyProvider) CreateCheckoutSession(ctx context.Context, customerID, priceID, successURL, cancelURL string) (string, error) {
+func (p *LemonSqueezyProvider) CreateCheckoutSession(ctx context.Context, customerID, priceID, successURL, cancelURL string, trialDays int) (string, error) {
+	attributes := map[string]interface{}{
+		"checkout_data": map[string]interface{}{
+			"custom": map[string]string{
+				"user_id": customerID,
+			},
+		},
+		"product_options": map[string]interface{}{
+			"redirect_url": successURL,
+		},
+	}
+
+	// Add trial period if specified
+	if trialDays > 0 {
+		attributes["checkout_options"] = map[string]interface{}{
+			"subscription_preview": true,
+		}
+		// LemonSqueezy handles trial via variant settings, not checkout params
+	}
+
 	payload := map[string]interface{}{
 		"data": map[string]interface{}{
-			"type": "checkouts",
-			"attributes": map[string]interface{}{
-				"checkout_data": map[string]interface{}{
-					"custom": map[string]string{
-						"user_id": customerID,
-					},
-				},
-				"product_options": map[string]interface{}{
-					"redirect_url": successURL,
-				},
-			},
+			"type":       "checkouts",
+			"attributes": attributes,
 			"relationships": map[string]interface{}{
 				"store": map[string]interface{}{
 					"data": map[string]interface{}{
