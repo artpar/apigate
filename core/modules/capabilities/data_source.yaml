@@ -1,0 +1,131 @@
+# Data Source Capability Interface
+# Modules implementing this capability provide access to external data sources
+# Used for data synchronization, ETL operations, and external integrations
+capability: data_source
+
+description: |
+  Data source capability provides access to external data systems.
+  Used for syncing data between systems, reading from external databases,
+  APIs, files, or other data sources.
+
+schema:
+  enabled: { type: bool, default: false, description: "Whether this data source is active" }
+
+# Actions that implementing modules MUST provide
+actions:
+  # Connection
+  connect:
+    description: Establish connection to the data source
+    output:
+      - { name: connected, type: bool }
+      - { name: error, type: string }
+
+  disconnect:
+    description: Close connection to the data source
+
+  test_connection:
+    description: Verify data source is accessible
+    output:
+      - { name: valid, type: bool }
+      - { name: error, type: string }
+      - { name: version, type: string, description: "Data source version/info" }
+
+  # Schema discovery
+  list_tables:
+    description: List available tables/collections
+    output:
+      - { name: tables, type: list, of: string }
+
+  describe_table:
+    description: Get schema/structure of a table
+    input:
+      - { name: table, type: string, required: true }
+    output:
+      - { name: columns, type: list, of: map }
+      - { name: primary_key, type: string }
+      - { name: row_count, type: int }
+
+  # Read operations
+  query:
+    description: Execute a query and return results
+    input:
+      - { name: query, type: string, required: true, description: "Query in data source's native format" }
+      - { name: params, type: list, description: "Query parameters" }
+      - { name: limit, type: int, default: 1000 }
+    output:
+      - { name: rows, type: list, of: map }
+      - { name: columns, type: list, of: string }
+      - { name: row_count, type: int }
+
+  fetch_all:
+    description: Fetch all records from a table
+    input:
+      - { name: table, type: string, required: true }
+      - { name: filter, type: map }
+      - { name: limit, type: int, default: 10000 }
+      - { name: offset, type: int, default: 0 }
+    output:
+      - { name: rows, type: list, of: map }
+      - { name: total, type: int }
+      - { name: has_more, type: bool }
+
+  fetch_changes:
+    description: Fetch records changed since a timestamp (for incremental sync)
+    input:
+      - { name: table, type: string, required: true }
+      - { name: since, type: datetime, required: true }
+      - { name: change_column, type: string, default: "updated_at" }
+    output:
+      - { name: rows, type: list, of: map }
+      - { name: count, type: int }
+      - { name: latest_timestamp, type: datetime }
+
+  # Write operations (optional - some sources are read-only)
+  insert:
+    description: Insert records into a table
+    input:
+      - { name: table, type: string, required: true }
+      - { name: rows, type: list, of: map, required: true }
+    output:
+      - { name: inserted_count, type: int }
+      - { name: errors, type: list, of: map }
+
+  update:
+    description: Update records in a table
+    input:
+      - { name: table, type: string, required: true }
+      - { name: filter, type: map, required: true }
+      - { name: data, type: map, required: true }
+    output:
+      - { name: updated_count, type: int }
+
+  delete:
+    description: Delete records from a table
+    input:
+      - { name: table, type: string, required: true }
+      - { name: filter, type: map, required: true }
+    output:
+      - { name: deleted_count, type: int }
+
+  # Bulk operations
+  upsert:
+    description: Insert or update records (for sync operations)
+    input:
+      - { name: table, type: string, required: true }
+      - { name: rows, type: list, of: map, required: true }
+      - { name: key_columns, type: list, of: string, required: true }
+    output:
+      - { name: inserted_count, type: int }
+      - { name: updated_count, type: int }
+      - { name: errors, type: list, of: map }
+
+# Events this capability emits
+events:
+  - data_source.connected
+  - data_source.disconnected
+  - data_source.query_executed
+  - data_source.sync_completed
+
+meta:
+  icon: database
+  display_name: Data Source

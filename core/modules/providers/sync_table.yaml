@@ -1,0 +1,236 @@
+# Sync Table Provider Module
+# Implements sync capability for table-level data synchronization
+# DEMONSTRATES: Multiple dependencies of the same capability type
+module: sync_table
+
+meta:
+  description: Table-level data synchronization between two data sources
+  implements: [sync]
+  icon: refresh-cw
+  display_name: Table Sync
+
+  # DEPENDENCY INJECTION: This module requires TWO data_source instances
+  # Both are the same capability type but serve different roles
+  requires:
+    source:
+      capability: data_source
+      required: true
+      description: "Source data source to read from"
+    target:
+      capability: data_source
+      required: true
+      description: "Target data source to write to"
+    # Optional notification for alerting
+    notifier:
+      capability: notification
+      required: false
+      description: "Optional notification provider for sync alerts"
+      default: "notification_log"
+
+schema:
+  # Instance identification
+  name:           { type: string, required: true, unique: true, lookup: true, description: "Instance name (e.g., sync_users_to_analytics)" }
+  description:    { type: string, description: "Description of this sync" }
+
+  # Configuration
+  enabled:        { type: bool, default: true, description: "Whether this sync is active" }
+
+  # Data source instances (resolved via dependency injection)
+  source_instance: { type: string, required: true, description: "Name of the source data_source instance" }
+  target_instance: { type: string, required: true, description: "Name of the target data_source instance" }
+
+  # Sync behavior
+  sync_mode:      { type: enum, values: [full, incremental, bidirectional], default: incremental, description: "How to sync data" }
+  conflict_resolution: { type: enum, values: [source_wins, target_wins, newest_wins, manual], default: source_wins }
+
+  # Table configuration (JSON array of table mappings)
+  table_mappings: { type: json, description: "Array of {source_table, target_table, key_columns, column_mapping}" }
+
+  # Schedule
+  auto_sync:      { type: bool, default: false, description: "Enable automatic periodic sync" }
+  schedule_cron:  { type: string, default: "*/15 * * * *", description: "Cron schedule for auto-sync (default: every 15 min)" }
+
+  # Notifications
+  notify_on_error: { type: bool, default: true, description: "Send notification on sync errors" }
+  notify_on_completion: { type: bool, default: false, description: "Send notification on successful sync" }
+
+  # Statistics
+  last_sync:      { type: datetime, internal: true }
+  last_result:    { type: enum, values: [success, partial, failed], internal: true }
+  total_syncs:    { type: int, default: 0, internal: true }
+  total_records_synced: { type: int, default: 0, internal: true }
+
+actions:
+  # Test both connections
+  test_connection:
+    description: Verify both data sources are accessible
+    output:
+      - { name: valid, type: bool }
+      - { name: source_status, type: string }
+      - { name: target_status, type: string }
+      - { name: error, type: string }
+    # Implementation uses injected source and target dependencies
+
+  # Full sync
+  sync_full:
+    description: Perform a full synchronization of configured tables
+    input:
+      - { name: table, type: string, description: "Specific table to sync (empty = all configured)" }
+      - { name: dry_run, type: bool, default: true }
+      - { name: batch_size, type: int, default: 1000 }
+    output:
+      - { name: tables_synced, type: int }
+      - { name: total_source_records, type: int }
+      - { name: total_target_records, type: int }
+      - { name: inserted, type: int }
+      - { name: updated, type: int }
+      - { name: deleted, type: int }
+      - { name: errors, type: int }
+      - { name: duration_ms, type: int }
+      - { name: details, type: list, of: map, description: "Per-table results" }
+
+  # Incremental sync
+  sync_incremental:
+    description: Sync only changes since last sync
+    input:
+      - { name: table, type: string }
+      - { name: dry_run, type: bool, default: true }
+      - { name: since, type: datetime, description: "Override: sync changes since this time" }
+    output:
+      - { name: tables_synced, type: int }
+      - { name: changes_found, type: int }
+      - { name: inserted, type: int }
+      - { name: updated, type: int }
+      - { name: deleted, type: int }
+      - { name: errors, type: int }
+      - { name: duration_ms, type: int }
+
+  # Compare without syncing
+  compare:
+    description: Compare source and target data
+    input:
+      - { name: table, type: string, required: true }
+      - { name: sample_size, type: int, default: 100 }
+    output:
+      - { name: source_count, type: int }
+      - { name: target_count, type: int }
+      - { name: missing_in_target, type: int }
+      - { name: missing_in_source, type: int }
+      - { name: different, type: int }
+      - { name: sample_differences, type: list, of: map }
+
+  # Get sync status
+  get_status:
+    description: Get current sync status and configuration
+    output:
+      - { name: enabled, type: bool }
+      - { name: source_instance, type: string }
+      - { name: target_instance, type: string }
+      - { name: sync_mode, type: string }
+      - { name: last_sync, type: datetime }
+      - { name: last_result, type: string }
+      - { name: total_syncs, type: int }
+      - { name: total_records_synced, type: int }
+      - { name: tables_configured, type: list, of: string }
+      - { name: next_scheduled, type: datetime }
+
+  # Configure table mapping
+  add_table_mapping:
+    description: Add or update a table mapping
+    input:
+      - { name: source_table, type: string, required: true }
+      - { name: target_table, type: string, required: true }
+      - { name: key_columns, type: list, of: string, required: true }
+      - { name: column_mapping, type: map, description: "Source column -> target column (empty = same names)" }
+      - { name: filter, type: string, description: "SQL-like filter for source data" }
+      - { name: change_tracking_column, type: string, default: "updated_at" }
+      - { name: soft_delete, type: bool, default: false, description: "Use soft delete instead of hard delete" }
+    output:
+      - { name: added, type: bool }
+      - { name: table_count, type: int }
+
+  remove_table_mapping:
+    description: Remove a table mapping
+    input:
+      - { name: source_table, type: string, required: true }
+    output:
+      - { name: removed, type: bool }
+
+  list_table_mappings:
+    description: List all configured table mappings
+    output:
+      - { name: mappings, type: list, of: map }
+      - { name: count, type: int }
+
+  # View sync history
+  get_history:
+    description: Get sync run history
+    input:
+      - { name: limit, type: int, default: 20 }
+      - { name: table_filter, type: string }
+    output:
+      - { name: runs, type: list, of: map }
+      - { name: total, type: int }
+
+  # View conflicts (for bidirectional sync)
+  get_conflicts:
+    description: Get unresolved sync conflicts
+    input:
+      - { name: table, type: string }
+    output:
+      - { name: conflicts, type: list, of: map }
+      - { name: count, type: int }
+
+  resolve_conflict:
+    description: Manually resolve a sync conflict
+    input:
+      - { name: conflict_id, type: string, required: true }
+      - { name: resolution, type: enum, values: [use_source, use_target, merge, skip], required: true }
+      - { name: merged_data, type: map, description: "For merge resolution, the merged data" }
+    output:
+      - { name: resolved, type: bool }
+
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /api/sync
+      endpoints:
+        - { action: get_status, method: GET, path: "/status" }
+        - { action: sync_full, method: POST, path: "/full" }
+        - { action: sync_incremental, method: POST, path: "/incremental" }
+        - { action: compare, method: POST, path: "/compare" }
+        - { action: list_table_mappings, method: GET, path: "/tables" }
+        - { action: add_table_mapping, method: POST, path: "/tables" }
+        - { action: get_conflicts, method: GET, path: "/conflicts" }
+        - { action: get_history, method: GET, path: "/history" }
+
+  cli:
+    serve:
+      enabled: true
+      command: sync
+      commands:
+        - action: test_connection
+        - action: get_status
+        - action: sync_full
+          flags:
+            - { name: table, type: string }
+            - { name: dry-run, type: bool, default: true }
+        - action: sync_incremental
+          flags:
+            - { name: table, type: string }
+            - { name: dry-run, type: bool, default: true }
+        - action: compare
+          args:
+            - { name: table, required: true }
+        - action: list_table_mappings
+        - action: get_conflicts
+        - action: get_history
+          flags:
+            - { name: limit, default: "20" }
+
+hooks:
+  # Verify both data sources on enable
+  after_update:
+    - call: verify_data_sources
+      when: "enabled == true"

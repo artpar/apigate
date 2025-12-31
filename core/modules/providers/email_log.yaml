@@ -1,0 +1,140 @@
+# Log Email Provider Module
+# Implements the email capability by logging emails instead of sending
+# Perfect for development and testing without external email services
+module: email_log
+
+meta:
+  description: Development email provider that logs emails to console/file instead of sending
+  implements: [email]
+  icon: mail
+  display_name: Log Email (Dev)
+
+schema:
+  # Instance identification
+  name:           { type: string, required: true, unique: true, lookup: true, description: "Instance name (e.g., email_dev, email_test)" }
+  description:    { type: string, description: "Description of this instance" }
+
+  # Configuration
+  enabled:        { type: bool, default: true, description: "Whether this email provider is active" }
+  from_email:     { type: email, default: "noreply@example.com", description: "Default sender email address" }
+  from_name:      { type: string, default: "APIGate", description: "Default sender name" }
+
+  # Logging options
+  log_to_console: { type: bool, default: true, description: "Log emails to console/stdout" }
+  log_to_file:    { type: bool, default: false, description: "Log emails to file" }
+  log_file_path:  { type: string, default: "/tmp/apigate_emails.log", description: "Path to email log file" }
+  log_html_body:  { type: bool, default: false, description: "Include full HTML body in logs" }
+
+  # Counters for testing
+  total_sent:     { type: int, default: 0, internal: true, description: "Total emails 'sent' (logged)" }
+  last_email_to:  { type: string, internal: true, description: "Last email recipient" }
+  last_email_subject: { type: string, internal: true, description: "Last email subject" }
+
+actions:
+  # Test connection (always succeeds for log provider)
+  test_connection:
+    description: Verify log email provider is working (always succeeds)
+    output:
+      - { name: valid, type: bool }
+      - { name: error, type: string }
+
+  # Send a single email
+  send:
+    description: Log a single email (does not actually send)
+    input:
+      - { name: to, type: email, required: true }
+      - { name: subject, type: string, required: true }
+      - { name: body_html, type: string }
+      - { name: body_text, type: string }
+      - { name: from_email, type: email }
+      - { name: from_name, type: string }
+      - { name: reply_to, type: email }
+    output:
+      - { name: message_id, type: string }
+      - { name: logged, type: bool }
+
+  # Send using template
+  send_template:
+    description: Log templated email (does not actually send)
+    input:
+      - { name: to, type: email, required: true }
+      - { name: template_id, type: string, required: true }
+      - { name: variables, type: map, of: string }
+      - { name: from_email, type: email }
+      - { name: from_name, type: string }
+    output:
+      - { name: message_id, type: string }
+      - { name: logged, type: bool }
+      - { name: resolved_template, type: string, description: "Template with variables substituted" }
+
+  # Send bulk (logs each recipient)
+  send_bulk:
+    description: Log bulk email (does not actually send)
+    input:
+      - { name: recipients, type: list, of: email, required: true }
+      - { name: subject, type: string, required: true }
+      - { name: body_html, type: string }
+      - { name: body_text, type: string }
+    output:
+      - { name: sent_count, type: int }
+      - { name: failed_count, type: int }
+      - { name: message_ids, type: list, of: string }
+
+  # Get email log
+  get_log:
+    description: Get recent logged emails
+    input:
+      - { name: limit, type: int, default: 10 }
+      - { name: to_filter, type: email, description: "Filter by recipient" }
+    output:
+      - { name: emails, type: list, of: map }
+      - { name: total, type: int }
+
+  # Get last email (useful for testing)
+  get_last:
+    description: Get the most recently logged email
+    output:
+      - { name: to, type: email }
+      - { name: subject, type: string }
+      - { name: body_text, type: string }
+      - { name: body_html, type: string }
+      - { name: timestamp, type: datetime }
+
+  # Get stats
+  get_stats:
+    description: Get statistics for this email provider instance
+    output:
+      - { name: total_sent, type: int }
+      - { name: last_email_to, type: string }
+      - { name: last_email_subject, type: string }
+
+  # Clear log
+  clear_log:
+    description: Clear all logged emails
+    confirm: true
+
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /api/email-log
+      endpoints:
+        - { action: get_log, method: GET, path: "/" }
+        - { action: get_last, method: GET, path: "/last" }
+        - { action: get_stats, method: GET, path: "/stats" }
+        - { action: clear_log, method: DELETE, path: "/" }
+
+  cli:
+    serve:
+      enabled: true
+      command: email-log
+      commands:
+        - action: test_connection
+        - action: get_log
+          args:
+            - { name: limit, default: "10" }
+            - { name: to_filter }
+        - action: get_last
+        - action: get_stats
+        - action: clear_log
+          confirm: "Clear all logged emails?"

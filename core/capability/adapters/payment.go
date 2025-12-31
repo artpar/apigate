@@ -29,8 +29,8 @@ func (a *PaymentAdapter) CreateCustomer(ctx context.Context, email, name, userID
 	return a.inner.CreateCustomer(ctx, email, name, userID)
 }
 
-func (a *PaymentAdapter) CreateCheckoutSession(ctx context.Context, customerID, priceID, successURL, cancelURL string) (string, error) {
-	return a.inner.CreateCheckoutSession(ctx, customerID, priceID, successURL, cancelURL)
+func (a *PaymentAdapter) CreateCheckoutSession(ctx context.Context, customerID, priceID, successURL, cancelURL string, trialDays int) (string, error) {
+	return a.inner.CreateCheckoutSession(ctx, customerID, priceID, successURL, cancelURL, trialDays)
 }
 
 func (a *PaymentAdapter) CreatePortalSession(ctx context.Context, customerID, returnURL string) (string, error) {

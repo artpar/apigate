@@ -1,0 +1,176 @@
+# Default Reconciliation Provider Module
+# Implements reconciliation by querying the configured payment provider
+# DEMONSTRATES: Requires dependency injection - needs a payment capability
+module: reconciliation_default
+
+meta:
+  description: Default reconciliation provider that syncs with any payment provider
+  implements: [reconciliation]
+  icon: refresh-cw
+  display_name: Default Reconciliation
+  depends: [provider_mapping]
+
+  # DEPENDENCY INJECTION: This module requires a payment provider instance
+  # The payment provider will be resolved at runtime and injected
+  requires:
+    payment_provider:
+      capability: payment
+      required: true
+      description: "Payment provider to reconcile against"
+      default: "payment_dummy"  # Default to dummy for testing
+
+schema:
+  # Instance identification
+  name:           { type: string, required: true, unique: true, lookup: true, description: "Instance name (e.g., reconcile_stripe)" }
+  description:    { type: string, description: "Description of this instance" }
+
+  # Configuration
+  enabled:        { type: bool, default: true, description: "Whether this reconciliation is active" }
+
+  # The payment provider instance to use (resolved via dependency injection)
+  # This references the name of a payment provider module instance
+  payment_instance: { type: string, required: true, description: "Name of the payment provider instance to reconcile with" }
+
+  # Schedule configuration
+  auto_reconcile: { type: bool, default: false, description: "Enable automatic periodic reconciliation" }
+  schedule_cron:  { type: string, default: "0 2 * * *", description: "Cron schedule for auto-reconciliation (default: 2am daily)" }
+
+  # Behavior settings
+  auto_fix:       { type: bool, default: false, description: "Automatically fix discrepancies (vs just reporting)" }
+  notify_on_discrepancy: { type: bool, default: true, description: "Send notification when discrepancies are found" }
+
+  # Statistics
+  last_run:       { type: datetime, internal: true }
+  last_result:    { type: enum, values: [success, partial, failed], internal: true }
+  total_runs:     { type: int, default: 0, internal: true }
+  total_fixes:    { type: int, default: 0, internal: true }
+
+actions:
+  # Test connection (verifies payment provider is accessible)
+  test_connection:
+    description: Verify reconciliation is properly configured
+    output:
+      - { name: valid, type: bool }
+      - { name: error, type: string }
+      - { name: payment_provider_status, type: string }
+
+  # Full reconciliation
+  reconcile_all:
+    description: Reconcile all payment data with external provider
+    input:
+      - { name: dry_run, type: bool, default: true }
+    output:
+      - { name: checked_count, type: int }
+      - { name: discrepancies_found, type: int }
+      - { name: fixed_count, type: int }
+      - { name: report, type: json }
+    # Implementation:
+    # 1. Call payment_provider.list_customers() (via injected dependency)
+    # 2. Compare with local users
+    # 3. Call payment_provider.list_subscriptions()
+    # 4. Compare with local subscriptions
+    # 5. Report or fix discrepancies
+
+  # Customer reconciliation
+  reconcile_customers:
+    description: Reconcile customer records between local and payment provider
+    input:
+      - { name: dry_run, type: bool, default: true }
+      - { name: user_ids, type: list, of: string }
+    output:
+      - { name: checked_count, type: int }
+      - { name: missing_in_provider, type: int }
+      - { name: missing_locally, type: int }
+      - { name: data_mismatches, type: int }
+      - { name: fixed_count, type: int }
+      - { name: details, type: list, of: map }
+
+  # Subscription reconciliation
+  reconcile_subscriptions:
+    description: Reconcile subscription status
+    input:
+      - { name: dry_run, type: bool, default: true }
+    output:
+      - { name: checked_count, type: int }
+      - { name: status_mismatches, type: int }
+      - { name: plan_mismatches, type: int }
+      - { name: fixed_count, type: int }
+      - { name: details, type: list, of: map }
+
+  # Invoice reconciliation
+  reconcile_invoices:
+    description: Reconcile invoice/payment records
+    input:
+      - { name: dry_run, type: bool, default: true }
+      - { name: since, type: datetime }
+    output:
+      - { name: checked_count, type: int }
+      - { name: missing_payments, type: int }
+      - { name: amount_discrepancies, type: int }
+      - { name: fixed_count, type: int }
+      - { name: details, type: list, of: map }
+
+  # Get status
+  get_status:
+    description: Get current reconciliation status
+    output:
+      - { name: last_run, type: datetime }
+      - { name: last_result, type: string }
+      - { name: total_runs, type: int }
+      - { name: total_fixes, type: int }
+      - { name: payment_provider, type: string }
+      - { name: next_scheduled_run, type: datetime }
+
+  # View pending discrepancies
+  get_discrepancies:
+    description: Get list of known discrepancies that haven't been fixed
+    input:
+      - { name: type_filter, type: enum, values: [customer, subscription, invoice] }
+    output:
+      - { name: discrepancies, type: list, of: map }
+      - { name: count, type: int }
+
+  # Fix specific discrepancy
+  fix_discrepancy:
+    description: Fix a specific discrepancy
+    input:
+      - { name: discrepancy_id, type: string, required: true }
+      - { name: resolution, type: enum, values: [use_local, use_provider, skip], required: true }
+    output:
+      - { name: fixed, type: bool }
+      - { name: error, type: string }
+
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /api/reconciliation
+      endpoints:
+        - { action: get_status, method: GET, path: "/status" }
+        - { action: get_discrepancies, method: GET, path: "/discrepancies" }
+        - { action: reconcile_all, method: POST, path: "/run" }
+        - { action: fix_discrepancy, method: POST, path: "/fix/{discrepancy_id}" }
+
+  cli:
+    serve:
+      enabled: true
+      command: reconcile
+      commands:
+        - action: test_connection
+        - action: get_status
+        - action: reconcile_all
+          flags:
+            - { name: dry-run, type: bool, default: true }
+        - action: reconcile_customers
+          flags:
+            - { name: dry-run, type: bool, default: true }
+        - action: reconcile_subscriptions
+          flags:
+            - { name: dry-run, type: bool, default: true }
+        - action: get_discrepancies
+
+hooks:
+  # When enabled, run initial reconciliation check
+  after_update:
+    - call: check_payment_provider_connection
+      when: "enabled == true"

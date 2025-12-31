@@ -97,7 +97,10 @@ func (m *MockPayment) CreateCustomer(ctx context.Context, email, name, userID st
 	return id, nil
 }
 
-func (m *MockPayment) CreateCheckoutSession(ctx context.Context, customerID, priceID, successURL, cancelURL string) (string, error) {
+func (m *MockPayment) CreateCheckoutSession(ctx context.Context, customerID, priceID, successURL, cancelURL string, trialDays int) (string, error) {
+	if trialDays > 0 {
+		return fmt.Sprintf("https://checkout.mock.com/session/%s?trial=%d", customerID, trialDays), nil
+	}
 	return fmt.Sprintf("https://checkout.mock.com/session/%s", customerID), nil
 }
 

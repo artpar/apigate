@@ -1,0 +1,184 @@
+# Dummy Payment Provider Module
+# Implements the payment capability for testing and development
+# Supports configurable scenarios: success, fail, pending
+module: payment_dummy
+
+meta:
+  description: Dummy payment provider for testing and development without external services
+  implements: [payment]
+  icon: credit-card
+  display_name: Dummy Payment
+  depends: [provider_mapping]
+
+schema:
+  # Instance identification
+  name:           { type: string, required: true, unique: true, lookup: true, description: "Instance name (e.g., payment_test, payment_dev)" }
+  description:    { type: string, description: "Description of this instance" }
+
+  # Scenario configuration
+  scenario:       { type: enum, values: [success, fail, pending, random], default: success, description: "Default scenario for all operations" }
+  fail_rate:      { type: int, default: 0, min: 0, max: 100, description: "Percentage of operations that fail (only used when scenario=random)" }
+  pending_rate:   { type: int, default: 0, min: 0, max: 100, description: "Percentage of operations that return pending (only used when scenario=random)" }
+  delay_ms:       { type: int, default: 0, min: 0, max: 5000, description: "Simulated delay in milliseconds for each operation" }
+
+  # Instance state
+  enabled:        { type: bool, default: true, description: "Whether this instance is active" }
+  is_default:     { type: bool, default: false, description: "Whether this is the default payment provider" }
+
+  # Counters for testing
+  total_customers_created: { type: int, default: 0, internal: true, description: "Total customers created" }
+  total_subscriptions_created: { type: int, default: 0, internal: true, description: "Total subscriptions created" }
+  total_payments_processed: { type: int, default: 0, internal: true, description: "Total payments processed" }
+
+actions:
+  # Test connection (always succeeds for dummy)
+  test_connection:
+    description: Verify dummy payment provider is working (always succeeds)
+    output:
+      - { name: valid, type: bool }
+      - { name: error, type: string }
+
+  # Customer Management
+  create_customer:
+    description: Create a dummy customer record
+    input:
+      - { name: user_id, type: ref, to: user, required: true }
+      - { name: email, type: email, required: true }
+      - { name: name, type: string }
+    output:
+      - { name: external_customer_id, type: string }
+      - { name: status, type: enum, values: [success, failed, pending] }
+      - { name: error, type: string }
+    # Returns dummy_cus_xxx based on scenario
+
+  delete_customer:
+    description: Delete a dummy customer record
+    input:
+      - { name: user_id, type: ref, to: user, required: true }
+    output:
+      - { name: status, type: enum, values: [success, failed] }
+      - { name: error, type: string }
+
+  # Price/Product Management
+  create_price:
+    description: Create a dummy price for a plan
+    input:
+      - { name: plan_id, type: ref, to: plan, required: true }
+    output:
+      - { name: external_price_id, type: string }
+      - { name: status, type: enum, values: [success, failed, pending] }
+      - { name: error, type: string }
+    # Returns dummy_price_xxx based on scenario
+
+  update_price:
+    description: Update dummy price (activate/deactivate)
+    input:
+      - { name: plan_id, type: ref, to: plan, required: true }
+      - { name: active, type: bool, required: true }
+    output:
+      - { name: status, type: enum, values: [success, failed] }
+      - { name: error, type: string }
+
+  # Subscription Management
+  create_subscription:
+    description: Create a dummy subscription
+    input:
+      - { name: user_id, type: ref, to: user, required: true }
+      - { name: plan_id, type: ref, to: plan, required: true }
+    output:
+      - { name: external_subscription_id, type: string }
+      - { name: status, type: enum, values: [success, failed, pending] }
+      - { name: error, type: string }
+    # Returns dummy_sub_xxx based on scenario
+
+  cancel_subscription:
+    description: Cancel a dummy subscription
+    input:
+      - { name: user_id, type: ref, to: user, required: true }
+      - { name: at_period_end, type: bool, default: true }
+    output:
+      - { name: status, type: enum, values: [success, failed] }
+      - { name: error, type: string }
+
+  # Usage Billing
+  report_usage:
+    description: Report usage for metered billing (logs only)
+    input:
+      - { name: user_id, type: ref, to: user, required: true }
+      - { name: quantity, type: int, required: true }
+    output:
+      - { name: status, type: enum, values: [success, failed] }
+      - { name: error, type: string }
+
+  # Webhook Processing (simulates incoming webhooks)
+  handle_webhook:
+    description: Process simulated webhook event
+    input:
+      - { name: payload, type: bytes, required: true }
+      - { name: signature, type: string }
+    output:
+      - { name: event_type, type: string }
+      - { name: event_data, type: json }
+
+  # Simulate events (for testing)
+  simulate_event:
+    description: Simulate a payment event (for testing webhooks and event handling)
+    input:
+      - { name: event_type, type: enum, values: [subscription.created, subscription.updated, subscription.cancelled, invoice.paid, invoice.failed, customer.created], required: true }
+      - { name: user_id, type: ref, to: user }
+      - { name: plan_id, type: ref, to: plan }
+      - { name: amount_cents, type: int }
+    output:
+      - { name: event_id, type: string }
+      - { name: processed, type: bool }
+
+  # Get statistics
+  get_stats:
+    description: Get statistics for this dummy payment provider instance
+    output:
+      - { name: customers_created, type: int }
+      - { name: subscriptions_created, type: int }
+      - { name: payments_processed, type: int }
+      - { name: scenario, type: string }
+
+  # Reset counters (for testing)
+  reset_stats:
+    description: Reset all counters to zero
+    confirm: true
+
+  # Force scenario (for testing specific flows)
+  set_next_scenario:
+    description: Override scenario for the next operation only
+    input:
+      - { name: scenario, type: enum, values: [success, fail, pending], required: true }
+
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /webhooks
+      endpoints:
+        - { action: handle_webhook, method: POST, path: "/dummy" }
+        - { action: simulate_event, method: POST, path: "/dummy/simulate" }
+
+  cli:
+    serve:
+      enabled: true
+      command: payment-dummy
+      commands:
+        - action: test_connection
+        - action: get_stats
+        - action: reset_stats
+          confirm: "Reset all statistics?"
+        - action: simulate_event
+          args:
+            - { name: event_type, required: true }
+            - { name: user_id }
+            - { name: plan_id }
+            - { name: amount_cents }
+
+hooks:
+  # When this module is enabled, sync all plans
+  after_update:
+    - call: sync_all_plans
+      when: "enabled == true"

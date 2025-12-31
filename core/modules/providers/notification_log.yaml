@@ -1,0 +1,105 @@
+# Log Notification Provider Module
+# Implements notifications by logging to console/file instead of sending
+# Perfect for development and testing without external notification services
+module: notification_log
+
+meta:
+  description: Development notification provider that logs notifications instead of sending
+  implements: [notification]
+  icon: bell
+  display_name: Log Notification (Dev)
+
+schema:
+  # Instance identification
+  name:           { type: string, required: true, unique: true, lookup: true, description: "Instance name (e.g., notify_dev)" }
+  description:    { type: string, description: "Description of this instance" }
+
+  # Configuration
+  enabled:        { type: bool, default: true, description: "Whether this notification provider is active" }
+
+  # Logging options
+  log_to_console: { type: bool, default: true, description: "Log notifications to console/stdout" }
+  log_to_file:    { type: bool, default: false, description: "Log notifications to file" }
+  log_file_path:  { type: string, default: "/tmp/apigate_notifications.log", description: "Path to notification log file" }
+
+  # Statistics
+  total_sent:     { type: int, default: 0, internal: true, description: "Total notifications logged" }
+  last_notification: { type: json, internal: true, description: "Last notification sent" }
+
+actions:
+  # Test connection (always succeeds)
+  test_connection:
+    description: Verify notification provider is working (always succeeds)
+    output:
+      - { name: valid, type: bool }
+      - { name: error, type: string }
+
+  # Send notification
+  send:
+    description: Log a notification (does not actually send)
+    input:
+      - { name: channel, type: string, description: "Target channel (e.g., #general, user-id)" }
+      - { name: message, type: string, required: true }
+      - { name: title, type: string }
+      - { name: severity, type: enum, values: [info, warning, error, critical], default: info }
+      - { name: metadata, type: map }
+    output:
+      - { name: notification_id, type: string }
+      - { name: logged, type: bool }
+
+  # Get log
+  get_log:
+    description: Get recent logged notifications
+    input:
+      - { name: limit, type: int, default: 10 }
+      - { name: severity_filter, type: enum, values: [info, warning, error, critical] }
+    output:
+      - { name: notifications, type: list, of: map }
+      - { name: total, type: int }
+
+  # Get last notification (useful for testing)
+  get_last:
+    description: Get the most recently logged notification
+    output:
+      - { name: channel, type: string }
+      - { name: message, type: string }
+      - { name: title, type: string }
+      - { name: severity, type: string }
+      - { name: timestamp, type: datetime }
+
+  # Get stats
+  get_stats:
+    description: Get statistics for this notification provider instance
+    output:
+      - { name: total_sent, type: int }
+      - { name: by_severity, type: map }
+
+  # Clear log
+  clear_log:
+    description: Clear all logged notifications
+    confirm: true
+
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /api/notification-log
+      endpoints:
+        - { action: get_log, method: GET, path: "/" }
+        - { action: get_last, method: GET, path: "/last" }
+        - { action: get_stats, method: GET, path: "/stats" }
+        - { action: clear_log, method: DELETE, path: "/" }
+
+  cli:
+    serve:
+      enabled: true
+      command: notification-log
+      commands:
+        - action: test_connection
+        - action: get_log
+          args:
+            - { name: limit, default: "10" }
+        - action: get_last
+        - action: get_stats
+        - action: clear_log
+          confirm: "Clear all logged notifications?"

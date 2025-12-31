@@ -1,0 +1,94 @@
+# Sync Capability Interface
+# Modules implementing this capability handle data synchronization between sources
+capability: sync
+
+description: |
+  Sync capability handles bidirectional or unidirectional data synchronization
+  between two data sources. Used for ETL, data migration, and keeping
+  systems in sync.
+
+schema:
+  enabled: { type: bool, default: false, description: "Whether this sync is active" }
+
+# Actions that implementing modules MUST provide
+actions:
+  # Full sync
+  sync_full:
+    description: Perform a full synchronization
+    input:
+      - { name: table, type: string, required: true }
+      - { name: dry_run, type: bool, default: true }
+    output:
+      - { name: source_count, type: int }
+      - { name: target_count, type: int }
+      - { name: inserted, type: int }
+      - { name: updated, type: int }
+      - { name: deleted, type: int }
+      - { name: errors, type: int }
+
+  # Incremental sync
+  sync_incremental:
+    description: Sync only changes since last sync
+    input:
+      - { name: table, type: string, required: true }
+      - { name: dry_run, type: bool, default: true }
+    output:
+      - { name: changes_found, type: int }
+      - { name: inserted, type: int }
+      - { name: updated, type: int }
+      - { name: deleted, type: int }
+      - { name: errors, type: int }
+      - { name: last_sync_time, type: datetime }
+
+  # Compare without syncing
+  compare:
+    description: Compare source and target without making changes
+    input:
+      - { name: table, type: string, required: true }
+      - { name: sample_size, type: int, default: 100 }
+    output:
+      - { name: source_count, type: int }
+      - { name: target_count, type: int }
+      - { name: missing_in_target, type: int }
+      - { name: missing_in_source, type: int }
+      - { name: different, type: int }
+      - { name: sample_differences, type: list, of: map }
+
+  # Get sync status
+  get_status:
+    description: Get current sync status
+    output:
+      - { name: last_sync, type: datetime }
+      - { name: last_result, type: enum, values: [success, partial, failed] }
+      - { name: tables_configured, type: list, of: string }
+      - { name: next_scheduled, type: datetime }
+
+  # Configure table mapping
+  configure_table:
+    description: Configure how a table should be synced
+    input:
+      - { name: source_table, type: string, required: true }
+      - { name: target_table, type: string, required: true }
+      - { name: key_columns, type: list, of: string, required: true }
+      - { name: column_mapping, type: map, description: "Source column -> target column" }
+      - { name: filter, type: string, description: "Filter expression for source data" }
+      - { name: direction, type: enum, values: [source_to_target, target_to_source, bidirectional], default: source_to_target }
+
+  test_connection:
+    description: Verify both data sources are accessible
+    output:
+      - { name: valid, type: bool }
+      - { name: source_status, type: string }
+      - { name: target_status, type: string }
+      - { name: error, type: string }
+
+# Events this capability emits
+events:
+  - sync.started
+  - sync.completed
+  - sync.failed
+  - sync.conflict_detected
+
+meta:
+  icon: refresh-cw
+  display_name: Data Sync

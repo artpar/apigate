@@ -1,0 +1,197 @@
+# Built-in Auth Provider Module
+# Implements the auth capability using JWT tokens and bcrypt password hashing
+# No external dependencies - works out of the box
+module: auth_builtin
+
+meta:
+  description: Built-in authentication using JWT tokens and bcrypt password hashing
+  implements: [auth]
+  icon: shield
+  display_name: Built-in Auth
+  depends: [cache_memory]
+
+schema:
+  # Instance identification
+  name:           { type: string, required: true, unique: true, lookup: true, description: "Instance name (e.g., auth_default)" }
+  description:    { type: string, description: "Description of this instance" }
+
+  # Configuration
+  enabled:        { type: bool, default: true, description: "Whether this auth provider is active" }
+  is_default:     { type: bool, default: false, description: "Whether this is the default auth provider" }
+
+  # JWT Configuration
+  jwt_secret:     { type: secret, description: "Secret key for signing JWT tokens (auto-generated if empty)" }
+  jwt_algorithm:  { type: enum, values: [HS256, HS384, HS512], default: HS256, description: "JWT signing algorithm" }
+  jwt_issuer:     { type: string, default: "apigate", description: "JWT issuer claim" }
+  token_ttl_hours: { type: int, default: 24, min: 1, max: 8760, description: "Default token lifetime in hours" }
+  refresh_token_ttl_days: { type: int, default: 30, min: 1, max: 365, description: "Refresh token lifetime in days" }
+
+  # Password Configuration
+  bcrypt_cost:    { type: int, default: 12, min: 4, max: 31, description: "bcrypt cost factor (higher = slower but more secure)" }
+  min_password_length: { type: int, default: 8, min: 1, max: 128, description: "Minimum password length" }
+
+  # Session Configuration (optional)
+  session_enabled: { type: bool, default: false, description: "Enable server-side session management" }
+  session_ttl_hours: { type: int, default: 24, description: "Session lifetime in hours" }
+
+  # Security Options
+  require_email_verification: { type: bool, default: false, description: "Require email verification for new accounts" }
+  max_login_attempts: { type: int, default: 5, min: 1, max: 100, description: "Max failed login attempts before lockout" }
+  lockout_duration_minutes: { type: int, default: 15, min: 1, max: 1440, description: "Account lockout duration in minutes" }
+
+actions:
+  # Test connection (always succeeds for built-in)
+  test_connection:
+    description: Verify auth provider is working
+    output:
+      - { name: valid, type: bool }
+      - { name: error, type: string }
+
+  # Token Management
+  generate_token:
+    description: Generate a JWT authentication token
+    input:
+      - { name: user_id, type: string, required: true }
+      - { name: claims, type: map, description: "Additional claims to include" }
+      - { name: ttl_seconds, type: int, description: "Override default TTL" }
+    output:
+      - { name: token, type: string }
+      - { name: expires_at, type: datetime }
+      - { name: refresh_token, type: string }
+
+  validate_token:
+    description: Validate and decode a JWT token
+    input:
+      - { name: token, type: string, required: true }
+    output:
+      - { name: valid, type: bool }
+      - { name: user_id, type: string }
+      - { name: claims, type: map }
+      - { name: expires_at, type: datetime }
+      - { name: error, type: string }
+
+  refresh_token:
+    description: Refresh an expired token using a refresh token
+    input:
+      - { name: refresh_token, type: string, required: true }
+    output:
+      - { name: token, type: string }
+      - { name: expires_at, type: datetime }
+      - { name: new_refresh_token, type: string }
+      - { name: error, type: string }
+
+  revoke_token:
+    description: Revoke a token (adds to blacklist)
+    input:
+      - { name: token, type: string, required: true }
+    output:
+      - { name: revoked, type: bool }
+
+  # Password Hashing
+  hash_password:
+    description: Hash a password using bcrypt
+    input:
+      - { name: password, type: secret, required: true }
+    output:
+      - { name: hash, type: string }
+      - { name: error, type: string }
+
+  verify_password:
+    description: Verify a password against a bcrypt hash
+    input:
+      - { name: password, type: secret, required: true }
+      - { name: hash, type: string, required: true }
+    output:
+      - { name: valid, type: bool }
+      - { name: error, type: string }
+
+  # API Key Validation
+  validate_api_key:
+    description: Validate an API key
+    input:
+      - { name: key, type: string, required: true }
+    output:
+      - { name: valid, type: bool }
+      - { name: key_id, type: string }
+      - { name: user_id, type: string }
+      - { name: plan_id, type: string }
+      - { name: error, type: string }
+
+  # Session Management (optional)
+  create_session:
+    description: Create a user session
+    input:
+      - { name: user_id, type: string, required: true }
+      - { name: metadata, type: map }
+      - { name: ttl_hours, type: int }
+    output:
+      - { name: session_id, type: string }
+      - { name: expires_at, type: datetime }
+
+  get_session:
+    description: Get session data
+    input:
+      - { name: session_id, type: string, required: true }
+    output:
+      - { name: user_id, type: string }
+      - { name: metadata, type: map }
+      - { name: valid, type: bool }
+      - { name: expires_at, type: datetime }
+
+  destroy_session:
+    description: Destroy a session
+    input:
+      - { name: session_id, type: string, required: true }
+    output:
+      - { name: destroyed, type: bool }
+
+  # User authentication flow
+  authenticate:
+    description: Authenticate a user with email/password
+    input:
+      - { name: email, type: email, required: true }
+      - { name: password, type: secret, required: true }
+    output:
+      - { name: success, type: bool }
+      - { name: user_id, type: string }
+      - { name: token, type: string }
+      - { name: refresh_token, type: string }
+      - { name: error, type: string }
+      - { name: locked_until, type: datetime, description: "If account is locked" }
+
+  # Account lockout management
+  check_lockout:
+    description: Check if an account is locked out
+    input:
+      - { name: email, type: email, required: true }
+    output:
+      - { name: locked, type: bool }
+      - { name: locked_until, type: datetime }
+      - { name: attempts_remaining, type: int }
+
+  clear_lockout:
+    description: Clear account lockout (admin action)
+    input:
+      - { name: email, type: email, required: true }
+    output:
+      - { name: cleared, type: bool }
+
+channels:
+  cli:
+    serve:
+      enabled: true
+      command: auth
+      commands:
+        - action: test_connection
+        - action: generate_token
+          args:
+            - { name: user_id, required: true }
+        - action: validate_token
+          args:
+            - { name: token, required: true }
+        - action: hash_password
+          args:
+            - { name: password, required: true, prompt: true }
+        - action: clear_lockout
+          args:
+            - { name: email, required: true }

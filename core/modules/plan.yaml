@@ -19,6 +19,9 @@ schema:
   paddle_price_id:    { type: string, description: "Paddle Price ID for subscription billing" }
   lemon_variant_id:   { type: string, description: "LemonSqueezy variant ID for subscription billing" }
 
+  # Trial settings
+  trial_days:         { type: int, default: 0, description: "Number of trial days for new subscriptions (0 = no trial)" }
+
   # Plan state
   is_default:         { type: bool, default: false, description: "Whether this plan is assigned to new users" }
   enabled:            { type: bool, default: true, description: "Whether this plan is available for selection" }
@@ -84,7 +87,7 @@ channels:
       command: plans
       commands:
         - action: list
-          columns: [id, name, rate_limit_per_minute, requests_per_month, price_monthly, is_default, enabled]
+          columns: [id, name, rate_limit_per_minute, requests_per_month, price_monthly, trial_days, is_default, enabled]
         - action: get
           args:
             - { name: id, required: true, description: "Plan ID" }
@@ -96,6 +99,7 @@ channels:
             - { param: requests_per_month, type: int, default: "1000" }
             - { param: price_monthly, type: int, default: "0" }
             - { param: overage_price, type: int, default: "0" }
+            - { param: trial_days, type: int, default: "0", description: "Trial period in days (0 = no trial)" }
             - { param: is_default, type: bool, default: "false" }
         - action: delete
           args:

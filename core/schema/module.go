@@ -49,6 +49,13 @@ type ModuleMeta struct {
 	// A module can implement multiple capabilities.
 	Implements []string `yaml:"implements,omitempty"`
 
+	// Requires maps named dependencies to capability requirements.
+	// This enables dependency injection where a module can declare it needs
+	// an instance of a specific capability type.
+	// Example: { "payment": { capability: "payment", required: true } }
+	// Example: { "source_db": { capability: "data_source" }, "target_db": { capability: "data_source" } }
+	Requires map[string]ModuleRequirement `yaml:"requires,omitempty"`
+
 	// Icon for UI display.
 	Icon string `yaml:"icon,omitempty"`
 
@@ -57,6 +64,23 @@ type ModuleMeta struct {
 
 	// Plural name for the module.
 	Plural string `yaml:"plural,omitempty"`
+}
+
+// ModuleRequirement defines a required dependency on a capability.
+// Used for dependency injection where a module needs an instance of a capability type.
+type ModuleRequirement struct {
+	// Capability is the capability type required (e.g., "payment", "data_source", "cache").
+	Capability string `yaml:"capability"`
+
+	// Required indicates if this dependency is mandatory.
+	// If true, the module cannot be enabled without this dependency being satisfied.
+	Required bool `yaml:"required,omitempty"`
+
+	// Description explains why this dependency is needed.
+	Description string `yaml:"description,omitempty"`
+
+	// Default is the default module instance name to use if not specified.
+	Default string `yaml:"default,omitempty"`
 }
 
 // Hook defines an event handler.

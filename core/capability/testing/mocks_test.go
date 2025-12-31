@@ -26,13 +26,22 @@ func TestMockPayment(t *testing.T) {
 		t.Errorf("CreateCustomerCalls() = %d, want 1", calls)
 	}
 
-	// Test CreateCheckoutSession
-	url, err := payment.CreateCheckoutSession(ctx, customerID, "price_123", "https://success.com", "https://cancel.com")
+	// Test CreateCheckoutSession without trial
+	url, err := payment.CreateCheckoutSession(ctx, customerID, "price_123", "https://success.com", "https://cancel.com", 0)
 	if err != nil {
 		t.Fatalf("CreateCheckoutSession() error = %v", err)
 	}
 	if url == "" {
 		t.Error("CreateCheckoutSession() returned empty URL")
+	}
+
+	// Test CreateCheckoutSession with trial
+	urlWithTrial, err := payment.CreateCheckoutSession(ctx, customerID, "price_123", "https://success.com", "https://cancel.com", 14)
+	if err != nil {
+		t.Fatalf("CreateCheckoutSession() with trial error = %v", err)
+	}
+	if urlWithTrial == "" {
+		t.Error("CreateCheckoutSession() with trial returned empty URL")
 	}
 
 	// Test CreatePrice
@@ -379,8 +388,8 @@ func TestCapabilityDrivenDevelopment(t *testing.T) {
 			t.Fatalf("CreateCustomer failed: %v", err)
 		}
 
-		// Create checkout session
-		sessionURL, err := payment.CreateCheckoutSession(ctx, customerID, "price_pro", "https://app.com/success", "https://app.com/cancel")
+		// Create checkout session with 14-day trial
+		sessionURL, err := payment.CreateCheckoutSession(ctx, customerID, "price_pro", "https://app.com/success", "https://app.com/cancel", 14)
 		if err != nil {
 			t.Fatalf("CreateCheckoutSession failed: %v", err)
 		}

@@ -1,0 +1,106 @@
+# Queue Capability Interface
+# Any module that implements this capability must provide these actions
+capability: queue
+
+description: |
+  Queue capability provides message queue functionality.
+  Used for background job processing, event-driven workflows, and async operations.
+
+schema:
+  enabled: { type: bool, default: false, description: "Whether this queue provider is active" }
+
+# Actions that implementing modules MUST provide
+actions:
+  # Publish messages
+  publish:
+    description: Publish a message to a queue
+    input:
+      - { name: queue, type: string, required: true, description: "Queue name" }
+      - { name: message, type: bytes, required: true, description: "Message payload" }
+      - { name: delay_seconds, type: int, default: 0, description: "Delay before message is available" }
+      - { name: priority, type: int, default: 0, description: "Message priority (higher = more urgent)" }
+    output:
+      - { name: message_id, type: string }
+
+  publish_batch:
+    description: Publish multiple messages
+    input:
+      - { name: queue, type: string, required: true }
+      - { name: messages, type: list, of: bytes, required: true }
+    output:
+      - { name: message_ids, type: list, of: string }
+      - { name: failed_count, type: int }
+
+  # Consume messages
+  consume:
+    description: Consume a message from a queue
+    input:
+      - { name: queue, type: string, required: true }
+      - { name: timeout_ms, type: int, default: 5000, description: "Max wait time for a message" }
+      - { name: auto_ack, type: bool, default: false, description: "Automatically acknowledge message" }
+    output:
+      - { name: message_id, type: string }
+      - { name: message, type: bytes }
+      - { name: received, type: bool }
+
+  ack:
+    description: Acknowledge a message (mark as processed)
+    input:
+      - { name: message_id, type: string, required: true }
+
+  nack:
+    description: Negative acknowledge (return to queue for retry)
+    input:
+      - { name: message_id, type: string, required: true }
+      - { name: requeue, type: bool, default: true }
+      - { name: delay_seconds, type: int, default: 0 }
+
+  # Queue management
+  create_queue:
+    description: Create a new queue
+    input:
+      - { name: queue, type: string, required: true }
+      - { name: max_size, type: int, description: "Maximum queue size (0 = unlimited)" }
+      - { name: ttl_seconds, type: int, description: "Message TTL (0 = no expiry)" }
+
+  delete_queue:
+    description: Delete a queue and all its messages
+    input:
+      - { name: queue, type: string, required: true }
+    confirm: true
+
+  purge_queue:
+    description: Remove all messages from a queue
+    input:
+      - { name: queue, type: string, required: true }
+    confirm: true
+
+  queue_stats:
+    description: Get queue statistics
+    input:
+      - { name: queue, type: string, required: true }
+    output:
+      - { name: pending_count, type: int }
+      - { name: processing_count, type: int }
+      - { name: dead_letter_count, type: int }
+
+  list_queues:
+    description: List all queues
+    output:
+      - { name: queues, type: list, of: map }
+
+  test_connection:
+    description: Verify queue provider is accessible
+    output:
+      - { name: valid, type: bool }
+      - { name: error, type: string }
+
+# Events this capability emits
+events:
+  - queue.message.published
+  - queue.message.consumed
+  - queue.message.failed
+
+meta:
+  icon: list
+  display_name: Queue Provider

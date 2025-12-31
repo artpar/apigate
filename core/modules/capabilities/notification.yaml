@@ -1,0 +1,50 @@
+# Notification Capability Interface
+# Any module that implements this capability must provide these actions
+capability: notification
+
+description: |
+  Notification capability handles sending notifications to various channels.
+  Used for alerts, usage notifications, system events, etc.
+
+schema:
+  enabled: { type: bool, default: false, description: "Whether this notification provider is active" }
+
+# Actions that implementing modules MUST provide
+actions:
+  send:
+    description: Send a notification
+    input:
+      - { name: channel, type: string, description: "Target channel (slack channel, webhook URL, etc.)" }
+      - { name: message, type: string, required: true }
+      - { name: title, type: string }
+      - { name: severity, type: enum, values: [info, warning, error, critical], default: info }
+      - { name: metadata, type: map, description: "Additional data to include" }
+    output:
+      - { name: notification_id, type: string }
+      - { name: sent, type: bool }
+
+  send_bulk:
+    description: Send notification to multiple channels
+    input:
+      - { name: channels, type: list, of: string, required: true }
+      - { name: message, type: string, required: true }
+      - { name: title, type: string }
+      - { name: severity, type: enum, values: [info, warning, error, critical], default: info }
+    output:
+      - { name: sent_count, type: int }
+      - { name: failed_count, type: int }
+
+  test_connection:
+    description: Verify notification configuration is valid
+    output:
+      - { name: valid, type: bool }
+      - { name: error, type: string }
+
+# Events this capability emits
+events:
+  - notification.sent
+  - notification.failed
+
+meta:
+  icon: bell
+  display_name: Notification Provider

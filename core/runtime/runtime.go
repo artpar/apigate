@@ -953,3 +953,222 @@ func (r *Runtime) Stop(ctx context.Context) error {
 	}
 	return nil
 }
+
+// ResolvedDependency represents a resolved module dependency.
+type ResolvedDependency struct {
+	// Name is the parameter name from the Requires definition.
+	Name string
+
+	// Capability is the capability type that was required.
+	Capability string
+
+	// ModuleName is the name of the module that provides this capability.
+	ModuleName string
+
+	// InstanceName is the specific instance name (from module settings).
+	InstanceName string
+
+	// Required indicates if this dependency was mandatory.
+	Required bool
+}
+
+// DependencyContext contains resolved dependencies for a module execution.
+type DependencyContext struct {
+	// Dependencies maps parameter names to resolved providers.
+	Dependencies map[string]ResolvedDependency
+
+	// Runtime reference for executing dependent module actions.
+	Runtime *Runtime
+}
+
+// Execute runs an action on a resolved dependency.
+func (dc *DependencyContext) Execute(ctx context.Context, dependencyName, action string, input ActionInput) (ActionResult, error) {
+	dep, ok := dc.Dependencies[dependencyName]
+	if !ok {
+		return ActionResult{}, fmt.Errorf("dependency %q not found in context", dependencyName)
+	}
+	return dc.Runtime.Execute(ctx, dep.ModuleName, action, input)
+}
+
+// ResolveDependencies resolves all requirements for a module.
+// It returns a DependencyContext that can be used to execute actions on dependencies.
+func (r *Runtime) ResolveDependencies(ctx context.Context, moduleName string) (*DependencyContext, error) {
+	r.mu.RLock()
+	mod, ok := r.registry.Get(moduleName)
+	r.mu.RUnlock()
+
+	if !ok {
+		return nil, fmt.Errorf("module %q not found", moduleName)
+	}
+
+	dc := &DependencyContext{
+		Dependencies: make(map[string]ResolvedDependency),
+		Runtime:      r,
+	}
+
+	// If module has no requirements, return empty context
+	if len(mod.Source.Meta.Requires) == 0 {
+		return dc, nil
+	}
+
+	// Resolve each requirement
+	for paramName, req := range mod.Source.Meta.Requires {
+		resolved, err := r.resolveSingleDependency(ctx, paramName, req)
+		if err != nil {
+			if req.Required {
+				return nil, fmt.Errorf("required dependency %q (%s): %w", paramName, req.Capability, err)
+			}
+			r.logger.Warn().
+				Str("module", moduleName).
+				Str("param", paramName).
+				Str("capability", req.Capability).
+				Err(err).
+				Msg("optional dependency not resolved")
+			continue
+		}
+		dc.Dependencies[paramName] = resolved
+	}
+
+	return dc, nil
+}
+
+// resolveSingleDependency resolves a single module requirement.
+func (r *Runtime) resolveSingleDependency(ctx context.Context, paramName string, req schema.ModuleRequirement) (ResolvedDependency, error) {
+	// First, try to use the default if specified
+	if req.Default != "" {
+		// Check if the default module exists and implements the capability
+		r.mu.RLock()
+		providers := r.capabilities[req.Capability]
+		r.mu.RUnlock()
+
+		for _, provider := range providers {
+			if provider == req.Default {
+				return ResolvedDependency{
+					Name:       paramName,
+					Capability: req.Capability,
+					ModuleName: provider,
+					Required:   req.Required,
+				}, nil
+			}
+		}
+	}
+
+	// Find any enabled provider for this capability
+	provider := r.GetEnabledProvider(ctx, req.Capability)
+	if provider != "" {
+		return ResolvedDependency{
+			Name:       paramName,
+			Capability: req.Capability,
+			ModuleName: provider,
+			Required:   req.Required,
+		}, nil
+	}
+
+	// Fall back to default if no enabled provider found
+	if req.Default != "" {
+		return ResolvedDependency{
+			Name:       paramName,
+			Capability: req.Capability,
+			ModuleName: req.Default,
+			Required:   req.Required,
+		}, nil
+	}
+
+	// No provider found
+	r.mu.RLock()
+	providers := r.capabilities[req.Capability]
+	r.mu.RUnlock()
+
+	if len(providers) == 0 {
+		return ResolvedDependency{}, fmt.Errorf("no modules implement capability %q", req.Capability)
+	}
+
+	// Return first available provider as fallback
+	return ResolvedDependency{
+		Name:       paramName,
+		Capability: req.Capability,
+		ModuleName: providers[0],
+		Required:   req.Required,
+	}, nil
+}
+
+// ValidateModuleDependencies checks if all required dependencies for a module can be resolved.
+// This should be called when a module is enabled to ensure all dependencies are available.
+func (r *Runtime) ValidateModuleDependencies(ctx context.Context, moduleName string) error {
+	r.mu.RLock()
+	mod, ok := r.registry.Get(moduleName)
+	r.mu.RUnlock()
+
+	if !ok {
+		return fmt.Errorf("module %q not found", moduleName)
+	}
+
+	if len(mod.Source.Meta.Requires) == 0 {
+		return nil
+	}
+
+	var missingDeps []string
+
+	for paramName, req := range mod.Source.Meta.Requires {
+		if !req.Required {
+			continue
+		}
+
+		// Check if any module implements this capability
+		r.mu.RLock()
+		providers := r.capabilities[req.Capability]
+		r.mu.RUnlock()
+
+		if len(providers) == 0 {
+			missingDeps = append(missingDeps, fmt.Sprintf("%s (%s)", paramName, req.Capability))
+		}
+	}
+
+	if len(missingDeps) > 0 {
+		return fmt.Errorf("missing required dependencies: %s", strings.Join(missingDeps, ", "))
+	}
+
+	return nil
+}
+
+// GetModuleDependencyInfo returns information about a module's dependencies.
+func (r *Runtime) GetModuleDependencyInfo(moduleName string) map[string]DependencyInfo {
+	r.mu.RLock()
+	mod, ok := r.registry.Get(moduleName)
+	r.mu.RUnlock()
+
+	if !ok {
+		return nil
+	}
+
+	result := make(map[string]DependencyInfo)
+
+	for paramName, req := range mod.Source.Meta.Requires {
+		info := DependencyInfo{
+			ParamName:   paramName,
+			Capability:  req.Capability,
+			Required:    req.Required,
+			Description: req.Description,
+			Default:     req.Default,
+		}
+
+		// Find available providers
+		r.mu.RLock()
+		info.AvailableProviders = r.capabilities[req.Capability]
+		r.mu.RUnlock()
+
+		result[paramName] = info
+	}
+
+	return result
+}
+
+// DependencyInfo describes a module's dependency on a capability.
+type DependencyInfo struct {
+	ParamName          string
+	Capability         string
+	Required           bool
+	Description        string
+	Default            string
+	AvailableProviders []string
+}

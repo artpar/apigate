@@ -1,0 +1,188 @@
+# In-Memory Storage Provider Module
+# Implements the storage capability using in-memory data structures
+# Perfect for testing and development - data is lost on restart
+module: storage_memory
+
+meta:
+  description: In-memory storage for testing and development (data not persisted)
+  implements: [storage]
+  icon: database
+  display_name: Memory Storage (Dev)
+
+schema:
+  # Instance identification
+  name:           { type: string, required: true, unique: true, lookup: true, description: "Instance name (e.g., storage_test)" }
+  description:    { type: string, description: "Description of this instance" }
+
+  # Configuration
+  enabled:        { type: bool, default: true, description: "Whether this storage provider is active" }
+  max_records:    { type: int, default: 100000, description: "Maximum total records to store" }
+  max_tables:     { type: int, default: 100, description: "Maximum number of tables" }
+
+  # Statistics
+  total_records:  { type: int, default: 0, internal: true, description: "Total records currently stored" }
+  total_tables:   { type: int, default: 0, internal: true, description: "Total tables created" }
+
+actions:
+  # Test connection (always succeeds for memory storage)
+  test_connection:
+    description: Verify memory storage is working (always succeeds)
+    output:
+      - { name: valid, type: bool }
+      - { name: error, type: string }
+
+  # CRUD Operations
+  create:
+    description: Insert a new record
+    input:
+      - { name: table, type: string, required: true }
+      - { name: data, type: map, required: true }
+    output:
+      - { name: id, type: string }
+
+  get:
+    description: Get a record by ID
+    input:
+      - { name: table, type: string, required: true }
+      - { name: id, type: string, required: true }
+    output:
+      - { name: record, type: map }
+      - { name: found, type: bool }
+
+  update:
+    description: Update an existing record
+    input:
+      - { name: table, type: string, required: true }
+      - { name: id, type: string, required: true }
+      - { name: data, type: map, required: true }
+    output:
+      - { name: updated, type: bool }
+
+  delete:
+    description: Delete a record
+    input:
+      - { name: table, type: string, required: true }
+      - { name: id, type: string, required: true }
+    output:
+      - { name: deleted, type: bool }
+
+  # Query Operations
+  list:
+    description: List records with optional filtering
+    input:
+      - { name: table, type: string, required: true }
+      - { name: filter, type: map, description: "Field conditions" }
+      - { name: order_by, type: string }
+      - { name: order_dir, type: enum, values: [asc, desc], default: asc }
+      - { name: limit, type: int, default: 100 }
+      - { name: offset, type: int, default: 0 }
+    output:
+      - { name: records, type: list, of: map }
+      - { name: total, type: int }
+
+  find_by:
+    description: Find records by field value
+    input:
+      - { name: table, type: string, required: true }
+      - { name: field, type: string, required: true }
+      - { name: value, type: any, required: true }
+    output:
+      - { name: records, type: list, of: map }
+
+  count:
+    description: Count records matching filter
+    input:
+      - { name: table, type: string, required: true }
+      - { name: filter, type: map }
+    output:
+      - { name: count, type: int }
+
+  # Schema Operations
+  create_table:
+    description: Create a table (in-memory structure)
+    input:
+      - { name: table, type: string, required: true }
+      - { name: schema, type: map, required: true }
+
+  drop_table:
+    description: Drop a table and all its data
+    input:
+      - { name: table, type: string, required: true }
+    confirm: true
+
+  list_tables:
+    description: List all tables
+    output:
+      - { name: tables, type: list, of: string }
+      - { name: count, type: int }
+
+  # Transaction Support (basic in-memory implementation)
+  begin_tx:
+    description: Start a transaction (creates snapshot)
+    output:
+      - { name: tx_id, type: string }
+
+  commit_tx:
+    description: Commit a transaction (applies changes)
+    input:
+      - { name: tx_id, type: string, required: true }
+
+  rollback_tx:
+    description: Rollback a transaction (restores snapshot)
+    input:
+      - { name: tx_id, type: string, required: true }
+
+  # Utility
+  get_stats:
+    description: Get storage statistics
+    output:
+      - { name: total_records, type: int }
+      - { name: total_tables, type: int }
+      - { name: memory_usage_bytes, type: int }
+      - { name: tables, type: list, of: map, description: "Per-table statistics" }
+
+  clear_all:
+    description: Clear all data (for testing)
+    confirm: true
+
+  # Data export/import (useful for testing)
+  export_table:
+    description: Export table data as JSON
+    input:
+      - { name: table, type: string, required: true }
+    output:
+      - { name: data, type: json }
+      - { name: count, type: int }
+
+  import_table:
+    description: Import table data from JSON
+    input:
+      - { name: table, type: string, required: true }
+      - { name: data, type: json, required: true }
+      - { name: clear_existing, type: bool, default: false }
+    output:
+      - { name: imported, type: int }
+      - { name: errors, type: int }
+
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /api/storage-memory
+      endpoints:
+        - { action: get_stats, method: GET, path: "/stats" }
+        - { action: list_tables, method: GET, path: "/tables" }
+
+  cli:
+    serve:
+      enabled: true
+      command: storage-memory
+      commands:
+        - action: test_connection
+        - action: get_stats
+        - action: list_tables
+        - action: export_table
+          args:
+            - { name: table, required: true }
+        - action: clear_all
+          confirm: "This will delete ALL data. Continue?"

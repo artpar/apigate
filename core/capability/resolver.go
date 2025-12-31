@@ -55,7 +55,8 @@ type PaymentProvider interface {
 	CreateCustomer(ctx context.Context, email, name, userID string) (customerID string, err error)
 
 	// CreateCheckoutSession creates a checkout session for subscription.
-	CreateCheckoutSession(ctx context.Context, customerID, priceID, successURL, cancelURL string) (sessionURL string, err error)
+	// trialDays specifies the number of trial days (0 = no trial).
+	CreateCheckoutSession(ctx context.Context, customerID, priceID, successURL, cancelURL string, trialDays int) (sessionURL string, err error)
 
 	// CreatePortalSession creates a customer portal session.
 	CreatePortalSession(ctx context.Context, customerID, returnURL string) (portalURL string, err error)

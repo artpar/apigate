@@ -1,0 +1,82 @@
+# Reconciliation Capability Interface
+# Modules that implement this capability handle payment reconciliation
+capability: reconciliation
+
+description: |
+  Reconciliation capability handles syncing and verifying payment data
+  between APIGate and external payment providers.
+  Used for ensuring subscription status, invoice status, and usage data are in sync.
+
+schema:
+  enabled: { type: bool, default: false, description: "Whether this reconciliation provider is active" }
+
+# Actions that implementing modules MUST provide
+actions:
+  # Full reconciliation
+  reconcile_all:
+    description: Reconcile all payment data with external provider
+    input:
+      - { name: dry_run, type: bool, default: true, description: "Only report differences, don't fix" }
+    output:
+      - { name: checked_count, type: int }
+      - { name: discrepancies_found, type: int }
+      - { name: fixed_count, type: int }
+      - { name: report, type: json }
+
+  # Customer reconciliation
+  reconcile_customers:
+    description: Reconcile customer records
+    input:
+      - { name: dry_run, type: bool, default: true }
+      - { name: user_ids, type: list, of: string, description: "Specific users to reconcile (empty = all)" }
+    output:
+      - { name: checked_count, type: int }
+      - { name: missing_in_provider, type: int }
+      - { name: missing_locally, type: int }
+      - { name: fixed_count, type: int }
+
+  # Subscription reconciliation
+  reconcile_subscriptions:
+    description: Reconcile subscription status
+    input:
+      - { name: dry_run, type: bool, default: true }
+    output:
+      - { name: checked_count, type: int }
+      - { name: status_mismatches, type: int }
+      - { name: fixed_count, type: int }
+
+  # Invoice reconciliation
+  reconcile_invoices:
+    description: Reconcile invoice/payment records
+    input:
+      - { name: dry_run, type: bool, default: true }
+      - { name: since, type: datetime, description: "Only check invoices since this date" }
+    output:
+      - { name: checked_count, type: int }
+      - { name: missing_payments, type: int }
+      - { name: fixed_count, type: int }
+
+  # Get reconciliation status
+  get_status:
+    description: Get current reconciliation status and last run info
+    output:
+      - { name: last_run, type: datetime }
+      - { name: last_result, type: enum, values: [success, partial, failed] }
+      - { name: pending_discrepancies, type: int }
+
+  test_connection:
+    description: Verify reconciliation is properly configured
+    output:
+      - { name: valid, type: bool }
+      - { name: error, type: string }
+
+# Events this capability emits
+events:
+  - reconciliation.started
+  - reconciliation.completed
+  - reconciliation.discrepancy_found
+  - reconciliation.discrepancy_fixed
+
+meta:
+  icon: refresh-cw
+  display_name: Reconciliation Provider
