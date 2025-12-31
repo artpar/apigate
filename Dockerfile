@@ -1,6 +1,10 @@
 # Build stage
 FROM golang:1.22-alpine AS builder
 
+ARG VERSION=dev
+ARG TARGETOS
+ARG TARGETARCH
+
 RUN apk add --no-cache gcc musl-dev
 
 WORKDIR /app
@@ -10,7 +14,8 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o apigate ./cmd/apigate
+RUN CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -ldflags="-s -w -X main.version=${VERSION}" -o apigate ./cmd/apigate
 
 # Runtime stage
 FROM alpine:3.19
