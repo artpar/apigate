@@ -622,3 +622,553 @@ func TestSortByPriority(t *testing.T) {
 		t.Errorf("unexpected order: %s, %s, %s", routes[0].ID, routes[1].ID, routes[2].ID)
 	}
 }
+
+// Tests for route.go functions
+
+func TestNewRoute(t *testing.T) {
+	r := route.NewRoute("id1", "test-route", "/api/*", "upstream1")
+
+	if r.ID != "id1" {
+		t.Errorf("ID = %s, want id1", r.ID)
+	}
+	if r.Name != "test-route" {
+		t.Errorf("Name = %s, want test-route", r.Name)
+	}
+	if r.PathPattern != "/api/*" {
+		t.Errorf("PathPattern = %s, want /api/*", r.PathPattern)
+	}
+	if r.UpstreamID != "upstream1" {
+		t.Errorf("UpstreamID = %s, want upstream1", r.UpstreamID)
+	}
+	if r.MatchType != route.MatchPrefix {
+		t.Errorf("MatchType = %s, want prefix", r.MatchType)
+	}
+	if r.MeteringExpr != "1" {
+		t.Errorf("MeteringExpr = %s, want 1", r.MeteringExpr)
+	}
+	if r.MeteringMode != "request" {
+		t.Errorf("MeteringMode = %s, want request", r.MeteringMode)
+	}
+	if r.Protocol != route.ProtocolHTTP {
+		t.Errorf("Protocol = %s, want http", r.Protocol)
+	}
+	if r.Priority != 0 {
+		t.Errorf("Priority = %d, want 0", r.Priority)
+	}
+	if !r.Enabled {
+		t.Error("Enabled should be true")
+	}
+	if r.CreatedAt.IsZero() {
+		t.Error("CreatedAt should be set")
+	}
+	if r.UpdatedAt.IsZero() {
+		t.Error("UpdatedAt should be set")
+	}
+}
+
+func TestNewUpstream(t *testing.T) {
+	u := route.NewUpstream("up1", "test-upstream", "https://api.example.com")
+
+	if u.ID != "up1" {
+		t.Errorf("ID = %s, want up1", u.ID)
+	}
+	if u.Name != "test-upstream" {
+		t.Errorf("Name = %s, want test-upstream", u.Name)
+	}
+	if u.BaseURL != "https://api.example.com" {
+		t.Errorf("BaseURL = %s, want https://api.example.com", u.BaseURL)
+	}
+	if u.Timeout.Seconds() != 30 {
+		t.Errorf("Timeout = %v, want 30s", u.Timeout)
+	}
+	if u.MaxIdleConns != 100 {
+		t.Errorf("MaxIdleConns = %d, want 100", u.MaxIdleConns)
+	}
+	if u.IdleConnTimeout.Seconds() != 90 {
+		t.Errorf("IdleConnTimeout = %v, want 90s", u.IdleConnTimeout)
+	}
+	if u.AuthType != route.AuthNone {
+		t.Errorf("AuthType = %s, want none", u.AuthType)
+	}
+	if !u.Enabled {
+		t.Error("Enabled should be true")
+	}
+	if u.CreatedAt.IsZero() {
+		t.Error("CreatedAt should be set")
+	}
+	if u.UpdatedAt.IsZero() {
+		t.Error("UpdatedAt should be set")
+	}
+}
+
+func TestRoute_WithRequestTransform(t *testing.T) {
+	r := route.NewRoute("id1", "test", "/api/*", "up1")
+	originalUpdatedAt := r.UpdatedAt
+
+	transform := &route.Transform{
+		SetHeaders:    map[string]string{"X-Custom": "value"},
+		DeleteHeaders: []string{"X-Remove"},
+	}
+
+	r2 := r.WithRequestTransform(transform)
+
+	if r2.RequestTransform != transform {
+		t.Error("RequestTransform not set correctly")
+	}
+	if r2.UpdatedAt.Before(originalUpdatedAt) {
+		t.Error("UpdatedAt should be updated")
+	}
+	// Original should be unchanged
+	if r.RequestTransform != nil {
+		t.Error("Original route should not be modified")
+	}
+}
+
+func TestRoute_WithResponseTransform(t *testing.T) {
+	r := route.NewRoute("id1", "test", "/api/*", "up1")
+	originalUpdatedAt := r.UpdatedAt
+
+	transform := &route.Transform{
+		SetHeaders: map[string]string{"X-Response": "value"},
+		BodyExpr:   `{"processed": true}`,
+	}
+
+	r2 := r.WithResponseTransform(transform)
+
+	if r2.ResponseTransform != transform {
+		t.Error("ResponseTransform not set correctly")
+	}
+	if r2.UpdatedAt.Before(originalUpdatedAt) {
+		t.Error("UpdatedAt should be updated")
+	}
+	// Original should be unchanged
+	if r.ResponseTransform != nil {
+		t.Error("Original route should not be modified")
+	}
+}
+
+func TestRoute_WithMeteringExpr(t *testing.T) {
+	r := route.NewRoute("id1", "test", "/api/*", "up1")
+	originalUpdatedAt := r.UpdatedAt
+
+	r2 := r.WithMeteringExpr("response.usage.tokens")
+
+	if r2.MeteringExpr != "response.usage.tokens" {
+		t.Errorf("MeteringExpr = %s, want response.usage.tokens", r2.MeteringExpr)
+	}
+	if r2.MeteringMode != "custom" {
+		t.Errorf("MeteringMode = %s, want custom", r2.MeteringMode)
+	}
+	if r2.UpdatedAt.Before(originalUpdatedAt) {
+		t.Error("UpdatedAt should be updated")
+	}
+	// Original should be unchanged
+	if r.MeteringExpr != "1" {
+		t.Error("Original route should not be modified")
+	}
+}
+
+func TestRoute_WithProtocol(t *testing.T) {
+	r := route.NewRoute("id1", "test", "/api/*", "up1")
+	originalUpdatedAt := r.UpdatedAt
+
+	r2 := r.WithProtocol(route.ProtocolSSE)
+
+	if r2.Protocol != route.ProtocolSSE {
+		t.Errorf("Protocol = %s, want sse", r2.Protocol)
+	}
+	if r2.UpdatedAt.Before(originalUpdatedAt) {
+		t.Error("UpdatedAt should be updated")
+	}
+	// Original should be unchanged
+	if r.Protocol != route.ProtocolHTTP {
+		t.Error("Original route should not be modified")
+	}
+
+	// Test other protocols
+	r3 := r.WithProtocol(route.ProtocolHTTPStream)
+	if r3.Protocol != route.ProtocolHTTPStream {
+		t.Errorf("Protocol = %s, want http_stream", r3.Protocol)
+	}
+
+	r4 := r.WithProtocol(route.ProtocolWebSocket)
+	if r4.Protocol != route.ProtocolWebSocket {
+		t.Errorf("Protocol = %s, want websocket", r4.Protocol)
+	}
+}
+
+func TestUpstream_WithAuth(t *testing.T) {
+	u := route.NewUpstream("up1", "test", "https://api.example.com")
+	originalUpdatedAt := u.UpdatedAt
+
+	u2 := u.WithAuth(route.AuthBearer, "", "my-token")
+
+	if u2.AuthType != route.AuthBearer {
+		t.Errorf("AuthType = %s, want bearer", u2.AuthType)
+	}
+	if u2.AuthValue != "my-token" {
+		t.Errorf("AuthValue = %s, want my-token", u2.AuthValue)
+	}
+	if u2.UpdatedAt.Before(originalUpdatedAt) {
+		t.Error("UpdatedAt should be updated")
+	}
+	// Original should be unchanged
+	if u.AuthType != route.AuthNone {
+		t.Error("Original upstream should not be modified")
+	}
+
+	// Test other auth types
+	u3 := u.WithAuth(route.AuthHeader, "X-API-Key", "secret-key")
+	if u3.AuthType != route.AuthHeader {
+		t.Errorf("AuthType = %s, want header", u3.AuthType)
+	}
+	if u3.AuthHeader != "X-API-Key" {
+		t.Errorf("AuthHeader = %s, want X-API-Key", u3.AuthHeader)
+	}
+
+	u4 := u.WithAuth(route.AuthBasic, "", "user:pass")
+	if u4.AuthType != route.AuthBasic {
+		t.Errorf("AuthType = %s, want basic", u4.AuthType)
+	}
+}
+
+func TestRoute_IsValid(t *testing.T) {
+	tests := []struct {
+		name     string
+		route    route.Route
+		expected bool
+	}{
+		{
+			"valid route",
+			route.Route{ID: "id1", Name: "name", PathPattern: "/api/*", UpstreamID: "up1"},
+			true,
+		},
+		{
+			"missing ID",
+			route.Route{ID: "", Name: "name", PathPattern: "/api/*", UpstreamID: "up1"},
+			false,
+		},
+		{
+			"missing Name",
+			route.Route{ID: "id1", Name: "", PathPattern: "/api/*", UpstreamID: "up1"},
+			false,
+		},
+		{
+			"missing PathPattern",
+			route.Route{ID: "id1", Name: "name", PathPattern: "", UpstreamID: "up1"},
+			false,
+		},
+		{
+			"missing UpstreamID",
+			route.Route{ID: "id1", Name: "name", PathPattern: "/api/*", UpstreamID: ""},
+			false,
+		},
+		{
+			"all fields empty",
+			route.Route{},
+			false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.route.IsValid(); got != tt.expected {
+				t.Errorf("IsValid() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestUpstream_IsValid(t *testing.T) {
+	tests := []struct {
+		name     string
+		upstream route.Upstream
+		expected bool
+	}{
+		{
+			"valid upstream",
+			route.Upstream{ID: "up1", Name: "name", BaseURL: "https://api.example.com"},
+			true,
+		},
+		{
+			"missing ID",
+			route.Upstream{ID: "", Name: "name", BaseURL: "https://api.example.com"},
+			false,
+		},
+		{
+			"missing Name",
+			route.Upstream{ID: "up1", Name: "", BaseURL: "https://api.example.com"},
+			false,
+		},
+		{
+			"missing BaseURL",
+			route.Upstream{ID: "up1", Name: "name", BaseURL: ""},
+			false,
+		},
+		{
+			"all fields empty",
+			route.Upstream{},
+			false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.upstream.IsValid(); got != tt.expected {
+				t.Errorf("IsValid() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+// Additional tests for edge cases in match.go
+
+func TestMatcher_InvalidRegexPattern(t *testing.T) {
+	routes := []route.Route{
+		{
+			ID:          "r1",
+			Name:        "invalid-regex",
+			PathPattern: "[invalid(regex",
+			MatchType:   route.MatchRegex,
+			UpstreamID:  "up1",
+			Enabled:     true,
+		},
+	}
+
+	_, err := route.NewMatcher(routes)
+	if err == nil {
+		t.Error("expected error for invalid regex pattern")
+	}
+}
+
+func TestMatcher_UnknownMatchType(t *testing.T) {
+	routes := []route.Route{
+		{
+			ID:          "r1",
+			Name:        "unknown-type",
+			PathPattern: "/api/*",
+			MatchType:   route.MatchType("unknown"),
+			UpstreamID:  "up1",
+			Enabled:     true,
+		},
+	}
+
+	matcher, err := route.NewMatcher(routes)
+	if err != nil {
+		t.Fatalf("NewMatcher failed: %v", err)
+	}
+
+	// Unknown match type should not match anything
+	result := matcher.Match("GET", "/api/test", nil)
+	if result != nil {
+		t.Error("expected no match for unknown match type")
+	}
+}
+
+func TestMatcher_HeaderMatchInvalidRegex(t *testing.T) {
+	routes := []route.Route{
+		{
+			ID:          "r1",
+			Name:        "invalid-header-regex",
+			PathPattern: "/api/data",
+			MatchType:   route.MatchExact,
+			Headers: []route.HeaderMatch{
+				{Name: "X-Custom", Value: "[invalid(regex", IsRegex: true, Required: true},
+			},
+			UpstreamID: "up1",
+			Enabled:    true,
+		},
+	}
+
+	matcher, err := route.NewMatcher(routes)
+	if err != nil {
+		t.Fatalf("NewMatcher failed: %v", err)
+	}
+
+	// Invalid regex in header should not match
+	result := matcher.Match("GET", "/api/data", map[string]string{"X-Custom": "value"})
+	if result != nil {
+		t.Error("expected no match for invalid header regex")
+	}
+}
+
+func TestMatcher_HeaderMatchNotRequired(t *testing.T) {
+	routes := []route.Route{
+		{
+			ID:          "r1",
+			Name:        "optional-header",
+			PathPattern: "/api/data",
+			MatchType:   route.MatchExact,
+			Headers: []route.HeaderMatch{
+				{Name: "X-Optional", Value: "specific", IsRegex: false, Required: false},
+			},
+			UpstreamID: "up1",
+			Enabled:    true,
+		},
+	}
+
+	matcher, err := route.NewMatcher(routes)
+	if err != nil {
+		t.Fatalf("NewMatcher failed: %v", err)
+	}
+
+	// Without header, should still match (not required)
+	result := matcher.Match("GET", "/api/data", nil)
+	if result == nil {
+		t.Fatal("expected match when optional header is missing")
+	}
+
+	// With correct header value, should match
+	result = matcher.Match("GET", "/api/data", map[string]string{"X-Optional": "specific"})
+	if result == nil {
+		t.Fatal("expected match when optional header has correct value")
+	}
+
+	// With incorrect header value, should not match
+	result = matcher.Match("GET", "/api/data", map[string]string{"X-Optional": "wrong"})
+	if result != nil {
+		t.Error("expected no match when optional header has wrong value")
+	}
+}
+
+func TestMatcher_PrefixWithoutWildcard(t *testing.T) {
+	routes := []route.Route{
+		{
+			ID:          "r1",
+			Name:        "prefix-no-wildcard",
+			PathPattern: "/api/v1",
+			MatchType:   route.MatchPrefix,
+			UpstreamID:  "up1",
+			Enabled:     true,
+		},
+	}
+
+	matcher, err := route.NewMatcher(routes)
+	if err != nil {
+		t.Fatalf("NewMatcher failed: %v", err)
+	}
+
+	// Without wildcard, prefix pattern "/api/v1" becomes regex "^/api/v1$"
+	// which only matches exact path
+	tests := []struct {
+		name    string
+		path    string
+		wantNil bool
+	}{
+		{"exact path", "/api/v1", false},
+		{"with suffix does not match without wildcard", "/api/v1/users", true},
+		{"partial match", "/api/v", true},
+		{"different path", "/api/v2", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := matcher.Match("GET", tt.path, nil)
+			if tt.wantNil && result != nil {
+				t.Errorf("expected nil, got route %s", result.Route.ID)
+			}
+			if !tt.wantNil && result == nil {
+				t.Error("expected match, got nil")
+			}
+		})
+	}
+}
+
+func TestMatcher_RegexWithAnchors(t *testing.T) {
+	routes := []route.Route{
+		{
+			ID:          "r1",
+			Name:        "regex-with-anchors",
+			PathPattern: "^/api/users$",
+			MatchType:   route.MatchRegex,
+			UpstreamID:  "up1",
+			Enabled:     true,
+		},
+		{
+			ID:          "r2",
+			Name:        "regex-without-anchors",
+			PathPattern: "/api/posts",
+			MatchType:   route.MatchRegex,
+			UpstreamID:  "up1",
+			Enabled:     true,
+		},
+	}
+
+	matcher, err := route.NewMatcher(routes)
+	if err != nil {
+		t.Fatalf("NewMatcher failed: %v", err)
+	}
+
+	// Pre-anchored pattern should work
+	result := matcher.Match("GET", "/api/users", nil)
+	if result == nil || result.Route.ID != "r1" {
+		t.Error("expected r1 to match /api/users")
+	}
+
+	// Auto-anchored pattern should also work
+	result = matcher.Match("GET", "/api/posts", nil)
+	if result == nil || result.Route.ID != "r2" {
+		t.Error("expected r2 to match /api/posts")
+	}
+}
+
+func TestMatcher_LowerCaseMethod(t *testing.T) {
+	routes := []route.Route{
+		{
+			ID:          "r1",
+			Name:        "get-only",
+			PathPattern: "/api/data",
+			MatchType:   route.MatchExact,
+			Methods:     []string{"GET"},
+			UpstreamID:  "up1",
+			Enabled:     true,
+		},
+	}
+
+	matcher, err := route.NewMatcher(routes)
+	if err != nil {
+		t.Fatalf("NewMatcher failed: %v", err)
+	}
+
+	// Lower case method should match
+	result := matcher.Match("get", "/api/data", nil)
+	if result == nil {
+		t.Error("expected lowercase 'get' to match")
+	}
+
+	// Mixed case method should match
+	result = matcher.Match("Get", "/api/data", nil)
+	if result == nil {
+		t.Error("expected mixed case 'Get' to match")
+	}
+}
+
+func TestMatcher_LowerCaseMethodInRoute(t *testing.T) {
+	routes := []route.Route{
+		{
+			ID:          "r1",
+			Name:        "lowercase-methods",
+			PathPattern: "/api/data",
+			MatchType:   route.MatchExact,
+			Methods:     []string{"get", "post"},
+			UpstreamID:  "up1",
+			Enabled:     true,
+		},
+	}
+
+	matcher, err := route.NewMatcher(routes)
+	if err != nil {
+		t.Fatalf("NewMatcher failed: %v", err)
+	}
+
+	// Uppercase request method should match lowercase route method
+	result := matcher.Match("GET", "/api/data", nil)
+	if result == nil {
+		t.Error("expected uppercase 'GET' to match lowercase 'get' in route")
+	}
+
+	result = matcher.Match("POST", "/api/data", nil)
+	if result == nil {
+		t.Error("expected uppercase 'POST' to match lowercase 'post' in route")
+	}
+}

@@ -77,15 +77,17 @@ func (m *mockRouteStore) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-type mockUpstreamStore struct {
+// mockUpstreamStoreRoutes is a simple mock for routes tests
+// (separate from the concurrent-safe version in admin_test.go)
+type mockUpstreamStoreRoutes struct {
 	upstreams map[string]route.Upstream
 }
 
-func newMockUpstreamStore() *mockUpstreamStore {
-	return &mockUpstreamStore{upstreams: make(map[string]route.Upstream)}
+func newMockUpstreamStoreRoutes() *mockUpstreamStoreRoutes {
+	return &mockUpstreamStoreRoutes{upstreams: make(map[string]route.Upstream)}
 }
 
-func (m *mockUpstreamStore) Get(ctx context.Context, id string) (route.Upstream, error) {
+func (m *mockUpstreamStoreRoutes) Get(ctx context.Context, id string) (route.Upstream, error) {
 	u, ok := m.upstreams[id]
 	if !ok {
 		return route.Upstream{}, errNotFound
@@ -93,7 +95,7 @@ func (m *mockUpstreamStore) Get(ctx context.Context, id string) (route.Upstream,
 	return u, nil
 }
 
-func (m *mockUpstreamStore) List(ctx context.Context) ([]route.Upstream, error) {
+func (m *mockUpstreamStoreRoutes) List(ctx context.Context) ([]route.Upstream, error) {
 	upstreams := make([]route.Upstream, 0, len(m.upstreams))
 	for _, u := range m.upstreams {
 		upstreams = append(upstreams, u)
@@ -101,7 +103,7 @@ func (m *mockUpstreamStore) List(ctx context.Context) ([]route.Upstream, error) 
 	return upstreams, nil
 }
 
-func (m *mockUpstreamStore) ListEnabled(ctx context.Context) ([]route.Upstream, error) {
+func (m *mockUpstreamStoreRoutes) ListEnabled(ctx context.Context) ([]route.Upstream, error) {
 	upstreams := make([]route.Upstream, 0)
 	for _, u := range m.upstreams {
 		if u.Enabled {
@@ -111,7 +113,7 @@ func (m *mockUpstreamStore) ListEnabled(ctx context.Context) ([]route.Upstream, 
 	return upstreams, nil
 }
 
-func (m *mockUpstreamStore) Create(ctx context.Context, u route.Upstream) error {
+func (m *mockUpstreamStoreRoutes) Create(ctx context.Context, u route.Upstream) error {
 	if _, exists := m.upstreams[u.ID]; exists {
 		return errDuplicate
 	}
@@ -119,7 +121,7 @@ func (m *mockUpstreamStore) Create(ctx context.Context, u route.Upstream) error 
 	return nil
 }
 
-func (m *mockUpstreamStore) Update(ctx context.Context, u route.Upstream) error {
+func (m *mockUpstreamStoreRoutes) Update(ctx context.Context, u route.Upstream) error {
 	if _, exists := m.upstreams[u.ID]; !exists {
 		return errNotFound
 	}
@@ -127,7 +129,7 @@ func (m *mockUpstreamStore) Update(ctx context.Context, u route.Upstream) error 
 	return nil
 }
 
-func (m *mockUpstreamStore) Delete(ctx context.Context, id string) error {
+func (m *mockUpstreamStoreRoutes) Delete(ctx context.Context, id string) error {
 	if _, exists := m.upstreams[id]; !exists {
 		return errNotFound
 	}
@@ -146,9 +148,9 @@ var errDuplicate = mockError{}
 // Test Helpers
 // -----------------------------------------------------------------------------
 
-func setupRoutesHandler() (*admin.RoutesHandler, *mockRouteStore, *mockUpstreamStore) {
+func setupRoutesHandler() (*admin.RoutesHandler, *mockRouteStore, *mockUpstreamStoreRoutes) {
 	routeStore := newMockRouteStore()
-	upstreamStore := newMockUpstreamStore()
+	upstreamStore := newMockUpstreamStoreRoutes()
 	logger := zerolog.Nop()
 	handler := admin.NewRoutesHandler(routeStore, upstreamStore, logger)
 	return handler, routeStore, upstreamStore

@@ -377,6 +377,697 @@ func TestParseBoolValues(t *testing.T) {
 	}
 }
 
+func TestLoad_InvalidYAML(t *testing.T) {
+	content := `
+upstream:
+  url: "http://localhost:3000"
+  this is not valid yaml: [
+`
+	_, err := writeAndLoadErr(t, content)
+	if err == nil {
+		t.Fatal("expected error for invalid YAML")
+	}
+}
+
+func TestLoad_FileNotFound(t *testing.T) {
+	_, err := config.Load("/nonexistent/path/config.yaml")
+	if err == nil {
+		t.Fatal("expected error for nonexistent file")
+	}
+}
+
+func TestLoad_InvalidUsageMode(t *testing.T) {
+	content := `
+upstream:
+  url: "http://localhost:3000"
+
+usage:
+  mode: "invalid"
+`
+	_, err := writeAndLoadErr(t, content)
+	if err == nil {
+		t.Fatal("expected error for invalid usage.mode")
+	}
+}
+
+func TestLoad_RemoteUsageMissingURL(t *testing.T) {
+	content := `
+upstream:
+  url: "http://localhost:3000"
+
+usage:
+  mode: "remote"
+`
+	_, err := writeAndLoadErr(t, content)
+	if err == nil {
+		t.Fatal("expected error for remote usage without URL")
+	}
+}
+
+func TestLoad_InvalidBillingMode(t *testing.T) {
+	content := `
+upstream:
+  url: "http://localhost:3000"
+
+billing:
+  mode: "invalid"
+`
+	_, err := writeAndLoadErr(t, content)
+	if err == nil {
+		t.Fatal("expected error for invalid billing.mode")
+	}
+}
+
+func TestLoad_RemoteBillingMissingURL(t *testing.T) {
+	content := `
+upstream:
+  url: "http://localhost:3000"
+
+billing:
+  mode: "remote"
+`
+	_, err := writeAndLoadErr(t, content)
+	if err == nil {
+		t.Fatal("expected error for remote billing without URL")
+	}
+}
+
+func TestLoad_PlanMissingID(t *testing.T) {
+	content := `
+upstream:
+  url: "http://localhost:3000"
+
+plans:
+  - name: "No ID Plan"
+    rate_limit_per_minute: 100
+`
+	_, err := writeAndLoadErr(t, content)
+	if err == nil {
+		t.Fatal("expected error for plan without ID")
+	}
+}
+
+func TestLoad_ValidBillingModes(t *testing.T) {
+	modes := []string{"none", "stripe", "paddle", "lemonsqueezy"}
+	for _, mode := range modes {
+		content := `
+upstream:
+  url: "http://localhost:3000"
+
+billing:
+  mode: "` + mode + `"
+`
+		cfg, err := writeAndLoadErr(t, content)
+		if err != nil {
+			t.Errorf("billing mode %q should be valid, got error: %v", mode, err)
+			continue
+		}
+		if cfg.Billing.Mode != mode {
+			t.Errorf("Billing.Mode = %s, want %s", cfg.Billing.Mode, mode)
+		}
+	}
+}
+
+func TestLoad_RemoteBillingWithURL(t *testing.T) {
+	content := `
+upstream:
+  url: "http://localhost:3000"
+
+billing:
+  mode: "remote"
+  remote:
+    url: "https://billing.example.com/api"
+`
+	cfg, err := writeAndLoadErr(t, content)
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+	if cfg.Billing.Mode != "remote" {
+		t.Errorf("Billing.Mode = %s, want remote", cfg.Billing.Mode)
+	}
+	if cfg.Billing.Remote.URL != "https://billing.example.com/api" {
+		t.Errorf("Billing.Remote.URL = %s, want https://billing.example.com/api", cfg.Billing.Remote.URL)
+	}
+}
+
+func TestLoad_RemoteUsageWithURL(t *testing.T) {
+	content := `
+upstream:
+  url: "http://localhost:3000"
+
+usage:
+  mode: "remote"
+  remote:
+    url: "https://usage.example.com/api"
+`
+	cfg, err := writeAndLoadErr(t, content)
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+	if cfg.Usage.Mode != "remote" {
+		t.Errorf("Usage.Mode = %s, want remote", cfg.Usage.Mode)
+	}
+	if cfg.Usage.Remote.URL != "https://usage.example.com/api" {
+		t.Errorf("Usage.Remote.URL = %s, want https://usage.example.com/api", cfg.Usage.Remote.URL)
+	}
+}
+
+func TestEnvOverrides_AllServerSettings(t *testing.T) {
+	os.Setenv("APIGATE_UPSTREAM_URL", "http://test:8000")
+	os.Setenv("APIGATE_SERVER_HOST", "192.168.1.1")
+	os.Setenv("APIGATE_SERVER_PORT", "3000")
+	os.Setenv("APIGATE_SERVER_READ_TIMEOUT", "45s")
+	os.Setenv("APIGATE_SERVER_WRITE_TIMEOUT", "90s")
+	defer func() {
+		os.Unsetenv("APIGATE_UPSTREAM_URL")
+		os.Unsetenv("APIGATE_SERVER_HOST")
+		os.Unsetenv("APIGATE_SERVER_PORT")
+		os.Unsetenv("APIGATE_SERVER_READ_TIMEOUT")
+		os.Unsetenv("APIGATE_SERVER_WRITE_TIMEOUT")
+	}()
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv error: %v", err)
+	}
+
+	if cfg.Server.Host != "192.168.1.1" {
+		t.Errorf("Server.Host = %s, want 192.168.1.1", cfg.Server.Host)
+	}
+	if cfg.Server.Port != 3000 {
+		t.Errorf("Server.Port = %d, want 3000", cfg.Server.Port)
+	}
+	if cfg.Server.ReadTimeout != 45*time.Second {
+		t.Errorf("Server.ReadTimeout = %v, want 45s", cfg.Server.ReadTimeout)
+	}
+	if cfg.Server.WriteTimeout != 90*time.Second {
+		t.Errorf("Server.WriteTimeout = %v, want 90s", cfg.Server.WriteTimeout)
+	}
+}
+
+func TestEnvOverrides_UpstreamTimeout(t *testing.T) {
+	os.Setenv("APIGATE_UPSTREAM_URL", "http://test:8000")
+	os.Setenv("APIGATE_UPSTREAM_TIMEOUT", "120s")
+	defer func() {
+		os.Unsetenv("APIGATE_UPSTREAM_URL")
+		os.Unsetenv("APIGATE_UPSTREAM_TIMEOUT")
+	}()
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv error: %v", err)
+	}
+
+	if cfg.Upstream.Timeout != 120*time.Second {
+		t.Errorf("Upstream.Timeout = %v, want 120s", cfg.Upstream.Timeout)
+	}
+}
+
+func TestEnvOverrides_AuthSettings(t *testing.T) {
+	os.Setenv("APIGATE_UPSTREAM_URL", "http://test:8000")
+	os.Setenv("APIGATE_AUTH_MODE", "remote")
+	os.Setenv("APIGATE_AUTH_KEY_PREFIX", "custom_")
+	os.Setenv("APIGATE_AUTH_REMOTE_URL", "https://auth.example.com/validate")
+	defer func() {
+		os.Unsetenv("APIGATE_UPSTREAM_URL")
+		os.Unsetenv("APIGATE_AUTH_MODE")
+		os.Unsetenv("APIGATE_AUTH_KEY_PREFIX")
+		os.Unsetenv("APIGATE_AUTH_REMOTE_URL")
+	}()
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv error: %v", err)
+	}
+
+	if cfg.Auth.Mode != "remote" {
+		t.Errorf("Auth.Mode = %s, want remote", cfg.Auth.Mode)
+	}
+	if cfg.Auth.KeyPrefix != "custom_" {
+		t.Errorf("Auth.KeyPrefix = %s, want custom_", cfg.Auth.KeyPrefix)
+	}
+	if cfg.Auth.Remote.URL != "https://auth.example.com/validate" {
+		t.Errorf("Auth.Remote.URL = %s, want https://auth.example.com/validate", cfg.Auth.Remote.URL)
+	}
+}
+
+func TestEnvOverrides_RateLimitSettings(t *testing.T) {
+	os.Setenv("APIGATE_UPSTREAM_URL", "http://test:8000")
+	os.Setenv("APIGATE_RATELIMIT_ENABLED", "false")
+	os.Setenv("APIGATE_RATELIMIT_BURST", "100")
+	os.Setenv("APIGATE_RATELIMIT_WINDOW", "120")
+	defer func() {
+		os.Unsetenv("APIGATE_UPSTREAM_URL")
+		os.Unsetenv("APIGATE_RATELIMIT_ENABLED")
+		os.Unsetenv("APIGATE_RATELIMIT_BURST")
+		os.Unsetenv("APIGATE_RATELIMIT_WINDOW")
+	}()
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv error: %v", err)
+	}
+
+	if cfg.RateLimit.Enabled != false {
+		t.Errorf("RateLimit.Enabled = %v, want false", cfg.RateLimit.Enabled)
+	}
+	if cfg.RateLimit.BurstTokens != 100 {
+		t.Errorf("RateLimit.BurstTokens = %d, want 100", cfg.RateLimit.BurstTokens)
+	}
+	if cfg.RateLimit.WindowSecs != 120 {
+		t.Errorf("RateLimit.WindowSecs = %d, want 120", cfg.RateLimit.WindowSecs)
+	}
+}
+
+func TestEnvOverrides_UsageSettings(t *testing.T) {
+	os.Setenv("APIGATE_UPSTREAM_URL", "http://test:8000")
+	os.Setenv("APIGATE_USAGE_MODE", "remote")
+	os.Setenv("APIGATE_USAGE_REMOTE_URL", "https://usage.example.com/api")
+	defer func() {
+		os.Unsetenv("APIGATE_UPSTREAM_URL")
+		os.Unsetenv("APIGATE_USAGE_MODE")
+		os.Unsetenv("APIGATE_USAGE_REMOTE_URL")
+	}()
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv error: %v", err)
+	}
+
+	if cfg.Usage.Mode != "remote" {
+		t.Errorf("Usage.Mode = %s, want remote", cfg.Usage.Mode)
+	}
+	if cfg.Usage.Remote.URL != "https://usage.example.com/api" {
+		t.Errorf("Usage.Remote.URL = %s, want https://usage.example.com/api", cfg.Usage.Remote.URL)
+	}
+}
+
+func TestEnvOverrides_BillingSettings(t *testing.T) {
+	os.Setenv("APIGATE_UPSTREAM_URL", "http://test:8000")
+	os.Setenv("APIGATE_BILLING_MODE", "stripe")
+	os.Setenv("APIGATE_BILLING_STRIPE_KEY", "sk_test_12345")
+	defer func() {
+		os.Unsetenv("APIGATE_UPSTREAM_URL")
+		os.Unsetenv("APIGATE_BILLING_MODE")
+		os.Unsetenv("APIGATE_BILLING_STRIPE_KEY")
+	}()
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv error: %v", err)
+	}
+
+	if cfg.Billing.Mode != "stripe" {
+		t.Errorf("Billing.Mode = %s, want stripe", cfg.Billing.Mode)
+	}
+	if cfg.Billing.StripeKey != "sk_test_12345" {
+		t.Errorf("Billing.StripeKey = %s, want sk_test_12345", cfg.Billing.StripeKey)
+	}
+}
+
+func TestEnvOverrides_DatabaseSettings(t *testing.T) {
+	os.Setenv("APIGATE_UPSTREAM_URL", "http://test:8000")
+	os.Setenv("APIGATE_DATABASE_DRIVER", "postgres")
+	os.Setenv("APIGATE_DATABASE_DSN", "postgres://user:pass@localhost/db")
+	defer func() {
+		os.Unsetenv("APIGATE_UPSTREAM_URL")
+		os.Unsetenv("APIGATE_DATABASE_DRIVER")
+		os.Unsetenv("APIGATE_DATABASE_DSN")
+	}()
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv error: %v", err)
+	}
+
+	if cfg.Database.Driver != "postgres" {
+		t.Errorf("Database.Driver = %s, want postgres", cfg.Database.Driver)
+	}
+	if cfg.Database.DSN != "postgres://user:pass@localhost/db" {
+		t.Errorf("Database.DSN = %s, want postgres://user:pass@localhost/db", cfg.Database.DSN)
+	}
+}
+
+func TestEnvOverrides_LoggingSettings(t *testing.T) {
+	os.Setenv("APIGATE_UPSTREAM_URL", "http://test:8000")
+	os.Setenv("APIGATE_LOG_LEVEL", "warn")
+	os.Setenv("APIGATE_LOG_FORMAT", "console")
+	defer func() {
+		os.Unsetenv("APIGATE_UPSTREAM_URL")
+		os.Unsetenv("APIGATE_LOG_LEVEL")
+		os.Unsetenv("APIGATE_LOG_FORMAT")
+	}()
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv error: %v", err)
+	}
+
+	if cfg.Logging.Level != "warn" {
+		t.Errorf("Logging.Level = %s, want warn", cfg.Logging.Level)
+	}
+	if cfg.Logging.Format != "console" {
+		t.Errorf("Logging.Format = %s, want console", cfg.Logging.Format)
+	}
+}
+
+func TestEnvOverrides_MetricsPath(t *testing.T) {
+	os.Setenv("APIGATE_UPSTREAM_URL", "http://test:8000")
+	os.Setenv("APIGATE_METRICS_ENABLED", "true")
+	os.Setenv("APIGATE_METRICS_PATH", "/custom-metrics")
+	defer func() {
+		os.Unsetenv("APIGATE_UPSTREAM_URL")
+		os.Unsetenv("APIGATE_METRICS_ENABLED")
+		os.Unsetenv("APIGATE_METRICS_PATH")
+	}()
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv error: %v", err)
+	}
+
+	if !cfg.Metrics.Enabled {
+		t.Error("Metrics.Enabled = false, want true")
+	}
+	if cfg.Metrics.Path != "/custom-metrics" {
+		t.Errorf("Metrics.Path = %s, want /custom-metrics", cfg.Metrics.Path)
+	}
+}
+
+func TestEnvOverrides_OpenAPISettings(t *testing.T) {
+	os.Setenv("APIGATE_UPSTREAM_URL", "http://test:8000")
+	os.Setenv("APIGATE_OPENAPI_ENABLED", "true")
+	defer func() {
+		os.Unsetenv("APIGATE_UPSTREAM_URL")
+		os.Unsetenv("APIGATE_OPENAPI_ENABLED")
+	}()
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv error: %v", err)
+	}
+
+	if !cfg.OpenAPI.Enabled {
+		t.Error("OpenAPI.Enabled = false, want true")
+	}
+}
+
+func TestEnvOverrides_PortalSettings(t *testing.T) {
+	os.Setenv("APIGATE_UPSTREAM_URL", "http://test:8000")
+	os.Setenv("APIGATE_PORTAL_ENABLED", "true")
+	os.Setenv("APIGATE_PORTAL_BASE_URL", "https://api.example.com")
+	os.Setenv("APIGATE_PORTAL_APP_NAME", "My API Gateway")
+	defer func() {
+		os.Unsetenv("APIGATE_UPSTREAM_URL")
+		os.Unsetenv("APIGATE_PORTAL_ENABLED")
+		os.Unsetenv("APIGATE_PORTAL_BASE_URL")
+		os.Unsetenv("APIGATE_PORTAL_APP_NAME")
+	}()
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv error: %v", err)
+	}
+
+	if !cfg.Portal.Enabled {
+		t.Error("Portal.Enabled = false, want true")
+	}
+	if cfg.Portal.BaseURL != "https://api.example.com" {
+		t.Errorf("Portal.BaseURL = %s, want https://api.example.com", cfg.Portal.BaseURL)
+	}
+	if cfg.Portal.AppName != "My API Gateway" {
+		t.Errorf("Portal.AppName = %s, want My API Gateway", cfg.Portal.AppName)
+	}
+}
+
+func TestEnvOverrides_SMTPSettings(t *testing.T) {
+	os.Setenv("APIGATE_UPSTREAM_URL", "http://test:8000")
+	os.Setenv("APIGATE_EMAIL_PROVIDER", "smtp")
+	os.Setenv("APIGATE_SMTP_HOST", "smtp.example.com")
+	os.Setenv("APIGATE_SMTP_PORT", "465")
+	os.Setenv("APIGATE_SMTP_USERNAME", "user@example.com")
+	os.Setenv("APIGATE_SMTP_PASSWORD", "secret123")
+	os.Setenv("APIGATE_SMTP_FROM", "noreply@example.com")
+	os.Setenv("APIGATE_SMTP_FROM_NAME", "API Gateway")
+	os.Setenv("APIGATE_SMTP_USE_TLS", "true")
+	defer func() {
+		os.Unsetenv("APIGATE_UPSTREAM_URL")
+		os.Unsetenv("APIGATE_EMAIL_PROVIDER")
+		os.Unsetenv("APIGATE_SMTP_HOST")
+		os.Unsetenv("APIGATE_SMTP_PORT")
+		os.Unsetenv("APIGATE_SMTP_USERNAME")
+		os.Unsetenv("APIGATE_SMTP_PASSWORD")
+		os.Unsetenv("APIGATE_SMTP_FROM")
+		os.Unsetenv("APIGATE_SMTP_FROM_NAME")
+		os.Unsetenv("APIGATE_SMTP_USE_TLS")
+	}()
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv error: %v", err)
+	}
+
+	if cfg.Email.Provider != "smtp" {
+		t.Errorf("Email.Provider = %s, want smtp", cfg.Email.Provider)
+	}
+	if cfg.Email.SMTP.Host != "smtp.example.com" {
+		t.Errorf("Email.SMTP.Host = %s, want smtp.example.com", cfg.Email.SMTP.Host)
+	}
+	if cfg.Email.SMTP.Port != 465 {
+		t.Errorf("Email.SMTP.Port = %d, want 465", cfg.Email.SMTP.Port)
+	}
+	if cfg.Email.SMTP.Username != "user@example.com" {
+		t.Errorf("Email.SMTP.Username = %s, want user@example.com", cfg.Email.SMTP.Username)
+	}
+	if cfg.Email.SMTP.Password != "secret123" {
+		t.Errorf("Email.SMTP.Password = %s, want secret123", cfg.Email.SMTP.Password)
+	}
+	if cfg.Email.SMTP.From != "noreply@example.com" {
+		t.Errorf("Email.SMTP.From = %s, want noreply@example.com", cfg.Email.SMTP.From)
+	}
+	if cfg.Email.SMTP.FromName != "API Gateway" {
+		t.Errorf("Email.SMTP.FromName = %s, want API Gateway", cfg.Email.SMTP.FromName)
+	}
+	if !cfg.Email.SMTP.UseTLS {
+		t.Error("Email.SMTP.UseTLS = false, want true")
+	}
+}
+
+func TestEnvOverrides_InvalidPort(t *testing.T) {
+	os.Setenv("APIGATE_UPSTREAM_URL", "http://test:8000")
+	os.Setenv("APIGATE_SERVER_PORT", "not-a-number")
+	defer func() {
+		os.Unsetenv("APIGATE_UPSTREAM_URL")
+		os.Unsetenv("APIGATE_SERVER_PORT")
+	}()
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv error: %v", err)
+	}
+
+	// Should use default port when env var is invalid
+	if cfg.Server.Port != 8080 {
+		t.Errorf("Server.Port = %d, want 8080 (default)", cfg.Server.Port)
+	}
+}
+
+func TestEnvOverrides_InvalidDuration(t *testing.T) {
+	os.Setenv("APIGATE_UPSTREAM_URL", "http://test:8000")
+	os.Setenv("APIGATE_SERVER_READ_TIMEOUT", "not-a-duration")
+	os.Setenv("APIGATE_UPSTREAM_TIMEOUT", "bad-value")
+	defer func() {
+		os.Unsetenv("APIGATE_UPSTREAM_URL")
+		os.Unsetenv("APIGATE_SERVER_READ_TIMEOUT")
+		os.Unsetenv("APIGATE_UPSTREAM_TIMEOUT")
+	}()
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv error: %v", err)
+	}
+
+	// Should use default when env var is invalid
+	if cfg.Server.ReadTimeout != 30*time.Second {
+		t.Errorf("Server.ReadTimeout = %v, want 30s (default)", cfg.Server.ReadTimeout)
+	}
+}
+
+func TestEnvOverrides_InvalidIntegers(t *testing.T) {
+	os.Setenv("APIGATE_UPSTREAM_URL", "http://test:8000")
+	os.Setenv("APIGATE_RATELIMIT_BURST", "not-a-number")
+	os.Setenv("APIGATE_RATELIMIT_WINDOW", "invalid")
+	os.Setenv("APIGATE_SMTP_PORT", "bad-port")
+	defer func() {
+		os.Unsetenv("APIGATE_UPSTREAM_URL")
+		os.Unsetenv("APIGATE_RATELIMIT_BURST")
+		os.Unsetenv("APIGATE_RATELIMIT_WINDOW")
+		os.Unsetenv("APIGATE_SMTP_PORT")
+	}()
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv error: %v", err)
+	}
+
+	// Should use defaults when env vars are invalid
+	if cfg.RateLimit.BurstTokens != 5 {
+		t.Errorf("RateLimit.BurstTokens = %d, want 5 (default)", cfg.RateLimit.BurstTokens)
+	}
+	if cfg.RateLimit.WindowSecs != 60 {
+		t.Errorf("RateLimit.WindowSecs = %d, want 60 (default)", cfg.RateLimit.WindowSecs)
+	}
+	if cfg.Email.SMTP.Port != 587 {
+		t.Errorf("Email.SMTP.Port = %d, want 587 (default)", cfg.Email.SMTP.Port)
+	}
+}
+
+func TestLoadWithFallback_EmptyPath(t *testing.T) {
+	os.Setenv("APIGATE_UPSTREAM_URL", "http://env-fallback:8000")
+	defer os.Unsetenv("APIGATE_UPSTREAM_URL")
+
+	cfg, err := config.LoadWithFallback("")
+	if err != nil {
+		t.Fatalf("LoadWithFallback error: %v", err)
+	}
+
+	if cfg.Upstream.URL != "http://env-fallback:8000" {
+		t.Errorf("Upstream.URL = %s, want http://env-fallback:8000", cfg.Upstream.URL)
+	}
+}
+
+func TestLoad_AllConfigFields(t *testing.T) {
+	content := `
+server:
+  host: "0.0.0.0"
+  port: 8080
+  read_timeout: 30s
+  write_timeout: 60s
+
+upstream:
+  url: "http://localhost:3000"
+  timeout: 30s
+  max_idle_conns: 100
+  idle_conn_timeout: 90s
+
+auth:
+  mode: "local"
+  key_prefix: "ak_"
+  header: "X-API-Key"
+  jwt_secret: "super-secret"
+
+rate_limit:
+  enabled: true
+  burst_tokens: 10
+  window_secs: 60
+
+usage:
+  mode: "local"
+  batch_size: 50
+  flush_interval: 5s
+
+billing:
+  mode: "stripe"
+  stripe_key: "sk_test_xxx"
+
+database:
+  driver: "sqlite"
+  dsn: ":memory:"
+
+plans:
+  - id: "free"
+    name: "Free"
+    rate_limit_per_minute: 60
+    requests_per_month: 1000
+    price_monthly: 0
+    overage_price: 0
+  - id: "pro"
+    name: "Pro"
+    rate_limit_per_minute: 600
+    requests_per_month: 100000
+    price_monthly: 2999
+    overage_price: 1
+
+endpoints:
+  - path: "/api/heavy"
+    method: "POST"
+    cost_multiplier: 5.0
+
+logging:
+  level: "debug"
+  format: "console"
+
+metrics:
+  enabled: true
+  path: "/metrics"
+
+openapi:
+  enabled: true
+
+portal:
+  enabled: true
+  base_url: "https://api.example.com"
+  app_name: "Test Gateway"
+
+email:
+  provider: "smtp"
+  smtp:
+    host: "smtp.example.com"
+    port: 587
+    username: "user"
+    password: "pass"
+    from: "noreply@example.com"
+    from_name: "Test"
+    use_tls: true
+    use_implicit: false
+    skip_verify: false
+    timeout: 30s
+`
+
+	cfg := writeAndLoad(t, content)
+
+	// Verify all fields are properly loaded
+	if cfg.Server.Host != "0.0.0.0" {
+		t.Errorf("Server.Host = %s, want 0.0.0.0", cfg.Server.Host)
+	}
+	if cfg.Upstream.MaxIdleConns != 100 {
+		t.Errorf("Upstream.MaxIdleConns = %d, want 100", cfg.Upstream.MaxIdleConns)
+	}
+	if cfg.Upstream.IdleConnTimeout != 90*time.Second {
+		t.Errorf("Upstream.IdleConnTimeout = %v, want 90s", cfg.Upstream.IdleConnTimeout)
+	}
+	if cfg.Auth.Header != "X-API-Key" {
+		t.Errorf("Auth.Header = %s, want X-API-Key", cfg.Auth.Header)
+	}
+	if cfg.Auth.JWTSecret != "super-secret" {
+		t.Errorf("Auth.JWTSecret = %s, want super-secret", cfg.Auth.JWTSecret)
+	}
+	if cfg.RateLimit.Enabled != true {
+		t.Error("RateLimit.Enabled = false, want true")
+	}
+	if cfg.Usage.BatchSize != 50 {
+		t.Errorf("Usage.BatchSize = %d, want 50", cfg.Usage.BatchSize)
+	}
+	if cfg.Usage.FlushInterval != 5*time.Second {
+		t.Errorf("Usage.FlushInterval = %v, want 5s", cfg.Usage.FlushInterval)
+	}
+	if len(cfg.Plans) != 2 {
+		t.Errorf("len(Plans) = %d, want 2", len(cfg.Plans))
+	}
+	if cfg.Plans[1].PriceMonthly != 2999 {
+		t.Errorf("Plans[1].PriceMonthly = %d, want 2999", cfg.Plans[1].PriceMonthly)
+	}
+	if cfg.Plans[1].OveragePrice != 1 {
+		t.Errorf("Plans[1].OveragePrice = %d, want 1", cfg.Plans[1].OveragePrice)
+	}
+	if cfg.Metrics.Path != "/metrics" {
+		t.Errorf("Metrics.Path = %s, want /metrics", cfg.Metrics.Path)
+	}
+	if cfg.Email.SMTP.Timeout != 30*time.Second {
+		t.Errorf("Email.SMTP.Timeout = %v, want 30s", cfg.Email.SMTP.Timeout)
+	}
+}
+
 // Helpers
 
 func writeAndLoad(t *testing.T, content string) *config.Config {

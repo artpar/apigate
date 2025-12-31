@@ -18,6 +18,7 @@ type LocalUsageRecorder struct {
 	flushInterval time.Duration
 	stopCh        chan struct{}
 	wg            sync.WaitGroup
+	closeOnce     sync.Once
 }
 
 // NewLocalUsageRecorder creates a new local usage recorder.
@@ -98,20 +99,23 @@ func (r *LocalUsageRecorder) flushLoop() {
 
 // Close stops the recorder and flushes remaining events.
 func (r *LocalUsageRecorder) Close() error {
-	close(r.stopCh)
-	r.wg.Wait()
+	var err error
+	r.closeOnce.Do(func() {
+		close(r.stopCh)
+		r.wg.Wait()
 
-	// Final flush with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+		// Final flush with timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
 
-	r.mu.Lock()
-	defer r.mu.Unlock()
+		r.mu.Lock()
+		defer r.mu.Unlock()
 
-	if len(r.buffer) > 0 {
-		return r.store.RecordBatch(ctx, r.buffer)
-	}
-	return nil
+		if len(r.buffer) > 0 {
+			err = r.store.RecordBatch(ctx, r.buffer)
+		}
+	})
+	return err
 }
 
 // Ensure interface compliance.

@@ -576,3 +576,543 @@ func TestTransformService_InvalidExpr(t *testing.T) {
 		t.Error("expected error for invalid expression")
 	}
 }
+
+func TestTransformService_ValidateExpr(t *testing.T) {
+	svc := app.NewTransformService()
+
+	tests := []struct {
+		name       string
+		expr       string
+		context    string
+		wantValid  bool
+	}{
+		{"empty expression", "", "request", true},
+		{"valid request expr", `method + " " + path`, "request", true},
+		{"valid response expr", `status > 200`, "response", true},
+		{"valid streaming expr", `responseBytes / 1000`, "streaming", true},
+		{"invalid syntax", `method + `, "request", false},
+		{"unknown variable in request", `nonexistent`, "request", false},
+		{"default context", `method`, "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := svc.ValidateExpr(tt.expr, tt.context)
+			if result.Valid != tt.wantValid {
+				t.Errorf("ValidateExpr() valid = %v, want %v, error = %s", result.Valid, tt.wantValid, result.Error)
+			}
+		})
+	}
+}
+
+func TestTransformService_AdvancedExprFunctions(t *testing.T) {
+	svc := app.NewTransformService()
+	ctx := context.Background()
+
+	tests := []struct {
+		name string
+		expr string
+		data map[string]any
+		want any
+	}{
+		{
+			"json parse",
+			`json(data).key`,
+			map[string]any{"data": []byte(`{"key":"value"}`)},
+			"value",
+		},
+		{
+			"now function",
+			`now() > 0`,
+			nil,
+			true,
+		},
+		{
+			"nowRFC3339",
+			`len(nowRFC3339()) > 0`,
+			nil,
+			true,
+		},
+		{
+			"urlDecode",
+			`urlDecode("hello%20world")`,
+			nil,
+			"hello world",
+		},
+		{
+			"jsonDecode",
+			`jsonDecode("{\"a\":1}").a`,
+			nil,
+			1.0,
+		},
+		{
+			"first function",
+			`first(arr)`,
+			map[string]any{"arr": []any{1, 2, 3}},
+			1,
+		},
+		{
+			"last function",
+			`last(arr)`,
+			map[string]any{"arr": []any{1, 2, 3}},
+			3,
+		},
+		{
+			"count function",
+			`count(arr)`,
+			map[string]any{"arr": []any{1, 2, 3}},
+			3,
+		},
+		{
+			"sum function",
+			`sum(arr)`,
+			map[string]any{"arr": []any{1.0, 2.0, 3.0}},
+			6.0,
+		},
+		{
+			"sum with field",
+			`sum(arr, "val")`,
+			map[string]any{"arr": []any{
+				map[string]any{"val": 1.0},
+				map[string]any{"val": 2.0},
+				map[string]any{"val": 3.0},
+			}},
+			6.0,
+		},
+		{
+			"avg function",
+			`avg(arr)`,
+			map[string]any{"arr": []any{1.0, 2.0, 3.0}},
+			2.0,
+		},
+		{
+			"avg with field",
+			`avg(arr, "val")`,
+			map[string]any{"arr": []any{
+				map[string]any{"val": 2.0},
+				map[string]any{"val": 4.0},
+			}},
+			3.0,
+		},
+		{
+			"max function",
+			`max(arr)`,
+			map[string]any{"arr": []any{1.0, 5.0, 3.0}},
+			5.0,
+		},
+		{
+			"max with field",
+			`max(arr, "val")`,
+			map[string]any{"arr": []any{
+				map[string]any{"val": 1.0},
+				map[string]any{"val": 5.0},
+			}},
+			5.0,
+		},
+		{
+			"min function",
+			`min(arr)`,
+			map[string]any{"arr": []any{3.0, 1.0, 5.0}},
+			1.0,
+		},
+		{
+			"min with field",
+			`min(arr, "val")`,
+			map[string]any{"arr": []any{
+				map[string]any{"val": 3.0},
+				map[string]any{"val": 1.0},
+			}},
+			1.0,
+		},
+		{
+			"get nested field",
+			`get(obj, "a.b.c")`,
+			map[string]any{"obj": map[string]any{
+				"a": map[string]any{
+					"b": map[string]any{
+						"c": "value",
+					},
+				},
+			}},
+			"value",
+		},
+		{
+			"lines function",
+			`len(lines(data))`,
+			map[string]any{"data": []byte("line1\nline2\nline3")},
+			3,
+		},
+		{
+			"linesNonEmpty function",
+			`len(linesNonEmpty(data))`,
+			map[string]any{"data": []byte("line1\n\nline2\n\n")},
+			2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := svc.Eval(ctx, tt.expr, tt.data)
+			if err != nil {
+				t.Fatalf("error: %v", err)
+			}
+			if result != tt.want {
+				t.Errorf("got %v (%T), want %v (%T)", result, result, tt.want, tt.want)
+			}
+		})
+	}
+}
+
+func TestTransformService_SSEFunctions(t *testing.T) {
+	svc := app.NewTransformService()
+	ctx := context.Background()
+
+	sseData := []byte("event: message\ndata: {\"msg\":\"hello\"}\nid: 1\n\nevent: done\ndata: {\"msg\":\"bye\"}\n\n")
+
+	tests := []struct {
+		name string
+		expr string
+		data map[string]any
+	}{
+		{
+			"sseEvents",
+			`len(sseEvents(data)) > 0`,
+			map[string]any{"data": sseData},
+		},
+		{
+			"sseLastData",
+			`len(sseLastData(data)) > 0`,
+			map[string]any{"data": sseData},
+		},
+		{
+			"sseAllData",
+			`len(sseAllData(data)) > 0`,
+			map[string]any{"data": sseData},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := svc.Eval(ctx, tt.expr, tt.data)
+			if err != nil {
+				t.Fatalf("error: %v", err)
+			}
+			if result != true {
+				t.Errorf("expected true, got %v", result)
+			}
+		})
+	}
+}
+
+func TestTransformService_EdgeCases(t *testing.T) {
+	svc := app.NewTransformService()
+	ctx := context.Background()
+
+	// Empty arrays
+	result, _ := svc.Eval(ctx, `first(arr)`, map[string]any{"arr": []any{}})
+	if result != nil {
+		t.Errorf("first of empty array should be nil")
+	}
+
+	result, _ = svc.Eval(ctx, `last(arr)`, map[string]any{"arr": []any{}})
+	if result != nil {
+		t.Errorf("last of empty array should be nil")
+	}
+
+	result, _ = svc.Eval(ctx, `count(nil)`, map[string]any{})
+	if result != 0 {
+		t.Errorf("count of nil should be 0")
+	}
+
+	result, _ = svc.Eval(ctx, `sum(nil)`, map[string]any{})
+	if result != 0.0 {
+		t.Errorf("sum of nil should be 0")
+	}
+
+	// Empty avg returns 0
+	result, _ = svc.Eval(ctx, `avg(arr)`, map[string]any{"arr": []any{}})
+	if result != 0.0 {
+		t.Errorf("avg of empty array should be 0")
+	}
+
+	// max/min of empty array
+	result, _ = svc.Eval(ctx, `max(arr)`, map[string]any{"arr": []any{}})
+	if result != nil {
+		t.Errorf("max of empty array should be nil")
+	}
+
+	result, _ = svc.Eval(ctx, `min(arr)`, map[string]any{"arr": []any{}})
+	if result != nil {
+		t.Errorf("min of empty array should be nil")
+	}
+
+	// get with non-map returns nil
+	result, _ = svc.Eval(ctx, `get(obj, "a.b")`, map[string]any{"obj": "not a map"})
+	if result != nil {
+		t.Errorf("get on non-map should be nil")
+	}
+
+	// json with empty bytes
+	result, _ = svc.Eval(ctx, `json(data)`, map[string]any{"data": []byte{}})
+	if result != nil {
+		t.Errorf("json of empty bytes should be nil")
+	}
+}
+
+func TestTransformService_TypeConversions(t *testing.T) {
+	svc := app.NewTransformService()
+	ctx := context.Background()
+
+	tests := []struct {
+		name string
+		expr string
+		data map[string]any
+		want any
+	}{
+		{
+			"toString nil",
+			`toString(nil)`,
+			map[string]any{"nil": nil},
+			"",
+		},
+		{
+			"toString bytes",
+			`toString(data)`,
+			map[string]any{"data": []byte("hello")},
+			"hello",
+		},
+		{
+			"toInt nil",
+			`toInt(nil)`,
+			map[string]any{"nil": nil},
+			0,
+		},
+		{
+			"toInt int64",
+			`toInt(val)`,
+			map[string]any{"val": int64(42)},
+			42,
+		},
+		{
+			"toInt float",
+			`toInt(val)`,
+			map[string]any{"val": 42.9},
+			42,
+		},
+		{
+			"toInt string",
+			`toInt(val)`,
+			map[string]any{"val": "42"},
+			42,
+		},
+		{
+			"toFloat nil",
+			`toFloat(nil)`,
+			map[string]any{"nil": nil},
+			0.0,
+		},
+		{
+			"toFloat float32",
+			`toFloat(val)`,
+			map[string]any{"val": float32(3.14)},
+			float64(float32(3.14)),
+		},
+		{
+			"toFloat int",
+			`toFloat(val)`,
+			map[string]any{"val": 42},
+			42.0,
+		},
+		{
+			"toFloat int64",
+			`toFloat(val)`,
+			map[string]any{"val": int64(42)},
+			42.0,
+		},
+		{
+			"toFloat string",
+			`toFloat(val)`,
+			map[string]any{"val": "3.14"},
+			3.14,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := svc.Eval(ctx, tt.expr, tt.data)
+			if err != nil {
+				t.Fatalf("error: %v", err)
+			}
+			if result != tt.want {
+				t.Errorf("got %v (%T), want %v (%T)", result, result, tt.want, tt.want)
+			}
+		})
+	}
+}
+
+func TestTransformService_TransformWithNilHeaders(t *testing.T) {
+	svc := app.NewTransformService()
+	ctx := context.Background()
+
+	// Request with nil headers
+	req := proxy.Request{
+		Method: "GET",
+		Path:   "/api/data",
+	}
+	transform := &route.Transform{
+		SetHeaders: map[string]string{
+			"X-Added": `"value"`,
+		},
+	}
+
+	result, err := svc.TransformRequest(ctx, req, transform, nil)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.Headers["X-Added"] != "value" {
+		t.Errorf("header not set correctly")
+	}
+}
+
+func TestTransformService_ResponseTransformWithNilHeaders(t *testing.T) {
+	svc := app.NewTransformService()
+	ctx := context.Background()
+
+	// Response with nil headers
+	resp := proxy.Response{
+		Status: 200,
+		Body:   []byte(`{"data":"test"}`),
+	}
+	transform := &route.Transform{
+		SetHeaders: map[string]string{
+			"X-Response": `"value"`,
+		},
+	}
+
+	result, err := svc.TransformResponse(ctx, resp, transform, nil)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.Headers["X-Response"] != "value" {
+		t.Errorf("header not set correctly")
+	}
+}
+
+func TestTransformService_TransformErrors(t *testing.T) {
+	svc := app.NewTransformService()
+	ctx := context.Background()
+
+	// Invalid header expression
+	req := proxy.Request{
+		Method:  "GET",
+		Path:    "/api/data",
+		Headers: map[string]string{},
+	}
+	transform := &route.Transform{
+		SetHeaders: map[string]string{
+			"X-Bad": `nonexistent_var`,
+		},
+	}
+
+	_, err := svc.TransformRequest(ctx, req, transform, nil)
+	if err == nil {
+		t.Error("expected error for invalid header expression")
+	}
+
+	// Invalid query expression
+	transform2 := &route.Transform{
+		SetQuery: map[string]string{
+			"bad": `nonexistent_var`,
+		},
+	}
+
+	_, err = svc.TransformRequest(ctx, req, transform2, nil)
+	if err == nil {
+		t.Error("expected error for invalid query expression")
+	}
+
+	// Invalid body expression
+	transform3 := &route.Transform{
+		BodyExpr: `nonexistent_var`,
+	}
+
+	_, err = svc.TransformRequest(ctx, req, transform3, nil)
+	if err == nil {
+		t.Error("expected error for invalid body expression")
+	}
+}
+
+func TestTransformService_ResponseTransformErrors(t *testing.T) {
+	svc := app.NewTransformService()
+	ctx := context.Background()
+
+	resp := proxy.Response{
+		Status:  200,
+		Headers: map[string]string{},
+	}
+
+	// Invalid header expression
+	transform := &route.Transform{
+		SetHeaders: map[string]string{
+			"X-Bad": `nonexistent_var`,
+		},
+	}
+
+	_, err := svc.TransformResponse(ctx, resp, transform, nil)
+	if err == nil {
+		t.Error("expected error for invalid header expression")
+	}
+
+	// Invalid body expression
+	transform2 := &route.Transform{
+		BodyExpr: `nonexistent_var`,
+	}
+
+	_, err = svc.TransformResponse(ctx, resp, transform2, nil)
+	if err == nil {
+		t.Error("expected error for invalid body expression")
+	}
+}
+
+func TestTransformService_JoinWithAnyArray(t *testing.T) {
+	svc := app.NewTransformService()
+	ctx := context.Background()
+
+	// join with []any
+	result, err := svc.Eval(ctx, `join(arr, "-")`, map[string]any{
+		"arr": []any{"a", "b", "c"},
+	})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result != "a-b-c" {
+		t.Errorf("got %v, want a-b-c", result)
+	}
+}
+
+func TestTransformService_ToSliceConversions(t *testing.T) {
+	svc := app.NewTransformService()
+	ctx := context.Background()
+
+	// Test with string slice
+	result, err := svc.Eval(ctx, `count(arr)`, map[string]any{
+		"arr": []string{"a", "b", "c"},
+	})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result != 3 {
+		t.Errorf("got %v, want 3", result)
+	}
+
+	// Test with map slice
+	result, err = svc.Eval(ctx, `count(arr)`, map[string]any{
+		"arr": []map[string]any{{"k": "v"}, {"k": "v2"}},
+	})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result != 2 {
+		t.Errorf("got %v, want 2", result)
+	}
+}

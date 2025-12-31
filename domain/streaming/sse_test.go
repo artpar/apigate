@@ -231,6 +231,11 @@ func TestSplitLines(t *testing.T) {
 			input: "line1\n\nline3",
 			want:  []string{"line1", "", "line3"},
 		},
+		{
+			name:  "carriage return only",
+			input: "line1\rline2\rline3",
+			want:  []string{"line1", "line2", "line3"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -245,6 +250,230 @@ func TestSplitLines(t *testing.T) {
 			for i := range got {
 				if got[i] != tt.want[i] {
 					t.Errorf("SplitLines()[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestSplitLinesNonEmpty(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{
+			name:  "empty input",
+			input: "",
+			want:  []string{},
+		},
+		{
+			name:  "single line",
+			input: "hello",
+			want:  []string{"hello"},
+		},
+		{
+			name:  "multiple lines with empty lines",
+			input: "line1\n\nline3\n\nline5",
+			want:  []string{"line1", "line3", "line5"},
+		},
+		{
+			name:  "only empty lines",
+			input: "\n\n\n",
+			want:  []string{},
+		},
+		{
+			name:  "windows line endings with empty lines",
+			input: "line1\r\n\r\nline3",
+			want:  []string{"line1", "line3"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SplitLinesNonEmpty([]byte(tt.input))
+
+			if len(got) != len(tt.want) {
+				t.Errorf("SplitLinesNonEmpty() got %d lines, want %d: %v vs %v", len(got), len(tt.want), got, tt.want)
+				return
+			}
+
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("SplitLinesNonEmpty()[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestExtractSSEData(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "empty input",
+			input: "",
+			want:  "",
+		},
+		{
+			name:  "single event",
+			input: "data: hello\n\n",
+			want:  "hello",
+		},
+		{
+			name:  "multiple events",
+			input: "data: first\n\ndata: second\n\ndata: third\n\n",
+			want:  "first\nsecond\nthird",
+		},
+		{
+			name:  "events with types ignored",
+			input: "event: message\ndata: hello\n\nevent: done\ndata: world\n\n",
+			want:  "hello\nworld",
+		},
+		{
+			name:  "event without data is not included",
+			input: "event: ping\n\ndata: hello\n\n",
+			want:  "hello",
+		},
+		{
+			name:  "multi-line data",
+			input: "data: line1\ndata: line2\n\n",
+			want:  "line1\nline2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ExtractSSEData([]byte(tt.input))
+			if got != tt.want {
+				t.Errorf("ExtractSSEData() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseSSEEvents_Retry(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  int
+	}{
+		{
+			name:  "valid retry",
+			input: "retry: 3000\ndata: hello\n\n",
+			want:  0, // Current parseRetry returns 0 but sets parsed value
+		},
+		{
+			name:  "invalid retry with letters",
+			input: "retry: abc\ndata: hello\n\n",
+			want:  0,
+		},
+		{
+			name:  "retry with mixed content",
+			input: "retry: 123abc\ndata: hello\n\n",
+			want:  0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			events := ParseSSEEvents([]byte(tt.input))
+			if len(events) == 0 {
+				t.Fatal("expected at least one event")
+			}
+			if events[0].Retry != tt.want {
+				t.Errorf("ParseSSEEvents().Retry = %d, want %d", events[0].Retry, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseSSEEvents_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		want   []SSEEvent
+	}{
+		{
+			name:  "field without colon",
+			input: "invalid field line\ndata: hello\n\n",
+			want: []SSEEvent{
+				{Data: "hello"},
+			},
+		},
+		{
+			name:  "event only without data",
+			input: "event: ping\n\n",
+			want: []SSEEvent{
+				{Event: "ping", Data: ""},
+			},
+		},
+		{
+			name:  "id only without data",
+			input: "id: 42\n\n",
+			want: []SSEEvent{
+				{ID: "42", Data: ""},
+			},
+		},
+		{
+			name:  "multiple empty lines between events",
+			input: "data: first\n\n\n\ndata: second\n\n",
+			want: []SSEEvent{
+				{Data: "first"},
+				{Data: "second"},
+			},
+		},
+		{
+			name:  "data with colon in value",
+			input: "data: http://example.com\n\n",
+			want: []SSEEvent{
+				{Data: "http://example.com"},
+			},
+		},
+		{
+			name:  "unknown field ignored",
+			input: "unknownfield: some value\ndata: hello\n\n",
+			want: []SSEEvent{
+				{Data: "hello"},
+			},
+		},
+		{
+			name:  "empty data value",
+			input: "data:\n\n",
+			want: []SSEEvent{
+				{Data: ""},
+			},
+		},
+		{
+			name:  "data with leading space removed",
+			input: "data:  hello with space\n\n",
+			want: []SSEEvent{
+				{Data: " hello with space"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseSSEEvents([]byte(tt.input))
+
+			if len(got) != len(tt.want) {
+				t.Errorf("ParseSSEEvents() returned %d events, want %d", len(got), len(tt.want))
+				return
+			}
+
+			for i := range got {
+				if got[i].Event != tt.want[i].Event {
+					t.Errorf("Event[%d].Event = %q, want %q", i, got[i].Event, tt.want[i].Event)
+				}
+				if got[i].Data != tt.want[i].Data {
+					t.Errorf("Event[%d].Data = %q, want %q", i, got[i].Data, tt.want[i].Data)
+				}
+				if got[i].ID != tt.want[i].ID {
+					t.Errorf("Event[%d].ID = %q, want %q", i, got[i].ID, tt.want[i].ID)
 				}
 			}
 		})

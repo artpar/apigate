@@ -40,7 +40,7 @@ schema:
   notify_on_discrepancy: { type: bool, default: true, description: "Send notification when discrepancies are found" }
 
   # Statistics
-  last_run:       { type: datetime, internal: true }
+  last_run:       { type: timestamp, internal: true }
   last_result:    { type: enum, values: [success, partial, failed], internal: true }
   total_runs:     { type: int, default: 0, internal: true }
   total_fixes:    { type: int, default: 0, internal: true }

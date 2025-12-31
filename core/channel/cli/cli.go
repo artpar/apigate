@@ -48,6 +48,11 @@ func (c *Channel) Register(mod convention.Derived) error {
 		return nil
 	}
 
+	// Skip if no root command (e.g., in tests)
+	if c.rootCmd == nil {
+		return nil
+	}
+
 	c.modules[mod.Source.Name] = mod
 
 	// Update validator with all modules

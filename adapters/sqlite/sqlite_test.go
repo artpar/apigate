@@ -1213,6 +1213,1172 @@ func TestUpstreamStore_DuplicateID(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
+// UserStore Additional Tests
+// -----------------------------------------------------------------------------
+
+func TestUserStore_Delete(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewUserStore(db)
+	ctx := context.Background()
+
+	user := ports.User{
+		ID:     "user-delete-1",
+		Email:  "delete@example.com",
+		PlanID: "free",
+		Status: "active",
+	}
+
+	if err := store.Create(ctx, user); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	if err := store.Delete(ctx, user.ID); err != nil {
+		t.Fatalf("delete user: %v", err)
+	}
+
+	_, err := store.Get(ctx, user.ID)
+	if err != sqlite.ErrNotFound {
+		t.Errorf("expected ErrNotFound after delete, got %v", err)
+	}
+}
+
+func TestUserStore_DeleteNotFound(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewUserStore(db)
+	ctx := context.Background()
+
+	err := store.Delete(ctx, "nonexistent")
+	if err != sqlite.ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestUserStore_UpdateNotFound(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewUserStore(db)
+	ctx := context.Background()
+
+	user := ports.User{
+		ID:     "nonexistent",
+		Email:  "nonexistent@example.com",
+		PlanID: "free",
+		Status: "active",
+	}
+
+	err := store.Update(ctx, user)
+	if err != sqlite.ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestUserStore_CreateWithTimestamps(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewUserStore(db)
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	user := ports.User{
+		ID:        "user-timestamps",
+		Email:     "timestamps@example.com",
+		PlanID:    "free",
+		Status:    "active",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if err := store.Create(ctx, user); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	got, err := store.Get(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("get user: %v", err)
+	}
+
+	if got.CreatedAt.IsZero() {
+		t.Error("CreatedAt should not be zero")
+	}
+}
+
+func TestUserStore_UpdateDuplicateEmail(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewUserStore(db)
+	ctx := context.Background()
+
+	// Create first user
+	user1 := ports.User{
+		ID:     "user-1",
+		Email:  "first@example.com",
+		PlanID: "free",
+		Status: "active",
+	}
+	if err := store.Create(ctx, user1); err != nil {
+		t.Fatalf("create user1: %v", err)
+	}
+
+	// Create second user
+	user2 := ports.User{
+		ID:     "user-2",
+		Email:  "second@example.com",
+		PlanID: "free",
+		Status: "active",
+	}
+	if err := store.Create(ctx, user2); err != nil {
+		t.Fatalf("create user2: %v", err)
+	}
+
+	// Try to update second user with first user's email
+	user2.Email = "first@example.com"
+	err := store.Update(ctx, user2)
+	if err == nil {
+		t.Fatal("expected error for duplicate email on update")
+	}
+}
+
+func TestUserStore_WithStripeID(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewUserStore(db)
+	ctx := context.Background()
+
+	user := ports.User{
+		ID:       "user-stripe",
+		Email:    "stripe@example.com",
+		PlanID:   "pro",
+		Status:   "active",
+		StripeID: "cus_12345",
+	}
+
+	if err := store.Create(ctx, user); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	got, err := store.Get(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("get user: %v", err)
+	}
+
+	if got.StripeID != "cus_12345" {
+		t.Errorf("StripeID = %s, want cus_12345", got.StripeID)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// KeyStore Additional Tests
+// -----------------------------------------------------------------------------
+
+func TestKeyStore_List(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	userStore := sqlite.NewUserStore(db)
+	keyStore := sqlite.NewKeyStore(db)
+	ctx := context.Background()
+
+	user := ports.User{
+		ID:     "user-list",
+		Email:  "list@example.com",
+		PlanID: "free",
+		Status: "active",
+	}
+	userStore.Create(ctx, user)
+
+	// Create multiple keys
+	for i := 0; i < 3; i++ {
+		k := key.Key{
+			ID:        "key-list-" + itoa(i),
+			UserID:    "user-list",
+			Hash:      []byte("hash"),
+			Prefix:    "ak_list" + itoa(i) + "abcd",
+			CreatedAt: time.Now().UTC(),
+		}
+		keyStore.Create(ctx, k)
+	}
+
+	keys, err := keyStore.List(ctx)
+	if err != nil {
+		t.Fatalf("list keys: %v", err)
+	}
+
+	if len(keys) != 3 {
+		t.Errorf("len = %d, want 3", len(keys))
+	}
+}
+
+func TestKeyStore_Update(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	userStore := sqlite.NewUserStore(db)
+	keyStore := sqlite.NewKeyStore(db)
+	ctx := context.Background()
+
+	user := ports.User{
+		ID:     "user-update-key",
+		Email:  "updatekey@example.com",
+		PlanID: "free",
+		Status: "active",
+	}
+	userStore.Create(ctx, user)
+
+	k := key.Key{
+		ID:        "key-update-1",
+		UserID:    "user-update-key",
+		Hash:      []byte("hash"),
+		Prefix:    "ak_update1234",
+		Name:      "Original Name",
+		Scopes:    []string{"/api/*"},
+		CreatedAt: time.Now().UTC(),
+	}
+	keyStore.Create(ctx, k)
+
+	// Update the key
+	k.Name = "Updated Name"
+	k.Scopes = []string{"/api/v1/*", "/api/v2/*"}
+	expiresAt := time.Now().UTC().Add(time.Hour * 24)
+	k.ExpiresAt = &expiresAt
+
+	if err := keyStore.Update(ctx, k); err != nil {
+		t.Fatalf("update key: %v", err)
+	}
+
+	got, err := keyStore.GetByID(ctx, k.ID)
+	if err != nil {
+		t.Fatalf("get key: %v", err)
+	}
+
+	if got.Name != "Updated Name" {
+		t.Errorf("Name = %s, want Updated Name", got.Name)
+	}
+	if len(got.Scopes) != 2 {
+		t.Errorf("Scopes len = %d, want 2", len(got.Scopes))
+	}
+	if got.ExpiresAt == nil {
+		t.Error("ExpiresAt should not be nil")
+	}
+}
+
+func TestKeyStore_UpdateNotFound(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	keyStore := sqlite.NewKeyStore(db)
+	ctx := context.Background()
+
+	k := key.Key{
+		ID:        "nonexistent-key",
+		UserID:    "user-1",
+		Hash:      []byte("hash"),
+		Prefix:    "ak_nonexist12",
+		CreatedAt: time.Now().UTC(),
+	}
+
+	err := keyStore.Update(ctx, k)
+	if err != sqlite.ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestKeyStore_Delete(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	userStore := sqlite.NewUserStore(db)
+	keyStore := sqlite.NewKeyStore(db)
+	ctx := context.Background()
+
+	user := ports.User{
+		ID:     "user-del-key",
+		Email:  "delkey@example.com",
+		PlanID: "free",
+		Status: "active",
+	}
+	userStore.Create(ctx, user)
+
+	k := key.Key{
+		ID:        "key-del-1",
+		UserID:    "user-del-key",
+		Hash:      []byte("hash"),
+		Prefix:    "ak_delkey1234",
+		CreatedAt: time.Now().UTC(),
+	}
+	keyStore.Create(ctx, k)
+
+	if err := keyStore.Delete(ctx, k.ID); err != nil {
+		t.Fatalf("delete key: %v", err)
+	}
+
+	_, err := keyStore.GetByID(ctx, k.ID)
+	if err != sqlite.ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestKeyStore_DeleteNotFound(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	keyStore := sqlite.NewKeyStore(db)
+	ctx := context.Background()
+
+	err := keyStore.Delete(ctx, "nonexistent")
+	if err != sqlite.ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestKeyStore_RevokeNotFound(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	keyStore := sqlite.NewKeyStore(db)
+	ctx := context.Background()
+
+	err := keyStore.Revoke(ctx, "nonexistent", time.Now())
+	if err != sqlite.ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestKeyStore_GetNotFound(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	keyStore := sqlite.NewKeyStore(db)
+	ctx := context.Background()
+
+	_, err := keyStore.GetByID(ctx, "nonexistent")
+	if err != sqlite.ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestKeyStore_GetByPrefixNoResults(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	keyStore := sqlite.NewKeyStore(db)
+	ctx := context.Background()
+
+	keys, err := keyStore.Get(ctx, "nonexistent_prefix")
+	if err != nil {
+		t.Fatalf("get keys: %v", err)
+	}
+
+	if len(keys) != 0 {
+		t.Errorf("expected empty slice, got %d keys", len(keys))
+	}
+}
+
+func TestKeyStore_WithNullScopes(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	userStore := sqlite.NewUserStore(db)
+	keyStore := sqlite.NewKeyStore(db)
+	ctx := context.Background()
+
+	user := ports.User{
+		ID:     "user-null-scopes",
+		Email:  "nullscopes@example.com",
+		PlanID: "free",
+		Status: "active",
+	}
+	userStore.Create(ctx, user)
+
+	k := key.Key{
+		ID:        "key-null-scopes",
+		UserID:    "user-null-scopes",
+		Hash:      []byte("hash"),
+		Prefix:    "ak_nullscope1",
+		Name:      "No Scopes",
+		Scopes:    nil, // No scopes
+		CreatedAt: time.Now().UTC(),
+	}
+	keyStore.Create(ctx, k)
+
+	got, err := keyStore.GetByID(ctx, k.ID)
+	if err != nil {
+		t.Fatalf("get key: %v", err)
+	}
+
+	if len(got.Scopes) != 0 {
+		t.Errorf("expected empty scopes, got %v", got.Scopes)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// RateLimitStore Additional Tests
+// -----------------------------------------------------------------------------
+
+func TestRateLimitStore_Delete(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewRateLimitStore(db)
+	ctx := context.Background()
+
+	state := ratelimit.WindowState{
+		Count:     10,
+		WindowEnd: time.Now().UTC().Add(time.Minute),
+		BurstUsed: 5,
+	}
+
+	if err := store.Set(ctx, "key-delete", state); err != nil {
+		t.Fatalf("set state: %v", err)
+	}
+
+	if err := store.Delete(ctx, "key-delete"); err != nil {
+		t.Fatalf("delete state: %v", err)
+	}
+
+	// Verify deleted - should return empty state
+	got, err := store.Get(ctx, "key-delete")
+	if err != nil {
+		t.Fatalf("get state: %v", err)
+	}
+
+	if got.Count != 0 {
+		t.Errorf("Count = %d, want 0", got.Count)
+	}
+}
+
+func TestRateLimitStore_Cleanup(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewRateLimitStore(db)
+	ctx := context.Background()
+
+	// Create expired state (window_end is more than 1 hour ago)
+	expiredState := ratelimit.WindowState{
+		Count:     10,
+		WindowEnd: time.Now().UTC().Add(-2 * time.Hour), // 2 hours ago
+		BurstUsed: 5,
+	}
+	store.Set(ctx, "key-expired", expiredState)
+
+	// Create valid state
+	validState := ratelimit.WindowState{
+		Count:     20,
+		WindowEnd: time.Now().UTC().Add(time.Minute),
+		BurstUsed: 10,
+	}
+	store.Set(ctx, "key-valid", validState)
+
+	// Cleanup
+	deleted, err := store.Cleanup(ctx)
+	if err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+
+	if deleted != 1 {
+		t.Errorf("deleted = %d, want 1", deleted)
+	}
+
+	// Verify expired is gone
+	got, err := store.Get(ctx, "key-expired")
+	if err != nil {
+		t.Fatalf("get expired: %v", err)
+	}
+	if got.Count != 0 {
+		t.Errorf("expired Count = %d, want 0", got.Count)
+	}
+
+	// Verify valid still exists
+	got, err = store.Get(ctx, "key-valid")
+	if err != nil {
+		t.Fatalf("get valid: %v", err)
+	}
+	if got.Count != 20 {
+		t.Errorf("valid Count = %d, want 20", got.Count)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// UsageStore Additional Tests
+// -----------------------------------------------------------------------------
+
+func TestUsageStore_RecordBatchEmpty(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewUsageStore(db)
+	ctx := context.Background()
+
+	// Empty batch should succeed
+	if err := store.RecordBatch(ctx, []usage.Event{}); err != nil {
+		t.Fatalf("record empty batch: %v", err)
+	}
+}
+
+func TestUsageStore_GetHistory(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewUsageStore(db)
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+
+	// Create events in different months
+	events := []usage.Event{
+		{
+			ID:             "evt-hist-1",
+			KeyID:          "key-1",
+			UserID:         "user-hist",
+			Method:         "GET",
+			Path:           "/api/data",
+			StatusCode:     200,
+			LatencyMs:      50,
+			RequestBytes:   100,
+			ResponseBytes:  500,
+			CostMultiplier: 1.0,
+			Timestamp:      now,
+		},
+		{
+			ID:             "evt-hist-2",
+			KeyID:          "key-1",
+			UserID:         "user-hist",
+			Method:         "POST",
+			Path:           "/api/data",
+			StatusCode:     500, // Error
+			LatencyMs:      100,
+			RequestBytes:   200,
+			ResponseBytes:  50,
+			CostMultiplier: 2.0,
+			Timestamp:      now,
+		},
+	}
+
+	if err := store.RecordBatch(ctx, events); err != nil {
+		t.Fatalf("record batch: %v", err)
+	}
+
+	history, err := store.GetHistory(ctx, "user-hist", 6)
+	if err != nil {
+		t.Fatalf("get history: %v", err)
+	}
+
+	if len(history) != 1 {
+		t.Errorf("len = %d, want 1", len(history))
+	}
+
+	if history[0].RequestCount != 2 {
+		t.Errorf("RequestCount = %d, want 2", history[0].RequestCount)
+	}
+	if history[0].ErrorCount != 1 {
+		t.Errorf("ErrorCount = %d, want 1", history[0].ErrorCount)
+	}
+}
+
+func TestUsageStore_SaveSummary(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewUsageStore(db)
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	summary := usage.Summary{
+		UserID:       "user-summary",
+		PeriodStart:  now.Truncate(time.Hour * 24),
+		PeriodEnd:    now.Truncate(time.Hour * 24).Add(time.Hour * 24),
+		RequestCount: 100,
+		ComputeUnits: 500.0,
+		BytesIn:      10000,
+		BytesOut:     50000,
+		ErrorCount:   5,
+		AvgLatencyMs: 45,
+	}
+
+	if err := store.SaveSummary(ctx, summary); err != nil {
+		t.Fatalf("save summary: %v", err)
+	}
+
+	// Save another summary for the same period (should update)
+	summary2 := usage.Summary{
+		UserID:       "user-summary",
+		PeriodStart:  now.Truncate(time.Hour * 24),
+		PeriodEnd:    now.Truncate(time.Hour * 24).Add(time.Hour * 24),
+		RequestCount: 50,
+		ComputeUnits: 250.0,
+		BytesIn:      5000,
+		BytesOut:     25000,
+		ErrorCount:   2,
+		AvgLatencyMs: 35,
+	}
+
+	if err := store.SaveSummary(ctx, summary2); err != nil {
+		t.Fatalf("save summary2: %v", err)
+	}
+}
+
+func TestUsageStore_Cleanup(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewUsageStore(db)
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+
+	// Create old and new events
+	events := []usage.Event{
+		{
+			ID:             "evt-old",
+			KeyID:          "key-1",
+			UserID:         "user-cleanup",
+			Method:         "GET",
+			Path:           "/api/data",
+			StatusCode:     200,
+			LatencyMs:      50,
+			CostMultiplier: 1.0,
+			Timestamp:      now.Add(-48 * time.Hour), // 2 days ago
+		},
+		{
+			ID:             "evt-new",
+			KeyID:          "key-1",
+			UserID:         "user-cleanup",
+			Method:         "GET",
+			Path:           "/api/data",
+			StatusCode:     200,
+			LatencyMs:      50,
+			CostMultiplier: 1.0,
+			Timestamp:      now,
+		},
+	}
+
+	if err := store.RecordBatch(ctx, events); err != nil {
+		t.Fatalf("record batch: %v", err)
+	}
+
+	// Cleanup events older than 1 day ago
+	deleted, err := store.Cleanup(ctx, now.Add(-24*time.Hour))
+	if err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+
+	if deleted != 1 {
+		t.Errorf("deleted = %d, want 1", deleted)
+	}
+
+	// Verify only new event remains
+	recent, err := store.GetRecentRequests(ctx, "user-cleanup", 10)
+	if err != nil {
+		t.Fatalf("get recent: %v", err)
+	}
+
+	if len(recent) != 1 {
+		t.Errorf("len = %d, want 1", len(recent))
+	}
+	if recent[0].ID != "evt-new" {
+		t.Errorf("ID = %s, want evt-new", recent[0].ID)
+	}
+}
+
+func TestUsageStore_GetRecentRequestsWithOptionalFields(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewUsageStore(db)
+	ctx := context.Background()
+
+	events := []usage.Event{
+		{
+			ID:             "evt-optional",
+			KeyID:          "key-1",
+			UserID:         "user-optional",
+			Method:         "GET",
+			Path:           "/api/data",
+			StatusCode:     200,
+			LatencyMs:      50,
+			CostMultiplier: 1.0,
+			IPAddress:      "192.168.1.1",
+			UserAgent:      "TestAgent/1.0",
+			Timestamp:      time.Now().UTC(),
+		},
+	}
+
+	if err := store.RecordBatch(ctx, events); err != nil {
+		t.Fatalf("record batch: %v", err)
+	}
+
+	recent, err := store.GetRecentRequests(ctx, "user-optional", 10)
+	if err != nil {
+		t.Fatalf("get recent: %v", err)
+	}
+
+	if len(recent) != 1 {
+		t.Fatalf("len = %d, want 1", len(recent))
+	}
+
+	if recent[0].IPAddress != "192.168.1.1" {
+		t.Errorf("IPAddress = %s, want 192.168.1.1", recent[0].IPAddress)
+	}
+	if recent[0].UserAgent != "TestAgent/1.0" {
+		t.Errorf("UserAgent = %s, want TestAgent/1.0", recent[0].UserAgent)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// PlanStore Tests
+// -----------------------------------------------------------------------------
+
+func TestPlanStore_CreateAndGet(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewPlanStore(db)
+	ctx := context.Background()
+
+	plan := ports.Plan{
+		ID:                 "plan-1",
+		Name:               "Pro Plan",
+		Description:        "Professional tier",
+		RateLimitPerMinute: 1000,
+		RequestsPerMonth:   100000,
+		PriceMonthly:       4999, // cents
+		OveragePrice:       1,    // cents
+		IsDefault:          false,
+		Enabled:            true,
+	}
+
+	if err := store.Create(ctx, plan); err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+
+	got, err := store.Get(ctx, plan.ID)
+	if err != nil {
+		t.Fatalf("get plan: %v", err)
+	}
+
+	if got.ID != plan.ID {
+		t.Errorf("ID = %s, want %s", got.ID, plan.ID)
+	}
+	if got.Name != plan.Name {
+		t.Errorf("Name = %s, want %s", got.Name, plan.Name)
+	}
+	if got.RateLimitPerMinute != plan.RateLimitPerMinute {
+		t.Errorf("RateLimitPerMinute = %d, want %d", got.RateLimitPerMinute, plan.RateLimitPerMinute)
+	}
+	if got.PriceMonthly != plan.PriceMonthly {
+		t.Errorf("PriceMonthly = %d, want %d", got.PriceMonthly, plan.PriceMonthly)
+	}
+}
+
+func TestPlanStore_List(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewPlanStore(db)
+	ctx := context.Background()
+
+	// Create multiple plans with different prices (in cents)
+	// Note: there's already a default "free" plan from migrations
+	plans := []ports.Plan{
+		{ID: "plan-pro", Name: "Pro", PriceMonthly: 4999, Enabled: true},
+		{ID: "plan-ent", Name: "Enterprise", PriceMonthly: 19999, Enabled: true},
+		{ID: "plan-disabled", Name: "Old Plan", PriceMonthly: 2500, Enabled: false},
+	}
+
+	for _, p := range plans {
+		if err := store.Create(ctx, p); err != nil {
+			t.Fatalf("create plan %s: %v", p.ID, err)
+		}
+	}
+
+	// List returns only enabled plans (default free + 2 we added)
+	result, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("list plans: %v", err)
+	}
+
+	if len(result) != 3 {
+		t.Errorf("len = %d, want 3 (enabled only: free + pro + enterprise)", len(result))
+	}
+
+	// Should be ordered by price ascending (free plan from seed is first)
+	if result[0].Name != "Free" {
+		t.Errorf("first plan = %s, want Free", result[0].Name)
+	}
+}
+
+func TestPlanStore_Update(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewPlanStore(db)
+	ctx := context.Background()
+
+	plan := ports.Plan{
+		ID:           "plan-update",
+		Name:         "Original",
+		PriceMonthly: 1000, // cents
+		Enabled:      true,
+	}
+	store.Create(ctx, plan)
+
+	// Update
+	plan.Name = "Updated"
+	plan.PriceMonthly = 2000 // cents
+	plan.Enabled = false
+
+	if err := store.Update(ctx, plan); err != nil {
+		t.Fatalf("update plan: %v", err)
+	}
+
+	got, err := store.Get(ctx, plan.ID)
+	if err != nil {
+		t.Fatalf("get plan: %v", err)
+	}
+
+	if got.Name != "Updated" {
+		t.Errorf("Name = %s, want Updated", got.Name)
+	}
+	if got.PriceMonthly != 2000 {
+		t.Errorf("PriceMonthly = %d, want 2000", got.PriceMonthly)
+	}
+}
+
+func TestPlanStore_Delete(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewPlanStore(db)
+	ctx := context.Background()
+
+	plan := ports.Plan{
+		ID:      "plan-delete",
+		Name:    "To Delete",
+		Enabled: true,
+	}
+	store.Create(ctx, plan)
+
+	if err := store.Delete(ctx, plan.ID); err != nil {
+		t.Fatalf("delete plan: %v", err)
+	}
+
+	_, err := store.Get(ctx, plan.ID)
+	if err == nil {
+		t.Error("expected error after delete")
+	}
+}
+
+func TestPlanStore_GetNotFound(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewPlanStore(db)
+	ctx := context.Background()
+
+	_, err := store.Get(ctx, "nonexistent")
+	if err == nil {
+		t.Error("expected error for nonexistent plan")
+	}
+}
+
+// -----------------------------------------------------------------------------
+// SettingsStore Tests
+// -----------------------------------------------------------------------------
+
+func TestSettingsStore_SetAndGet(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewSettingsStore(db)
+	ctx := context.Background()
+
+	if err := store.Set(ctx, "app.name", "MyApp", false); err != nil {
+		t.Fatalf("set setting: %v", err)
+	}
+
+	got, err := store.Get(ctx, "app.name")
+	if err != nil {
+		t.Fatalf("get setting: %v", err)
+	}
+
+	if got.Key != "app.name" {
+		t.Errorf("Key = %s, want app.name", got.Key)
+	}
+	if got.Value != "MyApp" {
+		t.Errorf("Value = %s, want MyApp", got.Value)
+	}
+	if got.Encrypted {
+		t.Error("Encrypted should be false")
+	}
+}
+
+func TestSettingsStore_SetEncrypted(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewSettingsStore(db)
+	ctx := context.Background()
+
+	if err := store.Set(ctx, "api.secret", "secret123", true); err != nil {
+		t.Fatalf("set encrypted setting: %v", err)
+	}
+
+	got, err := store.Get(ctx, "api.secret")
+	if err != nil {
+		t.Fatalf("get setting: %v", err)
+	}
+
+	if !got.Encrypted {
+		t.Error("Encrypted should be true")
+	}
+}
+
+func TestSettingsStore_SetUpsert(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewSettingsStore(db)
+	ctx := context.Background()
+
+	// Initial set
+	store.Set(ctx, "app.version", "1.0.0", false)
+
+	// Upsert
+	if err := store.Set(ctx, "app.version", "2.0.0", false); err != nil {
+		t.Fatalf("upsert setting: %v", err)
+	}
+
+	got, err := store.Get(ctx, "app.version")
+	if err != nil {
+		t.Fatalf("get setting: %v", err)
+	}
+
+	if got.Value != "2.0.0" {
+		t.Errorf("Value = %s, want 2.0.0", got.Value)
+	}
+}
+
+func TestSettingsStore_GetNotFound(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewSettingsStore(db)
+	ctx := context.Background()
+
+	_, err := store.Get(ctx, "nonexistent")
+	if err == nil {
+		t.Error("expected error for nonexistent setting")
+	}
+}
+
+func TestSettingsStore_GetAll(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewSettingsStore(db)
+	ctx := context.Background()
+
+	// Set multiple settings
+	store.Set(ctx, "app.name", "MyApp", false)
+	store.Set(ctx, "app.version", "1.0.0", false)
+	store.Set(ctx, "api.url", "https://api.example.com", false)
+
+	all, err := store.GetAll(ctx)
+	if err != nil {
+		t.Fatalf("get all settings: %v", err)
+	}
+
+	// Note: there are default settings seeded by migrations, so count includes those
+	// We verify our custom settings are present
+	if len(all) < 3 {
+		t.Errorf("len = %d, want at least 3", len(all))
+	}
+
+	if all["app.name"] != "MyApp" {
+		t.Errorf("app.name = %s, want MyApp", all["app.name"])
+	}
+	if all["app.version"] != "1.0.0" {
+		t.Errorf("app.version = %s, want 1.0.0", all["app.version"])
+	}
+	if all["api.url"] != "https://api.example.com" {
+		t.Errorf("api.url = %s, want https://api.example.com", all["api.url"])
+	}
+}
+
+func TestSettingsStore_GetByPrefix(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewSettingsStore(db)
+	ctx := context.Background()
+
+	// Set settings with different prefixes
+	store.Set(ctx, "app.name", "MyApp", false)
+	store.Set(ctx, "app.version", "1.0.0", false)
+	store.Set(ctx, "api.url", "https://api.example.com", false)
+	store.Set(ctx, "api.key", "secret", false)
+
+	// Get by prefix
+	appSettings, err := store.GetByPrefix(ctx, "app.")
+	if err != nil {
+		t.Fatalf("get by prefix: %v", err)
+	}
+
+	if len(appSettings) != 2 {
+		t.Errorf("len = %d, want 2", len(appSettings))
+	}
+
+	if appSettings["app.name"] != "MyApp" {
+		t.Errorf("app.name = %s, want MyApp", appSettings["app.name"])
+	}
+}
+
+func TestSettingsStore_SetBatch(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewSettingsStore(db)
+	ctx := context.Background()
+
+	batch := map[string]string{
+		"batch.setting1": "value1",
+		"batch.setting2": "value2",
+		"batch.setting3": "value3",
+	}
+
+	if err := store.SetBatch(ctx, batch); err != nil {
+		t.Fatalf("set batch: %v", err)
+	}
+
+	// Verify all were set
+	for key, want := range batch {
+		got, err := store.Get(ctx, key)
+		if err != nil {
+			t.Fatalf("get %s: %v", key, err)
+		}
+		if got.Value != want {
+			t.Errorf("%s = %s, want %s", key, got.Value, want)
+		}
+	}
+}
+
+func TestSettingsStore_Delete(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewSettingsStore(db)
+	ctx := context.Background()
+
+	store.Set(ctx, "to.delete", "value", false)
+
+	if err := store.Delete(ctx, "to.delete"); err != nil {
+		t.Fatalf("delete setting: %v", err)
+	}
+
+	_, err := store.Get(ctx, "to.delete")
+	if err == nil {
+		t.Error("expected error after delete")
+	}
+}
+
+// -----------------------------------------------------------------------------
+// Route and Upstream Additional Tests
+// -----------------------------------------------------------------------------
+
+func TestRouteStore_UpdateNotFound(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewRouteStore(db)
+	ctx := context.Background()
+
+	r := route.NewRoute("nonexistent", "Nonexistent", "/api/*", "up-1")
+	err := store.Update(ctx, r)
+	if err != sqlite.ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestUpstreamStore_UpdateNotFound(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewUpstreamStore(db)
+	ctx := context.Background()
+
+	u := route.NewUpstream("nonexistent", "Nonexistent", "https://example.com")
+	err := store.Update(ctx, u)
+	if err != sqlite.ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestRouteStore_CreateWithPathRewriteAndMethodOverride(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	upstreamStore := sqlite.NewUpstreamStore(db)
+	ctx := context.Background()
+
+	upstream := route.NewUpstream("up-1", "Upstream", "https://api.example.com")
+	upstreamStore.Create(ctx, upstream)
+
+	store := sqlite.NewRouteStore(db)
+
+	r := route.NewRoute("route-rewrite", "Rewrite Route", "/api/v1/*", "up-1")
+	r.PathRewrite = "/v2/$1"
+	r.MethodOverride = "POST"
+
+	if err := store.Create(ctx, r); err != nil {
+		t.Fatalf("create route: %v", err)
+	}
+
+	got, err := store.Get(ctx, r.ID)
+	if err != nil {
+		t.Fatalf("get route: %v", err)
+	}
+
+	if got.PathRewrite != "/v2/$1" {
+		t.Errorf("PathRewrite = %s, want /v2/$1", got.PathRewrite)
+	}
+	if got.MethodOverride != "POST" {
+		t.Errorf("MethodOverride = %s, want POST", got.MethodOverride)
+	}
+}
+
+func TestRouteStore_CreateDuplicate(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	upstreamStore := sqlite.NewUpstreamStore(db)
+	ctx := context.Background()
+
+	upstream := route.NewUpstream("up-1", "Upstream", "https://api.example.com")
+	upstreamStore.Create(ctx, upstream)
+
+	store := sqlite.NewRouteStore(db)
+
+	r := route.NewRoute("route-dup", "Route", "/api/*", "up-1")
+	if err := store.Create(ctx, r); err != nil {
+		t.Fatalf("create route: %v", err)
+	}
+
+	// Try to create duplicate
+	err := store.Create(ctx, r)
+	if err == nil {
+		t.Fatal("expected error for duplicate route")
+	}
+}
+
+// -----------------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------------
 

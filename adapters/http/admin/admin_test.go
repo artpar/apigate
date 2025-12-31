@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/artpar/apigate/adapters/http/admin"
 	"github.com/artpar/apigate/adapters/memory"
 	"github.com/artpar/apigate/domain/key"
+	"github.com/artpar/apigate/domain/route"
 	"github.com/artpar/apigate/ports"
 	"github.com/rs/zerolog"
 )
@@ -944,4 +946,1144 @@ func doRequest(t *testing.T, h *admin.Handler, method, path string, body interfa
 	h.Router().ServeHTTP(rec, req)
 
 	return rec.Result()
+}
+
+// ============================================================================
+// Session Management Tests
+// ============================================================================
+
+func TestSessionStore_CreateAndGet(t *testing.T) {
+	store := admin.NewSessionStore()
+
+	session := store.Create("user123", "test@example.com", time.Hour)
+
+	if session == nil {
+		t.Fatal("Expected session to be created")
+	}
+	if session.UserID != "user123" {
+		t.Errorf("Expected UserID=user123, got %s", session.UserID)
+	}
+	if session.Email != "test@example.com" {
+		t.Errorf("Expected Email=test@example.com, got %s", session.Email)
+	}
+
+	// Retrieve the session
+	retrieved := store.Get(session.ID)
+	if retrieved == nil {
+		t.Fatal("Expected to retrieve session")
+	}
+	if retrieved.ID != session.ID {
+		t.Errorf("Expected ID=%s, got %s", session.ID, retrieved.ID)
+	}
+}
+
+func TestSessionStore_GetExpired(t *testing.T) {
+	store := admin.NewSessionStore()
+
+	// Create a session with negative duration (expired immediately)
+	session := store.Create("user123", "test@example.com", -time.Hour)
+
+	// Should not be able to retrieve expired session
+	retrieved := store.Get(session.ID)
+	if retrieved != nil {
+		t.Error("Expected nil for expired session")
+	}
+}
+
+func TestSessionStore_GetNonExistent(t *testing.T) {
+	store := admin.NewSessionStore()
+
+	retrieved := store.Get("nonexistent-id")
+	if retrieved != nil {
+		t.Error("Expected nil for non-existent session")
+	}
+}
+
+func TestSessionStore_Delete(t *testing.T) {
+	store := admin.NewSessionStore()
+
+	session := store.Create("user123", "test@example.com", time.Hour)
+
+	// Delete the session
+	store.Delete(session.ID)
+
+	// Should not be able to retrieve deleted session
+	retrieved := store.Get(session.ID)
+	if retrieved != nil {
+		t.Error("Expected nil for deleted session")
+	}
+}
+
+// ============================================================================
+// Login Tests - Password Authentication
+// ============================================================================
+
+func TestLogin_WithPassword_Success(t *testing.T) {
+	h, _ := setupHandlerWithPasswordUser(t)
+
+	body := map[string]string{
+		"email":    "passworduser@test.com",
+		"password": "testpassword123",
+	}
+	resp := doRequest(t, h, "POST", "/login", body, "")
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Login failed: status=%d", resp.StatusCode)
+	}
+
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	if result["session_id"] == nil {
+		t.Error("Expected session_id in response")
+	}
+}
+
+func TestLogin_WithPassword_InvalidPassword(t *testing.T) {
+	h, _ := setupHandlerWithPasswordUser(t)
+
+	body := map[string]string{
+		"email":    "passworduser@test.com",
+		"password": "wrongpassword",
+	}
+	resp := doRequest(t, h, "POST", "/login", body, "")
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("Expected 401, got %d", resp.StatusCode)
+	}
+}
+
+func TestLogin_WithPassword_UserNotFound(t *testing.T) {
+	h, _ := setupHandler(t)
+
+	body := map[string]string{
+		"email":    "nonexistent@test.com",
+		"password": "anypassword",
+	}
+	resp := doRequest(t, h, "POST", "/login", body, "")
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("Expected 401, got %d", resp.StatusCode)
+	}
+}
+
+func TestLogin_WithPassword_NoPasswordSet(t *testing.T) {
+	h, _ := setupHandler(t)
+
+	// admin@test.com has no password set
+	body := map[string]string{
+		"email":    "admin@test.com",
+		"password": "anypassword",
+	}
+	resp := doRequest(t, h, "POST", "/login", body, "")
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("Expected 401, got %d", resp.StatusCode)
+	}
+}
+
+func TestLogin_WithPassword_InactiveUser(t *testing.T) {
+	h, _ := setupHandlerWithInactiveUser(t)
+
+	body := map[string]string{
+		"email":    "inactive@test.com",
+		"password": "testpassword123",
+	}
+	resp := doRequest(t, h, "POST", "/login", body, "")
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("Expected 403, got %d", resp.StatusCode)
+	}
+}
+
+func TestLogin_MissingEmailAndAPIKey(t *testing.T) {
+	h, _ := setupHandler(t)
+
+	body := map[string]string{
+		"password": "somepassword",
+	}
+	resp := doRequest(t, h, "POST", "/login", body, "")
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("Expected 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestLogin_MissingPassword(t *testing.T) {
+	h, _ := setupHandler(t)
+
+	body := map[string]string{
+		"email": "admin@test.com",
+	}
+	resp := doRequest(t, h, "POST", "/login", body, "")
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("Expected 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestLogin_InvalidJSON(t *testing.T) {
+	h, _ := setupHandler(t)
+
+	req := httptest.NewRequest("POST", "/login", bytes.NewBufferString("not valid json"))
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("Expected 400, got %d", rec.Code)
+	}
+}
+
+func TestLogin_APIKeyTooShort(t *testing.T) {
+	h, _ := setupHandler(t)
+
+	body := map[string]string{
+		"api_key": "short",
+	}
+	resp := doRequest(t, h, "POST", "/login", body, "")
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("Expected 401, got %d", resp.StatusCode)
+	}
+}
+
+func TestLogin_APIKeyWithoutEmail(t *testing.T) {
+	h, rawKey := setupHandler(t)
+
+	body := map[string]string{
+		"api_key": rawKey,
+		// No email provided
+	}
+	resp := doRequest(t, h, "POST", "/login", body, "")
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", resp.StatusCode)
+	}
+
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	user := result["user"].(map[string]interface{})
+	if user["email"] != "admin@apigate" {
+		t.Errorf("Expected default admin email, got %s", user["email"])
+	}
+}
+
+func TestLogin_RevokedAPIKey(t *testing.T) {
+	h, rawKey := setupHandlerWithRevokedKey(t)
+
+	body := map[string]string{
+		"api_key": rawKey,
+	}
+	resp := doRequest(t, h, "POST", "/login", body, "")
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("Expected 401 for revoked key, got %d", resp.StatusCode)
+	}
+}
+
+// ============================================================================
+// Logout Tests
+// ============================================================================
+
+func TestLogout_WithSession(t *testing.T) {
+	h, rawKey := setupHandler(t)
+
+	// First login to get a session
+	loginBody := map[string]string{
+		"api_key": rawKey,
+		"email":   "admin@test.com",
+	}
+	loginResp := doRequest(t, h, "POST", "/login", loginBody, "")
+
+	var loginResult map[string]interface{}
+	json.NewDecoder(loginResp.Body).Decode(&loginResult)
+	sessionID := loginResult["session_id"].(string)
+
+	// Now logout using the session
+	req := httptest.NewRequest("POST", "/logout", nil)
+	req.Header.Set("Authorization", "Bearer "+sessionID)
+
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", rec.Code)
+	}
+
+	// Verify session is invalidated - subsequent request should fail
+	req2 := httptest.NewRequest("GET", "/users", nil)
+	req2.Header.Set("Authorization", "Bearer "+sessionID)
+	rec2 := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec2, req2)
+
+	if rec2.Code != http.StatusUnauthorized {
+		t.Fatalf("Expected 401 after logout, got %d", rec2.Code)
+	}
+}
+
+// ============================================================================
+// Auth Middleware Tests
+// ============================================================================
+
+func TestAuthMiddleware_WithSessionCookie(t *testing.T) {
+	h, rawKey := setupHandler(t)
+
+	// First login to get a session
+	loginBody := map[string]string{
+		"api_key": rawKey,
+		"email":   "admin@test.com",
+	}
+	loginResp := doRequest(t, h, "POST", "/login", loginBody, "")
+
+	var loginResult map[string]interface{}
+	json.NewDecoder(loginResp.Body).Decode(&loginResult)
+	sessionID := loginResult["session_id"].(string)
+
+	// Make request with session cookie
+	req := httptest.NewRequest("GET", "/users", nil)
+	req.AddCookie(&http.Cookie{
+		Name:  "session_id",
+		Value: sessionID,
+	})
+
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 with cookie auth, got %d", rec.Code)
+	}
+}
+
+func TestAuthMiddleware_WithBearerSession(t *testing.T) {
+	h, rawKey := setupHandler(t)
+
+	// First login to get a session
+	loginBody := map[string]string{
+		"api_key": rawKey,
+		"email":   "admin@test.com",
+	}
+	loginResp := doRequest(t, h, "POST", "/login", loginBody, "")
+
+	var loginResult map[string]interface{}
+	json.NewDecoder(loginResp.Body).Decode(&loginResult)
+	sessionID := loginResult["session_id"].(string)
+
+	// Make request with Bearer token (session ID)
+	req := httptest.NewRequest("GET", "/users", nil)
+	req.Header.Set("Authorization", "Bearer "+sessionID)
+
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 with Bearer session, got %d", rec.Code)
+	}
+}
+
+func TestAuthMiddleware_WithBearerAPIKey(t *testing.T) {
+	h, rawKey := setupHandler(t)
+
+	// Make request with Bearer token (API key)
+	req := httptest.NewRequest("GET", "/users", nil)
+	req.Header.Set("Authorization", "Bearer "+rawKey)
+
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 with Bearer API key, got %d", rec.Code)
+	}
+}
+
+func TestAuthMiddleware_InvalidCookie(t *testing.T) {
+	h, _ := setupHandler(t)
+
+	req := httptest.NewRequest("GET", "/users", nil)
+	req.AddCookie(&http.Cookie{
+		Name:  "session_id",
+		Value: "invalid-session-id",
+	})
+
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("Expected 401 with invalid cookie, got %d", rec.Code)
+	}
+}
+
+func TestAuthMiddleware_InvalidBearerToken(t *testing.T) {
+	h, _ := setupHandler(t)
+
+	req := httptest.NewRequest("GET", "/users", nil)
+	req.Header.Set("Authorization", "Bearer invalid-token")
+
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("Expected 401 with invalid bearer token, got %d", rec.Code)
+	}
+}
+
+// ============================================================================
+// User API Additional Tests
+// ============================================================================
+
+func TestCreateUser_WithPassword(t *testing.T) {
+	h, rawKey := setupHandler(t)
+
+	body := map[string]string{
+		"email":    "withpassword@test.com",
+		"password": "securepassword123",
+	}
+	resp := doRequest(t, h, "POST", "/users", body, rawKey)
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("Expected 201, got %d", resp.StatusCode)
+	}
+
+	// Verify user can login with password
+	loginBody := map[string]string{
+		"email":    "withpassword@test.com",
+		"password": "securepassword123",
+	}
+	loginResp := doRequest(t, h, "POST", "/login", loginBody, "")
+
+	if loginResp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected 200 for login, got %d", loginResp.StatusCode)
+	}
+}
+
+func TestCreateUser_MissingEmail(t *testing.T) {
+	h, rawKey := setupHandler(t)
+
+	body := map[string]string{
+		"name": "Test User",
+	}
+	resp := doRequest(t, h, "POST", "/users", body, rawKey)
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("Expected 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestCreateUser_InvalidJSON(t *testing.T) {
+	h, rawKey := setupHandler(t)
+
+	req := httptest.NewRequest("POST", "/users", bytes.NewBufferString("not valid json"))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-Key", rawKey)
+
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("Expected 400, got %d", rec.Code)
+	}
+}
+
+func TestGetUser_NotFound(t *testing.T) {
+	h, rawKey := setupHandler(t)
+
+	resp := doRequest(t, h, "GET", "/users/nonexistent", nil, rawKey)
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("Expected 404, got %d", resp.StatusCode)
+	}
+}
+
+func TestUpdateUser_WithPassword(t *testing.T) {
+	h, rawKey := setupHandler(t)
+
+	// Create a user
+	createBody := map[string]string{"email": "updatepw@test.com"}
+	createResp := doRequest(t, h, "POST", "/users", createBody, rawKey)
+
+	var created map[string]interface{}
+	json.NewDecoder(createResp.Body).Decode(&created)
+	userID := created["id"].(string)
+
+	// Update with password
+	updateBody := map[string]string{"password": "newpassword123"}
+	resp := doRequest(t, h, "PUT", "/users/"+userID, updateBody, rawKey)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", resp.StatusCode)
+	}
+
+	// Verify can login with new password
+	loginBody := map[string]string{
+		"email":    "updatepw@test.com",
+		"password": "newpassword123",
+	}
+	loginResp := doRequest(t, h, "POST", "/login", loginBody, "")
+
+	if loginResp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected 200 for login, got %d", loginResp.StatusCode)
+	}
+}
+
+func TestUpdateUser_NotFound(t *testing.T) {
+	h, rawKey := setupHandler(t)
+
+	body := map[string]string{"name": "Updated"}
+	resp := doRequest(t, h, "PUT", "/users/nonexistent", body, rawKey)
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("Expected 404, got %d", resp.StatusCode)
+	}
+}
+
+func TestUpdateUser_InvalidJSON(t *testing.T) {
+	h, rawKey := setupHandler(t)
+
+	// Create a user first
+	createBody := map[string]string{"email": "jsontest@test.com"}
+	createResp := doRequest(t, h, "POST", "/users", createBody, rawKey)
+	var created map[string]interface{}
+	json.NewDecoder(createResp.Body).Decode(&created)
+	userID := created["id"].(string)
+
+	req := httptest.NewRequest("PUT", "/users/"+userID, bytes.NewBufferString("not valid json"))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-Key", rawKey)
+
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("Expected 400, got %d", rec.Code)
+	}
+}
+
+func TestDeleteUser_NotFound(t *testing.T) {
+	h, rawKey := setupHandler(t)
+
+	resp := doRequest(t, h, "DELETE", "/users/nonexistent", nil, rawKey)
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("Expected 404, got %d", resp.StatusCode)
+	}
+}
+
+// ============================================================================
+// Keys API Additional Tests
+// ============================================================================
+
+func TestCreateKey_MissingUserID(t *testing.T) {
+	h, rawKey := setupHandler(t)
+
+	body := map[string]string{"name": "Test Key"}
+	resp := doRequest(t, h, "POST", "/keys", body, rawKey)
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("Expected 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestCreateKey_UserNotFound(t *testing.T) {
+	h, rawKey := setupHandler(t)
+
+	body := map[string]string{"user_id": "nonexistent"}
+	resp := doRequest(t, h, "POST", "/keys", body, rawKey)
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("Expected 404, got %d", resp.StatusCode)
+	}
+}
+
+func TestCreateKey_InvalidJSON(t *testing.T) {
+	h, rawKey := setupHandler(t)
+
+	req := httptest.NewRequest("POST", "/keys", bytes.NewBufferString("not valid json"))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-Key", rawKey)
+
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("Expected 400, got %d", rec.Code)
+	}
+}
+
+func TestCreateKey_WithExpiry(t *testing.T) {
+	h, rawKey := setupHandler(t)
+
+	// Create a user first
+	userBody := map[string]string{"email": "keyexpiry@test.com"}
+	userResp := doRequest(t, h, "POST", "/users", userBody, rawKey)
+	var user map[string]interface{}
+	json.NewDecoder(userResp.Body).Decode(&user)
+	userID := user["id"].(string)
+
+	// Create key with expiry
+	expiryTime := time.Now().Add(24 * time.Hour).Format(time.RFC3339)
+	body := map[string]interface{}{
+		"user_id":    userID,
+		"name":       "Expiring Key",
+		"expires_at": expiryTime,
+	}
+
+	resp := doRequest(t, h, "POST", "/keys", body, rawKey)
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("Expected 201, got %d", resp.StatusCode)
+	}
+}
+
+func TestListKeys_FilterByUser(t *testing.T) {
+	h, rawKey := setupHandler(t)
+
+	// Create a specific user and key
+	userBody := map[string]string{"email": "filtereduser@test.com"}
+	userResp := doRequest(t, h, "POST", "/users", userBody, rawKey)
+	var user map[string]interface{}
+	json.NewDecoder(userResp.Body).Decode(&user)
+	userID := user["id"].(string)
+
+	keyBody := map[string]string{"user_id": userID, "name": "Filtered Key"}
+	doRequest(t, h, "POST", "/keys", keyBody, rawKey)
+
+	// List keys filtered by user
+	resp := doRequest(t, h, "GET", "/keys?user_id="+userID, nil, rawKey)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", resp.StatusCode)
+	}
+
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	keys := result["keys"].([]interface{})
+	if len(keys) != 1 {
+		t.Errorf("Expected 1 key for user, got %d", len(keys))
+	}
+}
+
+// ============================================================================
+// Usage API Additional Tests
+// ============================================================================
+
+func TestGetUsage_WithUserID(t *testing.T) {
+	h, rawKey := setupHandlerWithUsage(t)
+
+	resp := doRequest(t, h, "GET", "/usage?user_id=user_admin&period=month", nil, rawKey)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", resp.StatusCode)
+	}
+}
+
+func TestGetUsage_DayPeriod(t *testing.T) {
+	h, rawKey := setupHandlerWithUsage(t)
+
+	resp := doRequest(t, h, "GET", "/usage?period=day", nil, rawKey)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", resp.StatusCode)
+	}
+
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	if result["period"] != "day" {
+		t.Errorf("Expected period=day, got %s", result["period"])
+	}
+}
+
+func TestGetUsage_WeekPeriod(t *testing.T) {
+	h, rawKey := setupHandlerWithUsage(t)
+
+	resp := doRequest(t, h, "GET", "/usage?period=week", nil, rawKey)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", resp.StatusCode)
+	}
+
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	if result["period"] != "week" {
+		t.Errorf("Expected period=week, got %s", result["period"])
+	}
+}
+
+func TestGetUsage_CustomDateRange(t *testing.T) {
+	h, rawKey := setupHandlerWithUsage(t)
+
+	// Use RFC3339 format with proper URL encoding
+	startDate := url.QueryEscape(time.Now().AddDate(0, 0, -7).Format(time.RFC3339))
+	endDate := url.QueryEscape(time.Now().Format(time.RFC3339))
+
+	resp := doRequest(t, h, "GET", "/usage?start_date="+startDate+"&end_date="+endDate, nil, rawKey)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", resp.StatusCode)
+	}
+}
+
+func TestGetUsage_InvalidStartDate(t *testing.T) {
+	h, rawKey := setupHandlerWithUsage(t)
+
+	resp := doRequest(t, h, "GET", "/usage?start_date=invalid&end_date=2024-01-01T00:00:00Z", nil, rawKey)
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("Expected 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestGetUsage_InvalidEndDate(t *testing.T) {
+	h, rawKey := setupHandlerWithUsage(t)
+
+	startDate := time.Now().AddDate(0, 0, -7).Format(time.RFC3339)
+
+	resp := doRequest(t, h, "GET", "/usage?start_date="+startDate+"&end_date=invalid", nil, rawKey)
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("Expected 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestGetUsage_UnknownPeriod(t *testing.T) {
+	h, rawKey := setupHandlerWithUsage(t)
+
+	resp := doRequest(t, h, "GET", "/usage?period=unknown", nil, rawKey)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected 200 (defaults to month), got %d", resp.StatusCode)
+	}
+}
+
+// ============================================================================
+// Settings API Tests
+// ============================================================================
+
+func TestUpdateSettings(t *testing.T) {
+	h, rawKey := setupHandler(t)
+
+	body := map[string]interface{}{
+		"server": map[string]interface{}{
+			"port": 9090,
+		},
+	}
+	resp := doRequest(t, h, "PUT", "/settings", body, rawKey)
+
+	if resp.StatusCode != http.StatusNotImplemented {
+		t.Fatalf("Expected 501, got %d", resp.StatusCode)
+	}
+}
+
+// ============================================================================
+// Doctor API Additional Tests
+// ============================================================================
+
+func TestDoctor_WithUpstreams(t *testing.T) {
+	h, rawKey := setupHandlerWithUpstreams(t)
+
+	resp := doRequest(t, h, "GET", "/doctor", nil, rawKey)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", resp.StatusCode)
+	}
+
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	checks := result["checks"].([]interface{})
+	foundUpstream := false
+	for _, check := range checks {
+		c := check.(map[string]interface{})
+		if c["name"] == "upstream" {
+			foundUpstream = true
+			if c["status"] == "fail" {
+				t.Logf("Upstream check status: %s, message: %s", c["status"], c["message"])
+			}
+		}
+	}
+	if !foundUpstream {
+		t.Error("Expected upstream check in doctor response")
+	}
+}
+
+func TestDoctor_ResponseStructure(t *testing.T) {
+	h, rawKey := setupHandler(t)
+
+	resp := doRequest(t, h, "GET", "/doctor", nil, rawKey)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", resp.StatusCode)
+	}
+
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	// Verify all required fields are present
+	requiredFields := []string{"status", "timestamp", "version", "checks", "system", "statistics"}
+	for _, field := range requiredFields {
+		if result[field] == nil {
+			t.Errorf("Missing required field: %s", field)
+		}
+	}
+
+	// Verify system info structure
+	system := result["system"].(map[string]interface{})
+	systemFields := []string{"go_version", "num_cpu", "num_goroutine", "mem_alloc", "mem_sys", "uptime"}
+	for _, field := range systemFields {
+		if system[field] == nil {
+			t.Errorf("Missing system field: %s", field)
+		}
+	}
+
+	// Verify statistics structure
+	stats := result["statistics"].(map[string]interface{})
+	statsFields := []string{"total_users", "total_keys", "active_sessions"}
+	for _, field := range statsFields {
+		if stats[field] == nil {
+			t.Errorf("Missing statistics field: %s", field)
+		}
+	}
+}
+
+// ============================================================================
+// Query Parameter Parsing Tests
+// ============================================================================
+
+func TestListUsers_WithPagination(t *testing.T) {
+	h, rawKey := setupHandler(t)
+
+	// Create multiple users
+	for i := 0; i < 5; i++ {
+		body := map[string]string{
+			"email": "user" + string(rune('a'+i)) + "@test.com",
+		}
+		doRequest(t, h, "POST", "/users", body, rawKey)
+	}
+
+	// Test with limit
+	resp := doRequest(t, h, "GET", "/users?limit=2", nil, rawKey)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", resp.StatusCode)
+	}
+
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	users := result["users"].([]interface{})
+	if len(users) > 2 {
+		t.Errorf("Expected at most 2 users with limit, got %d", len(users))
+	}
+}
+
+func TestListUsers_InvalidLimit(t *testing.T) {
+	h, rawKey := setupHandler(t)
+
+	// Invalid limit should use default
+	resp := doRequest(t, h, "GET", "/users?limit=invalid", nil, rawKey)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected 200 (should use default), got %d", resp.StatusCode)
+	}
+}
+
+// ============================================================================
+// Error Response Tests
+// ============================================================================
+
+func TestErrorType_Error(t *testing.T) {
+	// Test that ErrInvalidCredentials implements error interface correctly
+	err := errors.New("test error")
+	if err.Error() == "" {
+		t.Error("Expected error message")
+	}
+}
+
+// ============================================================================
+// Additional Setup Helpers
+// ============================================================================
+
+func setupHandlerWithPasswordUser(t *testing.T) (*admin.Handler, string) {
+	t.Helper()
+
+	userStore := memory.NewUserStore()
+	keyStore := memory.NewKeyStore()
+	h := hasher.NewBcrypt(4)
+
+	// Create user with password
+	passwordHash, _ := h.Hash("testpassword123")
+	user := ports.User{
+		ID:           "user_password",
+		Email:        "passworduser@test.com",
+		PasswordHash: passwordHash,
+		PlanID:       "free",
+		Status:       "active",
+		CreatedAt:    time.Now().UTC(),
+		UpdatedAt:    time.Now().UTC(),
+	}
+	userStore.Create(context.Background(), user)
+
+	// Create admin API key
+	rawKey, keyData := key.Generate("ak_")
+	keyData = keyData.WithUserID(user.ID)
+	keyStore.Create(context.Background(), keyData)
+
+	planStore := newMockPlanStore()
+	now := time.Now().UTC()
+	planStore.Create(context.Background(), ports.Plan{
+		ID: "free", Name: "Free", RateLimitPerMinute: 60, IsDefault: true, Enabled: true,
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	handler := admin.NewHandler(admin.Deps{
+		Users:  userStore,
+		Keys:   keyStore,
+		Plans:  planStore,
+		Logger: zerolog.Nop(),
+		Hasher: h,
+	})
+
+	return handler, rawKey
+}
+
+func setupHandlerWithInactiveUser(t *testing.T) (*admin.Handler, string) {
+	t.Helper()
+
+	userStore := memory.NewUserStore()
+	keyStore := memory.NewKeyStore()
+	h := hasher.NewBcrypt(4)
+
+	// Create inactive user with password
+	passwordHash, _ := h.Hash("testpassword123")
+	user := ports.User{
+		ID:           "user_inactive",
+		Email:        "inactive@test.com",
+		PasswordHash: passwordHash,
+		PlanID:       "free",
+		Status:       "suspended", // Not active!
+		CreatedAt:    time.Now().UTC(),
+		UpdatedAt:    time.Now().UTC(),
+	}
+	userStore.Create(context.Background(), user)
+
+	// Create admin API key for auth
+	rawKey, keyData := key.Generate("ak_")
+	keyData = keyData.WithUserID(user.ID)
+	keyStore.Create(context.Background(), keyData)
+
+	planStore := newMockPlanStore()
+	now := time.Now().UTC()
+	planStore.Create(context.Background(), ports.Plan{
+		ID: "free", Name: "Free", RateLimitPerMinute: 60, IsDefault: true, Enabled: true,
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	handler := admin.NewHandler(admin.Deps{
+		Users:  userStore,
+		Keys:   keyStore,
+		Plans:  planStore,
+		Logger: zerolog.Nop(),
+		Hasher: h,
+	})
+
+	return handler, rawKey
+}
+
+func setupHandlerWithRevokedKey(t *testing.T) (*admin.Handler, string) {
+	t.Helper()
+
+	userStore := memory.NewUserStore()
+	keyStore := memory.NewKeyStore()
+	h := hasher.NewBcrypt(4)
+
+	user := ports.User{
+		ID:        "user_revoked",
+		Email:     "revoked@test.com",
+		PlanID:    "free",
+		Status:    "active",
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	userStore.Create(context.Background(), user)
+
+	// Create and revoke a key
+	rawKey, keyData := key.Generate("ak_")
+	keyData = keyData.WithUserID(user.ID)
+	keyStore.Create(context.Background(), keyData)
+
+	// Revoke the key
+	revokedAt := time.Now().UTC()
+	keyStore.Revoke(context.Background(), keyData.ID, revokedAt)
+
+	planStore := newMockPlanStore()
+	now := time.Now().UTC()
+	planStore.Create(context.Background(), ports.Plan{
+		ID: "free", Name: "Free", RateLimitPerMinute: 60, IsDefault: true, Enabled: true,
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	handler := admin.NewHandler(admin.Deps{
+		Users:  userStore,
+		Keys:   keyStore,
+		Plans:  planStore,
+		Logger: zerolog.Nop(),
+		Hasher: h,
+	})
+
+	return handler, rawKey
+}
+
+func setupHandlerWithUsage(t *testing.T) (*admin.Handler, string) {
+	t.Helper()
+
+	userStore := memory.NewUserStore()
+	keyStore := memory.NewKeyStore()
+	usageStore := memory.NewUsageStore()
+	h := hasher.NewBcrypt(4)
+
+	adminUser := ports.User{
+		ID:        "user_admin",
+		Email:     "admin@test.com",
+		PlanID:    "free",
+		Status:    "active",
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	userStore.Create(context.Background(), adminUser)
+
+	rawKey, keyData := key.Generate("ak_")
+	keyData = keyData.WithUserID(adminUser.ID)
+	keyStore.Create(context.Background(), keyData)
+
+	planStore := newMockPlanStore()
+	now := time.Now().UTC()
+	planStore.Create(context.Background(), ports.Plan{
+		ID: "free", Name: "Free", RateLimitPerMinute: 60, IsDefault: true, Enabled: true,
+		CreatedAt: now, UpdatedAt: now,
+	})
+	planStore.Create(context.Background(), ports.Plan{
+		ID: "pro", Name: "Pro", RateLimitPerMinute: 600, Enabled: true,
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	handler := admin.NewHandler(admin.Deps{
+		Users:  userStore,
+		Keys:   keyStore,
+		Usage:  usageStore,
+		Plans:  planStore,
+		Logger: zerolog.Nop(),
+		Hasher: h,
+	})
+
+	return handler, rawKey
+}
+
+func setupHandlerWithUpstreams(t *testing.T) (*admin.Handler, string) {
+	t.Helper()
+
+	userStore := memory.NewUserStore()
+	keyStore := memory.NewKeyStore()
+	h := hasher.NewBcrypt(4)
+
+	adminUser := ports.User{
+		ID:        "user_admin",
+		Email:     "admin@test.com",
+		PlanID:    "free",
+		Status:    "active",
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	userStore.Create(context.Background(), adminUser)
+
+	rawKey, keyData := key.Generate("ak_")
+	keyData = keyData.WithUserID(adminUser.ID)
+	keyStore.Create(context.Background(), keyData)
+
+	planStore := newMockPlanStore()
+	now := time.Now().UTC()
+	planStore.Create(context.Background(), ports.Plan{
+		ID: "free", Name: "Free", RateLimitPerMinute: 60, IsDefault: true, Enabled: true,
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	// Create mock upstream store
+	upstreamStore := newMockUpstreamStore()
+
+	handler := admin.NewHandler(admin.Deps{
+		Users:     userStore,
+		Keys:      keyStore,
+		Plans:     planStore,
+		Upstreams: upstreamStore,
+		Logger:    zerolog.Nop(),
+		Hasher:    h,
+	})
+
+	return handler, rawKey
+}
+
+// mockUpstreamStore for use with admin handler tests
+type mockUpstreamStore struct {
+	mu        sync.RWMutex
+	upstreams map[string]route.Upstream
+}
+
+func newMockUpstreamStore() *mockUpstreamStore {
+	return &mockUpstreamStore{
+		upstreams: make(map[string]route.Upstream),
+	}
+}
+
+func (s *mockUpstreamStore) Get(ctx context.Context, id string) (route.Upstream, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	u, ok := s.upstreams[id]
+	if !ok {
+		return route.Upstream{}, errors.New("not found")
+	}
+	return u, nil
+}
+
+func (s *mockUpstreamStore) List(ctx context.Context) ([]route.Upstream, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var result []route.Upstream
+	for _, u := range s.upstreams {
+		result = append(result, u)
+	}
+	return result, nil
+}
+
+func (s *mockUpstreamStore) ListEnabled(ctx context.Context) ([]route.Upstream, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var result []route.Upstream
+	for _, u := range s.upstreams {
+		if u.Enabled {
+			result = append(result, u)
+		}
+	}
+	return result, nil
+}
+
+func (s *mockUpstreamStore) Create(ctx context.Context, u route.Upstream) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.upstreams[u.ID] = u
+	return nil
+}
+
+func (s *mockUpstreamStore) Update(ctx context.Context, u route.Upstream) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.upstreams[u.ID] = u
+	return nil
+}
+
+func (s *mockUpstreamStore) Delete(ctx context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.upstreams, id)
+	return nil
 }

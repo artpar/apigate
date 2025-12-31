@@ -31,3 +31,14 @@ e2e.test
 apigate.yaml
 apigate.db
 coverage.out
+
+# Coverage files
+*.out
+coverage.out
+*_coverage.out
+
+# Test binaries
+*.test
+
+# Conversation exports
+2025-*.txt

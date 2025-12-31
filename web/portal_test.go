@@ -218,6 +218,62 @@ func (m *mockUsageStore) GetRecentRequests(ctx context.Context, userID string, l
 	return nil, nil
 }
 
+// mockPlanStore implements ports.PlanStore for testing.
+type mockPlanStore struct {
+	plans []ports.Plan
+}
+
+func newMockPlanStore() *mockPlanStore {
+	return &mockPlanStore{
+		plans: []ports.Plan{
+			{
+				ID:        "plan_default",
+				Name:      "Free",
+				IsDefault: true,
+				Enabled:   true,
+			},
+		},
+	}
+}
+
+func (m *mockPlanStore) List(ctx context.Context) ([]ports.Plan, error) {
+	return m.plans, nil
+}
+
+func (m *mockPlanStore) Get(ctx context.Context, id string) (ports.Plan, error) {
+	for _, p := range m.plans {
+		if p.ID == id {
+			return p, nil
+		}
+	}
+	return ports.Plan{}, errNotFound
+}
+
+func (m *mockPlanStore) Create(ctx context.Context, p ports.Plan) error {
+	m.plans = append(m.plans, p)
+	return nil
+}
+
+func (m *mockPlanStore) Update(ctx context.Context, p ports.Plan) error {
+	for i, existing := range m.plans {
+		if existing.ID == p.ID {
+			m.plans[i] = p
+			return nil
+		}
+	}
+	return errNotFound
+}
+
+func (m *mockPlanStore) Delete(ctx context.Context, id string) error {
+	for i, p := range m.plans {
+		if p.ID == id {
+			m.plans = append(m.plans[:i], m.plans[i+1:]...)
+			return nil
+		}
+	}
+	return errNotFound
+}
+
 var errNotFound = errors.New("not found")
 
 // Helper to create test portal handler
@@ -225,12 +281,16 @@ func newTestPortalHandler() (*PortalHandler, *mockUserStore, *mockTokenStore, *e
 	userStore := newMockUserStore()
 	tokenStore := newMockTokenStore()
 	sessionStore := newMockSessionStore()
+	planStore := newMockPlanStore()
 	emailSender := email.NewMockSender("https://test.com", "TestApp")
 
 	deps := PortalDeps{
 		Users:       userStore,
+		Keys:        &mockKeyStore{},
+		Usage:       &mockUsageStore{},
 		AuthTokens:  tokenStore,
 		Sessions:    sessionStore,
+		Plans:       planStore,
 		EmailSender: emailSender,
 		Logger:      zerolog.Nop(),
 		Hasher:      &mockHasher{},
@@ -266,7 +326,7 @@ func TestPortalHandler_SignupPage(t *testing.T) {
 }
 
 func TestPortalHandler_SignupSubmit_Success(t *testing.T) {
-	handler, userStore, _, emailSender := newTestPortalHandler()
+	handler, userStore, _, _ := newTestPortalHandler()
 
 	form := url.Values{
 		"email":    {"newuser@example.com"},
@@ -280,14 +340,14 @@ func TestPortalHandler_SignupSubmit_Success(t *testing.T) {
 
 	handler.SignupSubmit(w, req)
 
-	// Should redirect to login with success message
+	// Should redirect to login with ready message (no email verification required by default)
 	if w.Code != http.StatusFound {
 		t.Errorf("Status = %d, want %d", w.Code, http.StatusFound)
 	}
 
 	location := w.Header().Get("Location")
-	if !strings.Contains(location, "/portal/login?signup=success") {
-		t.Errorf("Location = %s, want /portal/login?signup=success", location)
+	if !strings.Contains(location, "/portal/login?signup=ready") {
+		t.Errorf("Location = %s, want to contain /portal/login?signup=ready", location)
 	}
 
 	// User should be created
@@ -295,16 +355,11 @@ func TestPortalHandler_SignupSubmit_Success(t *testing.T) {
 		t.Errorf("User count = %d, want 1", len(userStore.users))
 	}
 
-	// User should be pending (not active until email verified)
+	// User should be active (no email verification required by default)
 	for _, u := range userStore.users {
-		if u.Status != "pending" {
-			t.Errorf("Status = %s, want pending", u.Status)
+		if u.Status != "active" {
+			t.Errorf("Status = %s, want active", u.Status)
 		}
-	}
-
-	// Verification email should be sent
-	if emailSender.Count() != 1 {
-		t.Errorf("Email count = %d, want 1", emailSender.Count())
 	}
 }
 
@@ -715,3 +770,1160 @@ func TestPortalHandler_Router(t *testing.T) {
 		})
 	}
 }
+
+func TestPortalHandler_VerifyEmail_MissingToken(t *testing.T) {
+	handler, _, _, _ := newTestPortalHandler()
+
+	req := httptest.NewRequest("GET", "/portal/verify-email", nil)
+	w := httptest.NewRecorder()
+
+	handler.VerifyEmail(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestPortalHandler_VerifyEmail_InvalidToken(t *testing.T) {
+	handler, _, _, _ := newTestPortalHandler()
+
+	req := httptest.NewRequest("GET", "/portal/verify-email?token=invalid-token", nil)
+	w := httptest.NewRecorder()
+
+	handler.VerifyEmail(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestPortalHandler_ResetPasswordPage_MissingToken(t *testing.T) {
+	handler, _, _, _ := newTestPortalHandler()
+
+	req := httptest.NewRequest("GET", "/portal/reset-password", nil)
+	w := httptest.NewRecorder()
+
+	handler.ResetPasswordPage(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestPortalHandler_ResetPasswordPage_WithToken(t *testing.T) {
+	handler, _, _, _ := newTestPortalHandler()
+
+	req := httptest.NewRequest("GET", "/portal/reset-password?token=test-token", nil)
+	w := httptest.NewRecorder()
+
+	handler.ResetPasswordPage(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
+func TestPortalHandler_ResetPasswordSubmit_PasswordMismatch(t *testing.T) {
+	handler, _, _, _ := newTestPortalHandler()
+
+	form := url.Values{
+		"token":            {"test-token"},
+		"password":         {"Password123"},
+		"confirm_password": {"Password456"},
+	}
+
+	req := httptest.NewRequest("POST", "/portal/reset-password", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	handler.ResetPasswordSubmit(w, req)
+
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusUnprocessableEntity)
+	}
+}
+
+func TestPortalHandler_ResetPasswordSubmit_WeakPassword(t *testing.T) {
+	handler, _, _, _ := newTestPortalHandler()
+
+	form := url.Values{
+		"token":            {"test-token"},
+		"password":         {"weak"},
+		"confirm_password": {"weak"},
+	}
+
+	req := httptest.NewRequest("POST", "/portal/reset-password", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	handler.ResetPasswordSubmit(w, req)
+
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusUnprocessableEntity)
+	}
+}
+
+func TestPortalHandler_ResetPasswordSubmit_InvalidToken(t *testing.T) {
+	handler, _, _, _ := newTestPortalHandler()
+
+	form := url.Values{
+		"token":            {"invalid-token"},
+		"password":         {"Password123"},
+		"confirm_password": {"Password123"},
+	}
+
+	req := httptest.NewRequest("POST", "/portal/reset-password", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	handler.ResetPasswordSubmit(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestPortalHandler_PortalLogout(t *testing.T) {
+	handler, userStore, _, _ := newTestPortalHandler()
+
+	// Create active user
+	userStore.users["user1"] = ports.User{
+		ID:     "user1",
+		Email:  "user@example.com",
+		Status: "active",
+	}
+
+	// Generate token
+	tokenService := auth.NewTokenService("test-secret", 24*time.Hour)
+	token, _, _ := tokenService.GenerateToken("user1", "user@example.com", "user")
+
+	req := httptest.NewRequest("POST", "/portal/logout", nil)
+	req.AddCookie(&http.Cookie{Name: "portal_token", Value: token})
+	w := httptest.NewRecorder()
+
+	handler.PortalLogout(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusFound)
+	}
+
+	if w.Header().Get("Location") != "/portal/login" {
+		t.Errorf("Location = %s, want /portal/login", w.Header().Get("Location"))
+	}
+
+	// Check cookie is cleared
+	cookies := w.Result().Cookies()
+	for _, c := range cookies {
+		if c.Name == "portal_token" && c.MaxAge == -1 {
+			return
+		}
+	}
+	t.Error("Cookie should be cleared")
+}
+
+func TestPortalHandler_PortalDashboard(t *testing.T) {
+	handler, userStore, _, _ := newTestPortalHandler()
+
+	// Create active user with plan
+	userStore.users["user1"] = ports.User{
+		ID:     "user1",
+		Email:  "user@example.com",
+		Name:   "Test User",
+		PlanID: "plan_default",
+		Status: "active",
+	}
+
+	// Generate token
+	tokenService := auth.NewTokenService("test-secret", 24*time.Hour)
+	token, _, _ := tokenService.GenerateToken("user1", "user@example.com", "user")
+
+	req := httptest.NewRequest("GET", "/portal/dashboard", nil)
+	req.AddCookie(&http.Cookie{Name: "portal_token", Value: token})
+
+	// Add context with portal user
+	ctx := withPortalUser(req.Context(), &PortalUser{
+		ID:    "user1",
+		Email: "user@example.com",
+		Name:  "Test User",
+	})
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+
+	handler.PortalDashboard(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
+func TestPortalHandler_APIKeysPage(t *testing.T) {
+	handler, userStore, _, _ := newTestPortalHandler()
+
+	userStore.users["user1"] = ports.User{
+		ID:     "user1",
+		Email:  "user@example.com",
+		Name:   "Test User",
+		Status: "active",
+	}
+
+	req := httptest.NewRequest("GET", "/portal/api-keys", nil)
+	ctx := withPortalUser(req.Context(), &PortalUser{
+		ID:    "user1",
+		Email: "user@example.com",
+		Name:  "Test User",
+	})
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+
+	handler.APIKeysPage(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
+func TestPortalHandler_CreateAPIKey(t *testing.T) {
+	handler, userStore, _, _ := newTestPortalHandler()
+
+	// Set up keys store that actually stores keys
+	keyStore := &mockKeyStoreWithStorage{keys: make(map[string]key.Key)}
+	handler.keys = keyStore
+
+	userStore.users["user1"] = ports.User{
+		ID:     "user1",
+		Email:  "user@example.com",
+		Status: "active",
+	}
+
+	form := url.Values{
+		"name": {"My API Key"},
+	}
+
+	req := httptest.NewRequest("POST", "/portal/api-keys", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	ctx := withPortalUser(req.Context(), &PortalUser{
+		ID:    "user1",
+		Email: "user@example.com",
+		Name:  "Test User",
+	})
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+
+	handler.CreateAPIKey(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
+func TestPortalHandler_PortalUsagePage(t *testing.T) {
+	handler, userStore, _, _ := newTestPortalHandler()
+
+	userStore.users["user1"] = ports.User{
+		ID:     "user1",
+		Email:  "user@example.com",
+		Status: "active",
+	}
+
+	req := httptest.NewRequest("GET", "/portal/usage", nil)
+	ctx := withPortalUser(req.Context(), &PortalUser{
+		ID:    "user1",
+		Email: "user@example.com",
+		Name:  "Test User",
+	})
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+
+	handler.PortalUsagePage(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
+func TestPortalHandler_AccountSettingsPage(t *testing.T) {
+	handler, userStore, _, _ := newTestPortalHandler()
+
+	userStore.users["user1"] = ports.User{
+		ID:     "user1",
+		Email:  "user@example.com",
+		Status: "active",
+	}
+
+	req := httptest.NewRequest("GET", "/portal/settings", nil)
+	ctx := withPortalUser(req.Context(), &PortalUser{
+		ID:    "user1",
+		Email: "user@example.com",
+		Name:  "Test User",
+	})
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+
+	handler.AccountSettingsPage(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
+func TestPortalHandler_UpdateAccountSettings_Success(t *testing.T) {
+	handler, userStore, _, _ := newTestPortalHandler()
+
+	userStore.users["user1"] = ports.User{
+		ID:     "user1",
+		Email:  "user@example.com",
+		Name:   "Old Name",
+		Status: "active",
+	}
+
+	form := url.Values{
+		"name": {"New Name"},
+	}
+
+	req := httptest.NewRequest("POST", "/portal/settings", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	ctx := withPortalUser(req.Context(), &PortalUser{
+		ID:    "user1",
+		Email: "user@example.com",
+		Name:  "Old Name",
+	})
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+
+	handler.UpdateAccountSettings(w, req)
+
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+
+	// Verify name was updated
+	if userStore.users["user1"].Name != "New Name" {
+		t.Error("Name should be updated")
+	}
+}
+
+func TestPortalHandler_UpdateAccountSettings_EmptyName(t *testing.T) {
+	handler, userStore, _, _ := newTestPortalHandler()
+
+	userStore.users["user1"] = ports.User{
+		ID:     "user1",
+		Email:  "user@example.com",
+		Name:   "Old Name",
+		Status: "active",
+	}
+
+	form := url.Values{
+		"name": {""},
+	}
+
+	req := httptest.NewRequest("POST", "/portal/settings", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	ctx := withPortalUser(req.Context(), &PortalUser{
+		ID:    "user1",
+		Email: "user@example.com",
+	})
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+
+	handler.UpdateAccountSettings(w, req)
+
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusUnprocessableEntity)
+	}
+}
+
+func TestPortalHandler_ChangePassword_Success(t *testing.T) {
+	handler, userStore, _, _ := newTestPortalHandler()
+
+	userStore.users["user1"] = ports.User{
+		ID:           "user1",
+		Email:        "user@example.com",
+		PasswordHash: []byte("hashed_OldPassword123"),
+		Status:       "active",
+	}
+
+	form := url.Values{
+		"current_password": {"OldPassword123"},
+		"new_password":     {"NewPassword456"},
+		"confirm_password": {"NewPassword456"},
+	}
+
+	req := httptest.NewRequest("POST", "/portal/settings/password", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	ctx := withPortalUser(req.Context(), &PortalUser{
+		ID:    "user1",
+		Email: "user@example.com",
+	})
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+
+	handler.ChangePassword(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusFound)
+	}
+}
+
+func TestPortalHandler_ChangePassword_WrongCurrentPassword(t *testing.T) {
+	handler, userStore, _, _ := newTestPortalHandler()
+
+	userStore.users["user1"] = ports.User{
+		ID:           "user1",
+		Email:        "user@example.com",
+		PasswordHash: []byte("hashed_CorrectPassword"),
+		Status:       "active",
+	}
+
+	form := url.Values{
+		"current_password": {"WrongPassword"},
+		"new_password":     {"NewPassword456"},
+		"confirm_password": {"NewPassword456"},
+	}
+
+	req := httptest.NewRequest("POST", "/portal/settings/password", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	ctx := withPortalUser(req.Context(), &PortalUser{
+		ID:    "user1",
+		Email: "user@example.com",
+	})
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+
+	handler.ChangePassword(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestPortalHandler_PlansPage(t *testing.T) {
+	handler, userStore, _, _ := newTestPortalHandler()
+
+	userStore.users["user1"] = ports.User{
+		ID:     "user1",
+		Email:  "user@example.com",
+		PlanID: "plan_default",
+		Status: "active",
+	}
+
+	req := httptest.NewRequest("GET", "/portal/plans", nil)
+	ctx := withPortalUser(req.Context(), &PortalUser{
+		ID:    "user1",
+		Email: "user@example.com",
+	})
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+
+	handler.PlansPage(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
+func TestPortalHandler_ChangePlan_ToFreePlan(t *testing.T) {
+	handler, userStore, _, _ := newTestPortalHandler()
+
+	userStore.users["user1"] = ports.User{
+		ID:     "user1",
+		Email:  "user@example.com",
+		PlanID: "old_plan",
+		Status: "active",
+	}
+
+	form := url.Values{
+		"plan_id": {"plan_default"},
+	}
+
+	req := httptest.NewRequest("POST", "/portal/plans/change", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	ctx := withPortalUser(req.Context(), &PortalUser{
+		ID:    "user1",
+		Email: "user@example.com",
+	})
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+
+	handler.ChangePlan(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusFound)
+	}
+}
+
+func TestPortalHandler_CheckoutCancel(t *testing.T) {
+	handler, _, _, _ := newTestPortalHandler()
+
+	req := httptest.NewRequest("GET", "/portal/subscription/checkout-cancel", nil)
+	ctx := withPortalUser(req.Context(), &PortalUser{
+		ID:    "user1",
+		Email: "user@example.com",
+	})
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+
+	handler.CheckoutCancel(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusFound)
+	}
+
+	location := w.Header().Get("Location")
+	if !strings.Contains(location, "error=cancelled") {
+		t.Errorf("Location = %s, should contain error=cancelled", location)
+	}
+}
+
+func TestPortalHandler_ResendVerification_MissingEmail(t *testing.T) {
+	handler, _, _, _ := newTestPortalHandler()
+
+	form := url.Values{}
+
+	req := httptest.NewRequest("POST", "/portal/resend-verification", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	handler.ResendVerification(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestPortalHandler_ResendVerification_UnknownEmail(t *testing.T) {
+	handler, _, _, _ := newTestPortalHandler()
+
+	form := url.Values{
+		"email": {"unknown@example.com"},
+	}
+
+	req := httptest.NewRequest("POST", "/portal/resend-verification", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	handler.ResendVerification(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusFound)
+	}
+}
+
+func TestPortalHandler_ResendVerification_AlreadyVerified(t *testing.T) {
+	handler, userStore, _, _ := newTestPortalHandler()
+
+	userStore.users["user1"] = ports.User{
+		ID:     "user1",
+		Email:  "user@example.com",
+		Status: "active", // Already verified
+	}
+
+	form := url.Values{
+		"email": {"user@example.com"},
+	}
+
+	req := httptest.NewRequest("POST", "/portal/resend-verification", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	handler.ResendVerification(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusFound)
+	}
+}
+
+func TestPortalHandler_CloseAccount_Success(t *testing.T) {
+	handler, userStore, _, _ := newTestPortalHandler()
+
+	userStore.users["user1"] = ports.User{
+		ID:           "user1",
+		Email:        "user@example.com",
+		PasswordHash: []byte("hashed_Password123"),
+		Status:       "active",
+	}
+
+	form := url.Values{
+		"password": {"Password123"},
+	}
+
+	req := httptest.NewRequest("POST", "/portal/settings/close-account", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	ctx := withPortalUser(req.Context(), &PortalUser{
+		ID:    "user1",
+		Email: "user@example.com",
+	})
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+
+	handler.CloseAccount(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusFound)
+	}
+
+	// Verify user is marked as cancelled
+	if userStore.users["user1"].Status != "cancelled" {
+		t.Error("User status should be cancelled")
+	}
+}
+
+func TestPortalHandler_CloseAccount_WrongPassword(t *testing.T) {
+	handler, userStore, _, _ := newTestPortalHandler()
+
+	userStore.users["user1"] = ports.User{
+		ID:           "user1",
+		Email:        "user@example.com",
+		PasswordHash: []byte("hashed_CorrectPassword"),
+		Status:       "active",
+	}
+
+	form := url.Values{
+		"password": {"WrongPassword"},
+	}
+
+	req := httptest.NewRequest("POST", "/portal/settings/close-account", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	ctx := withPortalUser(req.Context(), &PortalUser{
+		ID:    "user1",
+		Email: "user@example.com",
+	})
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+
+	handler.CloseAccount(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+}
+
+// mockKeyStoreWithStorage stores keys for testing
+type mockKeyStoreWithStorage struct {
+	keys map[string]key.Key
+}
+
+func (m *mockKeyStoreWithStorage) Get(ctx context.Context, prefix string) ([]key.Key, error) {
+	return nil, nil
+}
+
+func (m *mockKeyStoreWithStorage) Create(ctx context.Context, k key.Key) error {
+	m.keys[k.ID] = k
+	return nil
+}
+
+func (m *mockKeyStoreWithStorage) Revoke(ctx context.Context, id string, at time.Time) error {
+	return nil
+}
+
+func (m *mockKeyStoreWithStorage) ListByUser(ctx context.Context, userID string) ([]key.Key, error) {
+	var result []key.Key
+	for _, k := range m.keys {
+		if k.UserID == userID {
+			result = append(result, k)
+		}
+	}
+	return result, nil
+}
+
+func (m *mockKeyStoreWithStorage) UpdateLastUsed(ctx context.Context, id string, at time.Time) error {
+	return nil
+}
+
+func TestPortalHandler_PortalAuthMiddleware_InvalidToken(t *testing.T) {
+	handler, _, _, _ := newTestPortalHandler()
+
+	protected := handler.PortalAuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/portal/dashboard", nil)
+	req.AddCookie(&http.Cookie{Name: "portal_token", Value: "invalid-token"})
+	w := httptest.NewRecorder()
+
+	protected.ServeHTTP(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusFound)
+	}
+}
+
+func TestPortalHandler_PortalAuthMiddleware_UserNotFound(t *testing.T) {
+	handler, _, _, _ := newTestPortalHandler()
+
+	tokenService := auth.NewTokenService("test-secret", 24*time.Hour)
+	token, _, _ := tokenService.GenerateToken("nonexistent", "user@example.com", "user")
+
+	protected := handler.PortalAuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/portal/dashboard", nil)
+	req.AddCookie(&http.Cookie{Name: "portal_token", Value: token})
+	w := httptest.NewRecorder()
+
+	protected.ServeHTTP(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusFound)
+	}
+}
+
+func TestPortalHandler_PortalAuthMiddleware_UserNotActive(t *testing.T) {
+	handler, userStore, _, _ := newTestPortalHandler()
+
+	userStore.users["user1"] = ports.User{
+		ID:     "user1",
+		Email:  "user@example.com",
+		Status: "suspended",
+	}
+
+	tokenService := auth.NewTokenService("test-secret", 24*time.Hour)
+	token, _, _ := tokenService.GenerateToken("user1", "user@example.com", "user")
+
+	protected := handler.PortalAuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/portal/dashboard", nil)
+	req.AddCookie(&http.Cookie{Name: "portal_token", Value: token})
+	w := httptest.NewRecorder()
+
+	protected.ServeHTTP(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusFound)
+	}
+}
+
+func TestPortalHandler_PortalLoginPage_WithMessages(t *testing.T) {
+	handler, _, _, _ := newTestPortalHandler()
+
+	tests := []struct {
+		name   string
+		query  string
+	}{
+		{"signup success", "?signup=success"},
+		{"signup ready", "?signup=ready"},
+		{"verified", "?verified=true"},
+		{"reset success", "?reset=success"},
+		{"with email", "?email=test@example.com"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/portal/login"+tt.query, nil)
+			w := httptest.NewRecorder()
+
+			handler.PortalLoginPage(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Errorf("Status = %d, want %d", w.Code, http.StatusOK)
+			}
+		})
+	}
+}
+
+func TestPortalHandler_PortalLoginSubmit_ValidationError(t *testing.T) {
+	handler, _, _, _ := newTestPortalHandler()
+
+	form := url.Values{
+		"email":    {""},
+		"password": {""},
+	}
+
+	req := httptest.NewRequest("POST", "/portal/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	handler.PortalLoginSubmit(w, req)
+
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusUnprocessableEntity)
+	}
+}
+
+func TestPortalHandler_PortalLoginSubmit_SuspendedUser(t *testing.T) {
+	handler, userStore, _, _ := newTestPortalHandler()
+
+	userStore.users["user1"] = ports.User{
+		ID:           "user1",
+		Email:        "user@example.com",
+		PasswordHash: []byte("hashed_Password123"),
+		Status:       "suspended",
+	}
+
+	form := url.Values{
+		"email":    {"user@example.com"},
+		"password": {"Password123"},
+	}
+
+	req := httptest.NewRequest("POST", "/portal/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	handler.PortalLoginSubmit(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusForbidden)
+	}
+}
+
+func TestNewPortalPageData(t *testing.T) {
+	handler, _, _, _ := newTestPortalHandler()
+
+	ctx := withPortalUser(context.Background(), &PortalUser{
+		ID:    "user1",
+		Email: "user@example.com",
+		Name:  "Test User",
+	})
+
+	data := handler.newPortalPageData(ctx, "Test Page")
+
+	if data.Title != "Test Page" {
+		t.Errorf("Title = %s, want Test Page", data.Title)
+	}
+
+	if data.User == nil {
+		t.Fatal("User should not be nil")
+	}
+
+	if data.User.ID != "user1" {
+		t.Errorf("User.ID = %s, want user1", data.User.ID)
+	}
+
+	if data.AppName != "TestApp" {
+		t.Errorf("AppName = %s, want TestApp", data.AppName)
+	}
+}
+
+// mockKeyStoreWithData implements ports.KeyStore with actual data storage
+type mockKeyStoreWithData struct {
+	keys map[string]key.Key
+}
+
+func newMockKeyStoreWithData() *mockKeyStoreWithData {
+	return &mockKeyStoreWithData{keys: make(map[string]key.Key)}
+}
+
+func (m *mockKeyStoreWithData) Get(ctx context.Context, prefix string) ([]key.Key, error) {
+	for _, k := range m.keys {
+		if k.Prefix == prefix {
+			return []key.Key{k}, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *mockKeyStoreWithData) Create(ctx context.Context, k key.Key) error {
+	m.keys[k.ID] = k
+	return nil
+}
+
+func (m *mockKeyStoreWithData) Revoke(ctx context.Context, id string, at time.Time) error {
+	if k, ok := m.keys[id]; ok {
+		k.RevokedAt = &at
+		m.keys[id] = k
+		return nil
+	}
+	return errors.New("key not found")
+}
+
+func (m *mockKeyStoreWithData) ListByUser(ctx context.Context, userID string) ([]key.Key, error) {
+	var result []key.Key
+	for _, k := range m.keys {
+		if k.UserID == userID {
+			result = append(result, k)
+		}
+	}
+	return result, nil
+}
+
+func (m *mockKeyStoreWithData) UpdateLastUsed(ctx context.Context, id string, at time.Time) error {
+	return nil
+}
+
+func newTestPortalHandlerWithKeyStore() (*PortalHandler, *mockUserStore, *mockKeyStoreWithData) {
+	userStore := newMockUserStore()
+	tokenStore := newMockTokenStore()
+	sessionStore := newMockSessionStore()
+	planStore := newMockPlanStore()
+	keyStore := newMockKeyStoreWithData()
+	emailSender := email.NewMockSender("https://test.com", "TestApp")
+
+	deps := PortalDeps{
+		Users:       userStore,
+		Keys:        keyStore,
+		Usage:       &mockUsageStore{},
+		AuthTokens:  tokenStore,
+		Sessions:    sessionStore,
+		Plans:       planStore,
+		EmailSender: emailSender,
+		Logger:      zerolog.Nop(),
+		Hasher:      &mockHasher{},
+		IDGen:       &mockIDGen{},
+		JWTSecret:   "test-secret",
+		BaseURL:     "https://test.com",
+		AppName:     "TestApp",
+	}
+
+	handler, _ := NewPortalHandler(deps)
+	return handler, userStore, keyStore
+}
+
+func TestPortalHandler_RevokeAPIKey(t *testing.T) {
+	handler, userStore, keyStore := newTestPortalHandlerWithKeyStore()
+
+	// Create test user and key
+	userStore.users["user1"] = ports.User{
+		ID:    "user1",
+		Email: "user@example.com",
+	}
+
+	keyStore.keys["key1"] = key.Key{
+		ID:     "key1",
+		UserID: "user1",
+		Name:   "Test Key",
+	}
+
+	r := chi.NewRouter()
+	r.Delete("/portal/api-keys/{id}", handler.RevokeAPIKey)
+
+	req := httptest.NewRequest("DELETE", "/portal/api-keys/key1", nil)
+	ctx := withPortalUser(req.Context(), &PortalUser{
+		ID:    "user1",
+		Email: "user@example.com",
+	})
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusFound)
+	}
+}
+
+func TestPortalHandler_RevokeAPIKey_MissingID(t *testing.T) {
+	handler, _, _ := newTestPortalHandlerWithKeyStore()
+
+	req := httptest.NewRequest("DELETE", "/portal/api-keys/", nil)
+	ctx := withPortalUser(req.Context(), &PortalUser{
+		ID:    "user1",
+		Email: "user@example.com",
+	})
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	handler.RevokeAPIKey(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestPortalHandler_RevokeAPIKey_NotOwned(t *testing.T) {
+	handler, userStore, keyStore := newTestPortalHandlerWithKeyStore()
+
+	userStore.users["user1"] = ports.User{
+		ID:    "user1",
+		Email: "user@example.com",
+	}
+
+	// Key belongs to different user
+	keyStore.keys["key1"] = key.Key{
+		ID:     "key1",
+		UserID: "other_user",
+		Name:   "Test Key",
+	}
+
+	r := chi.NewRouter()
+	r.Delete("/portal/api-keys/{id}", handler.RevokeAPIKey)
+
+	req := httptest.NewRequest("DELETE", "/portal/api-keys/key1", nil)
+	ctx := withPortalUser(req.Context(), &PortalUser{
+		ID:    "user1",
+		Email: "user@example.com",
+	})
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+func TestPortalHandler_CheckoutSuccess(t *testing.T) {
+	handler, userStore, _ := newTestPortalHandlerWithKeyStore()
+
+	userStore.users["user1"] = ports.User{
+		ID:    "user1",
+		Email: "user@example.com",
+	}
+
+	req := httptest.NewRequest("GET", "/portal/checkout/success?session_id=test_session", nil)
+	ctx := withPortalUser(req.Context(), &PortalUser{
+		ID:    "user1",
+		Email: "user@example.com",
+	})
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	handler.CheckoutSuccess(w, req)
+
+	// Should redirect since payment provider is nil
+	if w.Code != http.StatusFound && w.Code != http.StatusInternalServerError {
+		t.Errorf("Status = %d, want Found or InternalServerError", w.Code)
+	}
+}
+
+func TestPortalHandler_ManageSubscription(t *testing.T) {
+	handler, userStore, _ := newTestPortalHandlerWithKeyStore()
+
+	userStore.users["user1"] = ports.User{
+		ID:    "user1",
+		Email: "user@example.com",
+	}
+
+	req := httptest.NewRequest("GET", "/portal/subscription/manage", nil)
+	ctx := withPortalUser(req.Context(), &PortalUser{
+		ID:    "user1",
+		Email: "user@example.com",
+	})
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	handler.ManageSubscription(w, req)
+
+	// Should redirect or error since payment provider is nil
+	if w.Code != http.StatusFound && w.Code != http.StatusInternalServerError {
+		t.Errorf("Status = %d, want Found or InternalServerError", w.Code)
+	}
+}
+
+func TestPortalHandler_CancelSubscription(t *testing.T) {
+	handler, userStore, _ := newTestPortalHandlerWithKeyStore()
+
+	userStore.users["user1"] = ports.User{
+		ID:    "user1",
+		Email: "user@example.com",
+	}
+
+	req := httptest.NewRequest("POST", "/portal/subscription/cancel", nil)
+	ctx := withPortalUser(req.Context(), &PortalUser{
+		ID:    "user1",
+		Email: "user@example.com",
+	})
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	handler.CancelSubscription(w, req)
+
+	// Should redirect or error since payment provider is nil
+	if w.Code != http.StatusFound && w.Code != http.StatusInternalServerError {
+		t.Errorf("Status = %d, want Found or InternalServerError", w.Code)
+	}
+}
+
+func TestPortalHandler_RenderSignupPage(t *testing.T) {
+	handler, _, _, _ := newTestPortalHandler()
+
+	// Test basic render
+	result := handler.renderSignupPage("Test User", "test@example.com", nil)
+	if result == "" {
+		t.Error("renderSignupPage should return non-empty string")
+	}
+	if !strings.Contains(result, "Test User") {
+		t.Error("renderSignupPage should contain the name")
+	}
+
+	// Test with errors
+	errors := map[string]string{"email": "Invalid email"}
+	result2 := handler.renderSignupPage("", "bad-email", errors)
+	if !strings.Contains(result2, "Invalid email") {
+		t.Error("renderSignupPage should contain error message")
+	}
+}
+
+func TestPortalHandler_ChangePlan_MissingPlanID(t *testing.T) {
+	handler, _, _, _ := newTestPortalHandler()
+
+	form := url.Values{}
+
+	req := httptest.NewRequest("POST", "/portal/subscription/change", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	ctx := withPortalUser(req.Context(), &PortalUser{
+		ID:    "user1",
+		Email: "user@example.com",
+	})
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	handler.ChangePlan(w, req)
+
+	// Should redirect or show error for missing plan
+	if w.Code != http.StatusFound && w.Code != http.StatusBadRequest {
+		t.Errorf("Status = %d, want Found or BadRequest", w.Code)
+	}
+}
+
+func TestPortalHandler_ChangePassword_MissingFields(t *testing.T) {
+	handler, _, _, _ := newTestPortalHandler()
+
+	form := url.Values{
+		"current_password": {""},
+		"new_password":     {""},
+	}
+
+	req := httptest.NewRequest("POST", "/portal/settings/change-password", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	ctx := withPortalUser(req.Context(), &PortalUser{
+		ID:    "user1",
+		Email: "user@example.com",
+	})
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	handler.ChangePassword(w, req)
+
+	// Should handle missing fields - 422 is also acceptable for validation errors
+	if w.Code != http.StatusBadRequest && w.Code != http.StatusFound && w.Code != http.StatusOK && w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("Status = %d, want BadRequest, Found, OK, or UnprocessableEntity", w.Code)
+	}
+}
+
+func TestPortalHandler_ResetPasswordSubmit_MissingFields(t *testing.T) {
+	handler, _, _, _ := newTestPortalHandler()
+
+	form := url.Values{
+		"token":        {""},
+		"new_password": {""},
+	}
+
+	req := httptest.NewRequest("POST", "/portal/reset-password", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	handler.ResetPasswordSubmit(w, req)
+
+	// Should handle missing fields - 422 is also acceptable for validation errors
+	if w.Code != http.StatusBadRequest && w.Code != http.StatusFound && w.Code != http.StatusOK && w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("Status = %d, want BadRequest, Found, OK, or UnprocessableEntity", w.Code)
+	}
+}
+

@@ -390,6 +390,287 @@ func TestResolver_NoEnabledProvider(t *testing.T) {
 }
 
 // =============================================================================
+// Registry Additional Tests for Coverage
+// =============================================================================
+
+func TestRegistry_GetByModule(t *testing.T) {
+	reg := capability.NewRegistry()
+
+	// Register providers from different modules
+	providers := []capability.ProviderInfo{
+		{Name: "stripe_prod", Module: "payment_stripe", Capability: capability.Payment, Enabled: true},
+		{Name: "stripe_test", Module: "payment_stripe", Capability: capability.Payment, Enabled: true},
+		{Name: "paddle_prod", Module: "payment_paddle", Capability: capability.Payment, Enabled: true},
+		{Name: "smtp_main", Module: "email_smtp", Capability: capability.Email, Enabled: true},
+	}
+
+	for _, p := range providers {
+		if err := reg.Register(p); err != nil {
+			t.Fatalf("Register(%s) error = %v", p.Name, err)
+		}
+	}
+
+	// Get providers from payment_stripe module
+	stripeProviders := reg.GetByModule("payment_stripe")
+	if len(stripeProviders) != 2 {
+		t.Errorf("GetByModule(payment_stripe) got %d providers, want 2", len(stripeProviders))
+	}
+
+	// Get providers from non-existent module
+	noProviders := reg.GetByModule("nonexistent")
+	if len(noProviders) != 0 {
+		t.Errorf("GetByModule(nonexistent) got %d providers, want 0", len(noProviders))
+	}
+}
+
+func TestRegistry_All(t *testing.T) {
+	reg := capability.NewRegistry()
+
+	providers := []capability.ProviderInfo{
+		{Name: "stripe_prod", Module: "payment_stripe", Capability: capability.Payment, Enabled: true},
+		{Name: "smtp_main", Module: "email_smtp", Capability: capability.Email, Enabled: true},
+		{Name: "redis_main", Module: "cache_redis", Capability: capability.Cache, Enabled: true},
+	}
+
+	for _, p := range providers {
+		reg.Register(p)
+	}
+
+	all := reg.All()
+	if len(all) != 3 {
+		t.Errorf("All() got %d providers, want 3", len(all))
+	}
+}
+
+func TestRegistry_HasCapability(t *testing.T) {
+	reg := capability.NewRegistry()
+
+	// No providers registered
+	if reg.HasCapability(capability.Payment) {
+		t.Error("HasCapability(Payment) should return false when no providers registered")
+	}
+
+	// Register a payment provider
+	info := capability.ProviderInfo{
+		Name:       "stripe_prod",
+		Module:     "payment_stripe",
+		Capability: capability.Payment,
+		Enabled:    true,
+	}
+	reg.Register(info)
+
+	if !reg.HasCapability(capability.Payment) {
+		t.Error("HasCapability(Payment) should return true after registration")
+	}
+
+	if reg.HasCapability(capability.Email) {
+		t.Error("HasCapability(Email) should return false when not registered")
+	}
+}
+
+func TestRegistry_SetEnabled_NotFound(t *testing.T) {
+	reg := capability.NewRegistry()
+
+	err := reg.SetEnabled("nonexistent", true)
+	if err == nil {
+		t.Error("SetEnabled() should return error for nonexistent provider")
+	}
+}
+
+func TestRegistry_SetDefault_NotFound(t *testing.T) {
+	reg := capability.NewRegistry()
+
+	err := reg.SetDefault("nonexistent")
+	if err == nil {
+		t.Error("SetDefault() should return error for nonexistent provider")
+	}
+}
+
+func TestRegistry_Unregister_NotFound(t *testing.T) {
+	reg := capability.NewRegistry()
+
+	err := reg.Unregister("nonexistent")
+	if err == nil {
+		t.Error("Unregister() should return error for nonexistent provider")
+	}
+}
+
+func TestRegistry_Get_NotFound(t *testing.T) {
+	reg := capability.NewRegistry()
+
+	_, ok := reg.Get("nonexistent")
+	if ok {
+		t.Error("Get() should return false for nonexistent provider")
+	}
+}
+
+func TestRegistry_GetDefault_FallbackToFirstEnabled(t *testing.T) {
+	reg := capability.NewRegistry()
+
+	// Register providers without explicit default
+	providers := []capability.ProviderInfo{
+		{Name: "stripe_prod", Module: "payment_stripe", Capability: capability.Payment, Enabled: true, IsDefault: false},
+		{Name: "paddle_prod", Module: "payment_paddle", Capability: capability.Payment, Enabled: true, IsDefault: false},
+	}
+
+	for _, p := range providers {
+		reg.Register(p)
+	}
+
+	// Should fall back to first enabled
+	def, ok := reg.GetDefault(capability.Payment)
+	if !ok {
+		t.Fatal("GetDefault(Payment) should find a provider")
+	}
+	// Should be one of the enabled providers
+	if def.Name != "stripe_prod" && def.Name != "paddle_prod" {
+		t.Errorf("GetDefault(Payment) should return an enabled provider, got %s", def.Name)
+	}
+}
+
+func TestRegistry_GetDefault_SkipsDisabledDefault(t *testing.T) {
+	reg := capability.NewRegistry()
+
+	// Register default that is disabled
+	providers := []capability.ProviderInfo{
+		{Name: "stripe_prod", Module: "payment_stripe", Capability: capability.Payment, Enabled: false, IsDefault: true},
+		{Name: "paddle_prod", Module: "payment_paddle", Capability: capability.Payment, Enabled: true, IsDefault: false},
+	}
+
+	for _, p := range providers {
+		reg.Register(p)
+	}
+
+	// Should fall back to first enabled (not disabled default)
+	def, ok := reg.GetDefault(capability.Payment)
+	if !ok {
+		t.Fatal("GetDefault(Payment) should find a provider")
+	}
+	if def.Name != "paddle_prod" {
+		t.Errorf("GetDefault(Payment) should return enabled provider, got %s", def.Name)
+	}
+}
+
+func TestRegistry_GetDefault_AllDisabled(t *testing.T) {
+	reg := capability.NewRegistry()
+
+	// Register all disabled providers
+	info := capability.ProviderInfo{
+		Name:       "stripe_prod",
+		Module:     "payment_stripe",
+		Capability: capability.Payment,
+		Enabled:    false,
+		IsDefault:  true,
+	}
+	reg.Register(info)
+
+	// Should not find any default
+	_, ok := reg.GetDefault(capability.Payment)
+	if ok {
+		t.Error("GetDefault(Payment) should not find provider when all are disabled")
+	}
+}
+
+func TestRegistry_Unregister_CleansUpIndexes(t *testing.T) {
+	reg := capability.NewRegistry()
+
+	info := capability.ProviderInfo{
+		Name:       "stripe_prod",
+		Module:     "payment_stripe",
+		Capability: capability.Payment,
+		Enabled:    true,
+	}
+	reg.Register(info)
+
+	// Verify provider is indexed
+	if len(reg.GetByCapability(capability.Payment)) != 1 {
+		t.Fatal("Provider should be in capability index")
+	}
+	if len(reg.GetByModule("payment_stripe")) != 1 {
+		t.Fatal("Provider should be in module index")
+	}
+
+	// Unregister
+	reg.Unregister("stripe_prod")
+
+	// Verify indexes are cleaned up
+	if len(reg.GetByCapability(capability.Payment)) != 0 {
+		t.Error("Provider should be removed from capability index")
+	}
+	if len(reg.GetByModule("payment_stripe")) != 0 {
+		t.Error("Provider should be removed from module index")
+	}
+}
+
+func TestRegistry_Register_ValidationError(t *testing.T) {
+	reg := capability.NewRegistry()
+
+	// Missing required fields
+	info := capability.ProviderInfo{
+		Name:       "",
+		Module:     "",
+		Capability: capability.Unknown,
+	}
+
+	err := reg.Register(info)
+	if err == nil {
+		t.Error("Register() should return error for invalid provider info")
+	}
+}
+
+func TestRegistry_GetByCustomCapability_Empty(t *testing.T) {
+	reg := capability.NewRegistry()
+
+	// No providers registered
+	providers := reg.GetByCustomCapability("reconciliation")
+	if len(providers) != 0 {
+		t.Errorf("GetByCustomCapability() should return empty for non-registered capability, got %d", len(providers))
+	}
+}
+
+func TestRegistry_SetDefault_ClearsPreviousDefault(t *testing.T) {
+	reg := capability.NewRegistry()
+
+	// Register multiple providers
+	providers := []capability.ProviderInfo{
+		{Name: "stripe_prod", Module: "payment_stripe", Capability: capability.Payment, Enabled: true, IsDefault: true},
+		{Name: "paddle_prod", Module: "payment_paddle", Capability: capability.Payment, Enabled: true, IsDefault: false},
+		{Name: "braintree_prod", Module: "payment_braintree", Capability: capability.Payment, Enabled: true, IsDefault: false},
+	}
+
+	for _, p := range providers {
+		reg.Register(p)
+	}
+
+	// Verify initial default
+	def, _ := reg.GetDefault(capability.Payment)
+	if def.Name != "stripe_prod" {
+		t.Errorf("Initial default should be stripe_prod, got %s", def.Name)
+	}
+
+	// Change default
+	reg.SetDefault("paddle_prod")
+
+	// Verify new default
+	def, _ = reg.GetDefault(capability.Payment)
+	if def.Name != "paddle_prod" {
+		t.Errorf("New default should be paddle_prod, got %s", def.Name)
+	}
+
+	// Verify old default is cleared
+	stripe, _ := reg.Get("stripe_prod")
+	if stripe.IsDefault {
+		t.Error("stripe_prod should no longer be default")
+	}
+
+	// Verify non-default is still not default
+	braintree, _ := reg.Get("braintree_prod")
+	if braintree.IsDefault {
+		t.Error("braintree_prod should not be default")
+	}
+}
+
+// =============================================================================
 // Mock Implementations for Testing
 // =============================================================================
 
@@ -401,7 +682,7 @@ func (m *MockPaymentProvider) Name() string { return m.name }
 func (m *MockPaymentProvider) CreateCustomer(ctx context.Context, email, name, userID string) (string, error) {
 	return "cus_mock_123", nil
 }
-func (m *MockPaymentProvider) CreateCheckoutSession(ctx context.Context, customerID, priceID, successURL, cancelURL string) (string, error) {
+func (m *MockPaymentProvider) CreateCheckoutSession(ctx context.Context, customerID, priceID, successURL, cancelURL string, trialDays int) (string, error) {
 	return "https://checkout.mock.com/session", nil
 }
 func (m *MockPaymentProvider) CreatePortalSession(ctx context.Context, customerID, returnURL string) (string, error) {

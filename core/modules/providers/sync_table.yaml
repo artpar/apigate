@@ -55,7 +55,7 @@ schema:
   notify_on_completion: { type: bool, default: false, description: "Send notification on successful sync" }
 
   # Statistics
-  last_sync:      { type: datetime, internal: true }
+  last_sync:      { type: timestamp, internal: true }
   last_result:    { type: enum, values: [success, partial, failed], internal: true }
   total_syncs:    { type: int, default: 0, internal: true }
   total_records_synced: { type: int, default: 0, internal: true }
