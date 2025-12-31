@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/artpar/apigate/app"
@@ -12,6 +13,7 @@ import (
 
 // mockSettingsStore implements ports.SettingsStore for testing.
 type mockSettingsStore struct {
+	mu     sync.RWMutex
 	data   settings.Settings
 	getErr error
 	setErr error
@@ -24,6 +26,8 @@ func newMockSettingsStore() *mockSettingsStore {
 }
 
 func (m *mockSettingsStore) Get(ctx context.Context, key string) (settings.Setting, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if m.getErr != nil {
 		return settings.Setting{}, m.getErr
 	}
@@ -35,6 +39,8 @@ func (m *mockSettingsStore) Get(ctx context.Context, key string) (settings.Setti
 }
 
 func (m *mockSettingsStore) GetAll(ctx context.Context) (settings.Settings, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if m.getErr != nil {
 		return nil, m.getErr
 	}
@@ -46,6 +52,8 @@ func (m *mockSettingsStore) GetAll(ctx context.Context) (settings.Settings, erro
 }
 
 func (m *mockSettingsStore) GetByPrefix(ctx context.Context, prefix string) (settings.Settings, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if m.getErr != nil {
 		return nil, m.getErr
 	}
@@ -59,6 +67,8 @@ func (m *mockSettingsStore) GetByPrefix(ctx context.Context, prefix string) (set
 }
 
 func (m *mockSettingsStore) Set(ctx context.Context, key, value string, encrypted bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.setErr != nil {
 		return m.setErr
 	}
@@ -67,6 +77,8 @@ func (m *mockSettingsStore) Set(ctx context.Context, key, value string, encrypte
 }
 
 func (m *mockSettingsStore) SetBatch(ctx context.Context, s settings.Settings) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.setErr != nil {
 		return m.setErr
 	}
@@ -77,6 +89,8 @@ func (m *mockSettingsStore) SetBatch(ctx context.Context, s settings.Settings) e
 }
 
 func (m *mockSettingsStore) Delete(ctx context.Context, key string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.data, key)
 	return nil
 }

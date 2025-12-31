@@ -1,6 +1,7 @@
 package analytics
 
 import (
+	"math"
 	"testing"
 	"time"
 )
@@ -133,7 +134,8 @@ func TestDefaultCostCalculator_CalculateWithDefaultValues(t *testing.T) {
 	// transfer: ((512+512)/1024) * 0.00001 = 1 * 0.00001 = 0.00001
 	expected := 0.001 + 0.01 + 0.000001 + 0.00001
 
-	if result != expected {
+	// Use tolerance for float comparison due to floating point precision
+	if math.Abs(result-expected) > 1e-12 {
 		t.Errorf("Calculate() = %v, want %v", result, expected)
 	}
 }
