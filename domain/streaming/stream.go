@@ -4,6 +4,7 @@ package streaming
 import (
 	"bytes"
 	"io"
+	"sync"
 	"sync/atomic"
 )
 
@@ -18,6 +19,7 @@ type StreamMetrics struct {
 
 // StreamReader wraps a reader to track streaming metrics.
 type StreamReader struct {
+	mu           sync.RWMutex
 	reader       io.ReadCloser
 	totalBytes   atomic.Int64
 	chunkCount   atomic.Int64
@@ -44,6 +46,7 @@ func (s *StreamReader) Read(p []byte) (int, error) {
 		s.totalBytes.Add(int64(n))
 		s.chunkCount.Add(1)
 
+		s.mu.Lock()
 		// Keep track of last chunk
 		s.lastChunk = make([]byte, n)
 		copy(s.lastChunk, p[:n])
@@ -52,6 +55,7 @@ func (s *StreamReader) Read(p []byte) (int, error) {
 		if s.accumulate {
 			s.buffer.Write(p[:n])
 		}
+		s.mu.Unlock()
 	}
 	return n, err
 }
@@ -64,6 +68,8 @@ func (s *StreamReader) Close() error {
 
 // GetMetrics returns the accumulated stream metrics.
 func (s *StreamReader) GetMetrics() StreamMetrics {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	metrics := StreamMetrics{
 		TotalBytes:    s.totalBytes.Load(),
 		ChunkCount:    s.chunkCount.Load(),
@@ -83,11 +89,15 @@ func (s *StreamReader) GetTotalBytes() int64 {
 
 // GetLastChunk returns the last chunk of data received.
 func (s *StreamReader) GetLastChunk() []byte {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.lastChunk
 }
 
 // GetAllData returns all accumulated data (only if accumulate was true).
 func (s *StreamReader) GetAllData() []byte {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if s.accumulate {
 		return s.buffer.Bytes()
 	}
