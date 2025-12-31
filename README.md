@@ -264,7 +264,7 @@ Payment and email providers are configured via the Admin Dashboard settings.
 
 ### User Guides
 - **[User Guide](docs/USER_GUIDE.md)** - Complete guide for both API sellers (admins) and API buyers (customers)
-- **[User Journeys](docs/USER_JOURNEYS.md)** - Complete user journey maps with screenshot automation
+- **[User Journeys](docs/user_journeys/)** - Complete user journey documentation with UX/business analysis
 
 ### Technical Reference
 - **[Technical Features](docs/TECHNICAL_FEATURES.md)** - Comprehensive list of all features, APIs, CLI commands, and configuration options
