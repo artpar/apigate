@@ -1,0 +1,207 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: apigate
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  # Linux AMD64
+  - id: linux-amd64
+    binary: apigate
+    main: ./cmd/apigate
+    goos:
+      - linux
+    goarch:
+      - amd64
+    env:
+      - CGO_ENABLED=1
+      - CC=x86_64-linux-gnu-gcc
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+      - -extldflags "-static"
+    tags:
+      - netgo
+      - osusergo
+
+  # Linux ARM64
+  - id: linux-arm64
+    binary: apigate
+    main: ./cmd/apigate
+    goos:
+      - linux
+    goarch:
+      - arm64
+    env:
+      - CGO_ENABLED=1
+      - CC=aarch64-linux-gnu-gcc
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+      - -extldflags "-static"
+    tags:
+      - netgo
+      - osusergo
+
+  # macOS AMD64 (built on macOS runner)
+  - id: darwin-amd64
+    binary: apigate
+    main: ./cmd/apigate
+    goos:
+      - darwin
+    goarch:
+      - amd64
+    env:
+      - CGO_ENABLED=1
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+
+  # macOS ARM64 (built on macOS runner)
+  - id: darwin-arm64
+    binary: apigate
+    main: ./cmd/apigate
+    goos:
+      - darwin
+    goarch:
+      - arm64
+    env:
+      - CGO_ENABLED=1
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+
+  # Windows AMD64
+  - id: windows-amd64
+    binary: apigate
+    main: ./cmd/apigate
+    goos:
+      - windows
+    goarch:
+      - amd64
+    env:
+      - CGO_ENABLED=1
+      - CC=x86_64-w64-mingw32-gcc
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+
+archives:
+  - id: default
+    format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE*
+      - configs/apigate.example.yaml
+      - migrations/*
+
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+      - Merge pull request
+      - Merge branch
+
+release:
+  github:
+    owner: artpar
+    name: apigate
+  prerelease: auto
+  draft: false
+  name_template: "{{.ProjectName}} v{{.Version}}"
+
+# Homebrew tap
+brews:
+  - name: apigate
+    repository:
+      owner: artpar
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    folder: Formula
+    homepage: "https://github.com/artpar/apigate"
+    description: "Self-hosted API gateway with usage metering and billing"
+    license: "MIT"
+    skip_upload: auto
+    test: |
+      system "#{bin}/apigate", "version"
+    install: |
+      bin.install "apigate"
+
+# Scoop bucket for Windows
+scoops:
+  - name: apigate
+    repository:
+      owner: artpar
+      name: scoop-bucket
+      token: "{{ .Env.SCOOP_BUCKET_TOKEN }}"
+    homepage: "https://github.com/artpar/apigate"
+    description: "Self-hosted API gateway with usage metering and billing"
+    license: "MIT"
+    skip_upload: auto
+
+# Docker images
+dockers:
+  - image_templates:
+      - "ghcr.io/artpar/apigate:{{ .Version }}-amd64"
+      - "ghcr.io/artpar/apigate:latest-amd64"
+    dockerfile: Dockerfile.goreleaser
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.source=https://github.com/artpar/apigate"
+    goos: linux
+    goarch: amd64
+    ids:
+      - linux-amd64
+    extra_files:
+      - migrations
+      - configs/apigate.example.yaml
+
+  - image_templates:
+      - "ghcr.io/artpar/apigate:{{ .Version }}-arm64"
+      - "ghcr.io/artpar/apigate:latest-arm64"
+    dockerfile: Dockerfile.goreleaser
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.source=https://github.com/artpar/apigate"
+    goos: linux
+    goarch: arm64
+    ids:
+      - linux-arm64
+    extra_files:
+      - migrations
+      - configs/apigate.example.yaml
+
+docker_manifests:
+  - name_template: "ghcr.io/artpar/apigate:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/artpar/apigate:{{ .Version }}-amd64"
+      - "ghcr.io/artpar/apigate:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/artpar/apigate:latest"
+    image_templates:
+      - "ghcr.io/artpar/apigate:latest-amd64"
+      - "ghcr.io/artpar/apigate:latest-arm64"

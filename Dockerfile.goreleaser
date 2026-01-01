@@ -1,0 +1,24 @@
+# Dockerfile for goreleaser - uses pre-built binary
+FROM alpine:3.21
+
+RUN apk add --no-cache ca-certificates tzdata
+
+WORKDIR /app
+
+# Copy pre-built binary from goreleaser
+COPY apigate /app/apigate
+COPY migrations /app/migrations
+COPY configs/apigate.example.yaml /app/apigate.example.yaml
+
+# Create data directory
+RUN mkdir -p /app/data
+
+# Default ports
+EXPOSE 8080 8081 8082
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
+
+ENTRYPOINT ["/app/apigate"]
+CMD ["serve", "-config", "/app/apigate.yaml"]
