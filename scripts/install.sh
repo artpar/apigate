@@ -6,6 +6,7 @@ set -e
 
 REPO="artpar/apigate"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
+VERSION="${VERSION:-}"  # Can be set via environment variable
 
 # Detect OS and architecture
 detect_platform() {
@@ -44,9 +45,19 @@ main() {
     platform="$(detect_platform)"
     echo "Platform: $platform"
 
-    echo "Fetching latest version..."
-    version="$(get_latest_version)"
-    echo "Latest version: $version"
+    if [ -n "$VERSION" ]; then
+        version="$VERSION"
+        echo "Using specified version: $version"
+    else
+        echo "Fetching latest version..."
+        version="$(get_latest_version)"
+        if [ -z "$version" ]; then
+            echo "Error: Could not determine latest version." >&2
+            echo "For private repos, set VERSION=v0.1.0 environment variable." >&2
+            exit 1
+        fi
+        echo "Latest version: $version"
+    fi
 
     # Determine file extension
     local ext="tar.gz"
@@ -62,11 +73,22 @@ main() {
 
     cd "$tmp_dir"
 
-    if [[ "$ext" == "zip" ]]; then
-        curl -fsSL "$download_url" -o apigate.zip
-        unzip -q apigate.zip
+    # Try gh CLI first (works with private repos), fall back to curl
+    if command -v gh &> /dev/null && gh auth status &> /dev/null; then
+        echo "Using GitHub CLI for download..."
+        gh release download "$version" --repo "$REPO" --pattern "apigate-${platform}.${ext}"
+        if [[ "$ext" == "zip" ]]; then
+            unzip -q "apigate-${platform}.${ext}"
+        else
+            tar xzf "apigate-${platform}.${ext}"
+        fi
     else
-        curl -fsSL "$download_url" | tar xz
+        if [[ "$ext" == "zip" ]]; then
+            curl -fsSL "$download_url" -o apigate.zip
+            unzip -q apigate.zip
+        else
+            curl -fsSL "$download_url" | tar xz
+        fi
     fi
 
     # Find the binary
