@@ -76,7 +76,7 @@ jobs:
             ./cmd/apigate
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: apigate-linux-${{ matrix.goarch }}
           path: apigate-linux-${{ matrix.goarch }}
@@ -114,7 +114,7 @@ jobs:
             ./cmd/apigate
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: apigate-darwin-${{ matrix.goarch }}
           path: apigate-darwin-${{ matrix.goarch }}
@@ -155,7 +155,7 @@ jobs:
             ./cmd/apigate
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: apigate-windows-amd64
           path: apigate-windows-amd64.exe
