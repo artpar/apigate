@@ -34,10 +34,12 @@
             const savedState = localStorage.getItem(STORAGE_KEY);
 
             if (!hasVisited) {
-                // First visit - auto-open the panel and mark as visited
+                // First visit - mark as visited but don't auto-open (UX improvement)
+                // Users can discover the help panel via the ? button or keyboard shortcut
                 localStorage.setItem(FIRST_VISIT_KEY, 'true');
-                this.open();
-            } else if (savedState === 'true') {
+            }
+
+            if (savedState === 'true') {
                 // Restore previous state
                 this.open();
             }

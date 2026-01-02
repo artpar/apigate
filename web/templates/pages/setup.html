@@ -25,7 +25,7 @@
                 <div class="form-group">
                     <label for="upstream_url" class="form-label">
                         Your API URL
-                        <span class="info-tooltip" data-tip="This is the base URL of your existing API server. APIGate will forward all requests to this address. Example: https://api.mycompany.com">?</span>
+                        <span class="info-tooltip" data-tip="This is the base URL of your existing API server. APIGate will forward all requests to this address. Example: https://api.mycompany.com">i</span>
                     </label>
                     <input type="url" id="upstream_url" name="upstream_url" required class="form-input" placeholder="https://api.example.com" value="{{.UpstreamURL}}">
                     <p class="form-hint">This is where your actual API lives. APIGate will forward requests here.</p>
@@ -44,14 +44,14 @@
                 <div class="form-group">
                     <label for="admin_name" class="form-label">
                         Your Name
-                        <span class="info-tooltip" data-tip="Your name as it will appear in the admin dashboard.">?</span>
+                        <span class="info-tooltip" data-tip="Your name as it will appear in the admin dashboard.">i</span>
                     </label>
                     <input type="text" id="admin_name" name="admin_name" required class="form-input" placeholder="John Smith" value="{{.AdminName}}">
                 </div>
                 <div class="form-group">
                     <label for="admin_email" class="form-label">
                         Your Email
-                        <span class="info-tooltip" data-tip="You'll use this email to log into the admin dashboard. It won't be shared with your API users.">?</span>
+                        <span class="info-tooltip" data-tip="You'll use this email to log into the admin dashboard. It won't be shared with your API users.">i</span>
                     </label>
                     <input type="email" id="admin_email" name="admin_email" required class="form-input" placeholder="you@company.com" value="{{.AdminEmail}}">
                 </div>
@@ -77,7 +77,7 @@
                 <div class="form-group">
                     <label for="plan_name" class="form-label">
                         Plan Name
-                        <span class="info-tooltip" data-tip="This is what your customers will see. Common examples: Free, Basic, Starter, Pro, Enterprise">?</span>
+                        <span class="info-tooltip" data-tip="This is what your customers will see. Common examples: Free, Basic, Starter, Pro, Enterprise">i</span>
                     </label>
                     <input type="text" id="plan_name" name="plan_name" required class="form-input" placeholder="Starter" value="{{.PlanName}}">
                     <p class="form-hint">What should customers see? (e.g., Free, Starter, Pro)</p>
@@ -87,7 +87,7 @@
                 <div class="form-group">
                     <label for="price_monthly" class="form-label">
                         Monthly Price ($)
-                        <span class="info-tooltip" data-tip="How much to charge per month. Set to 0 for a free plan.">?</span>
+                        <span class="info-tooltip" data-tip="How much to charge per month. Set to 0 for a free plan.">i</span>
                     </label>
                     <input type="number" id="price_monthly" name="price_monthly" class="form-input" value="{{if .PriceMonthly}}{{.PriceMonthly}}{{else}}0{{end}}" min="0" step="0.01">
                     <p class="form-hint">Set to $0 for a free tier, or enter your monthly subscription price.</p>
@@ -95,7 +95,7 @@
                 <div class="form-group">
                     <label for="overage_price" class="form-label">
                         Overage Price ($ per 1000 requests)
-                        <span class="info-tooltip" data-tip="Optional: Charge per 1000 requests over the monthly limit. Leave at 0 to block requests when quota is exceeded.">?</span>
+                        <span class="info-tooltip" data-tip="Optional: Charge per 1000 requests over the monthly limit. Leave at 0 to block requests when quota is exceeded.">i</span>
                     </label>
                     <input type="number" id="overage_price" name="overage_price" class="form-input" value="{{if .OveragePrice}}{{.OveragePrice}}{{else}}0{{end}}" min="0" step="0.01">
                     <p class="form-hint">Leave at $0 to block requests when quota is exceeded.</p>
@@ -105,7 +105,7 @@
                 <div class="form-group">
                     <label for="rate_limit" class="form-label">
                         Requests per Minute
-                        <span class="info-tooltip" data-tip="How many requests can one user make per minute? This prevents anyone from overwhelming your API. 60/min is reasonable for most APIs.">?</span>
+                        <span class="info-tooltip" data-tip="How many requests can one user make per minute? This prevents anyone from overwhelming your API. 60/min is reasonable for most APIs.">i</span>
                     </label>
                     <input type="number" id="rate_limit" name="rate_limit" required class="form-input" value="{{if .RateLimit}}{{.RateLimit}}{{else}}60{{end}}" min="1">
                     <p class="form-hint">Prevents API abuse. 60/min is a good starting point.</p>
@@ -113,7 +113,7 @@
                 <div class="form-group">
                     <label for="monthly_quota" class="form-label">
                         Monthly Request Limit
-                        <span class="info-tooltip" data-tip="Total requests a user can make in a calendar month. When they hit this limit, requests will be blocked (or charged overage) until next month.">?</span>
+                        <span class="info-tooltip" data-tip="Total requests a user can make in a calendar month. When they hit this limit, requests will be blocked (or charged overage) until next month.">i</span>
                     </label>
                     <input type="number" id="monthly_quota" name="monthly_quota" required class="form-input" value="{{if .MonthlyQuota}}{{.MonthlyQuota}}{{else}}1000{{end}}" min="1">
                     <p class="form-hint">Total requests allowed per month. 1,000 is typical for free tiers.</p>

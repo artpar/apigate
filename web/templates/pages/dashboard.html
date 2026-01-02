@@ -162,7 +162,7 @@
     <div class="stat">
         <div class="stat-label">
             Total Users
-            <span class="info-tooltip" data-tip="The total number of registered users who can access your API. Each user can have multiple API keys.">?</span>
+            <span class="info-tooltip" data-tip="The total number of registered users who can access your API. Each user can have multiple API keys.">i</span>
         </div>
         <div class="stat-value">{{.TotalUsers}}</div>
     </div>
@@ -171,7 +171,7 @@
     <div class="stat">
         <div class="stat-label">
             Active API Keys
-            <span class="info-tooltip" data-tip="API keys that are currently active and can make requests. Revoked keys are not counted here.">?</span>
+            <span class="info-tooltip" data-tip="API keys that are currently active and can make requests. Revoked keys are not counted here.">i</span>
         </div>
         <div class="stat-value">{{.ActiveKeys}}</div>
     </div>
@@ -180,7 +180,7 @@
     <div class="stat">
         <div class="stat-label">
             Requests Today
-            <span class="info-tooltip" data-tip="Total API requests processed through your gateway since midnight (local time). Updates every 30 seconds.">?</span>
+            <span class="info-tooltip" data-tip="Total API requests processed through your gateway since midnight (local time). Updates every 30 seconds.">i</span>
         </div>
         <div class="stat-value">{{.RequestsToday}}</div>
     </div>
@@ -189,7 +189,7 @@
     <div class="stat">
         <div class="stat-label">
             Monthly Revenue
-            <span class="info-tooltip" data-tip="Monthly Recurring Revenue (MRR) based on active users and their plan prices.">?</span>
+            <span class="info-tooltip" data-tip="Monthly Recurring Revenue (MRR) based on active users and their plan prices.">i</span>
         </div>
         <div class="stat-value">${{printf "%.2f" .MRR}}</div>
     </div>
