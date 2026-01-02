@@ -6,20 +6,17 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/artpar/apigate/core/convention"
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog"
 )
 
 func newTestDocsHandler() *DocsHandler {
+	// OpenAPIService can be nil - the handler has a fallback for this case
 	return NewDocsHandler(DocsDeps{
-		Modules: func() map[string]convention.Derived {
-			return map[string]convention.Derived{}
-		},
-		Routes:   newMockRoutes(),
-		Settings: newMockSettingsStore(),
-		Logger:   zerolog.Nop(),
-		AppName:  "TestAPI",
+		OpenAPIService: nil,
+		Settings:       newMockSettingsStore(),
+		Logger:         zerolog.Nop(),
+		AppName:        "TestAPI",
 	})
 }
 
@@ -33,9 +30,9 @@ func TestNewDocsHandler(t *testing.T) {
 
 func TestNewDocsHandler_DefaultAppName(t *testing.T) {
 	h := NewDocsHandler(DocsDeps{
-		Modules: func() map[string]convention.Derived { return nil },
-		Logger:  zerolog.Nop(),
-		AppName: "",
+		OpenAPIService: nil,
+		Logger:         zerolog.Nop(),
+		AppName:        "",
 	})
 
 	if h.appName != "APIGate" {
