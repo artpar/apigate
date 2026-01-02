@@ -47,14 +47,14 @@
             <div class="section-header">
                 <div class="section-title">
                     Basic Information
-                    <span class="info-tooltip" data-tip="An upstream represents a backend API service. Routes can target different upstreams to forward requests to different APIs.">?</span>
+                    <span class="info-tooltip" data-tip="An upstream represents a backend API service. Routes can target different upstreams to forward requests to different APIs.">i</span>
                 </div>
             </div>
             <div class="card-body">
                 <div class="form-group">
                     <label for="name" class="form-label">
                         Name
-                        <span class="info-tooltip" data-tip="A human-readable identifier for this upstream. Use lowercase with hyphens (e.g., 'openai', 'my-backend'). This appears in the route dropdown.">?</span>
+                        <span class="info-tooltip" data-tip="A human-readable identifier for this upstream. Use lowercase with hyphens (e.g., 'openai', 'my-backend'). This appears in the route dropdown.">i</span>
                     </label>
                     <input type="text" id="name" name="name" required class="form-input" placeholder="my-backend" value="{{.Upstream.Name}}">
                 </div>
@@ -62,7 +62,7 @@
                 <div class="form-group">
                     <label for="base_url" class="form-label">
                         Base URL
-                        <span class="info-tooltip" data-tip="The root URL of the backend API. All request paths are appended to this URL. Include the scheme (https://) but no trailing slash.">?</span>
+                        <span class="info-tooltip" data-tip="The root URL of the backend API. All request paths are appended to this URL. Include the scheme (https://) but no trailing slash.">i</span>
                     </label>
                     <input type="url" id="base_url" name="base_url" required class="form-input" placeholder="https://api.example.com" value="{{.Upstream.BaseURL}}">
                     <div class="field-hint info">
@@ -86,28 +86,28 @@
             <div class="section-header">
                 <div class="section-title">
                     Authentication
-                    <span class="info-tooltip" data-tip="Configure how requests are authenticated with this upstream. The auth credentials are automatically added to every forwarded request.">?</span>
+                    <span class="info-tooltip" data-tip="Configure how requests are authenticated with this upstream. The auth credentials are automatically added to every forwarded request.">i</span>
                 </div>
             </div>
             <div class="card-body">
                 <div class="form-group">
                     <label for="auth_type" class="form-label">
                         Auth Type
-                        <span class="info-tooltip" data-tip="None: No auth added. Header: Custom header (X-API-Key). Bearer: Authorization: Bearer &lt;token&gt;. Basic: Authorization: Basic &lt;base64&gt;.">?</span>
+                        <span class="info-tooltip" data-tip="None: No auth added. Header: Custom header (X-API-Key). Bearer: Authorization: Bearer &lt;token&gt;. Basic: Authorization: Basic &lt;base64&gt;.">i</span>
                     </label>
                     <select id="auth_type" name="auth_type" class="form-input" onchange="toggleAuthFields(); updateAuthHint()">
-                        <option value="none" {{if eq .Upstream.AuthType "none"}}selected{{end}}>None - No authentication</option>
-                        <option value="header" {{if eq .Upstream.AuthType "header"}}selected{{end}}>Header - Custom header (e.g., X-API-Key)</option>
-                        <option value="bearer" {{if eq .Upstream.AuthType "bearer"}}selected{{end}}>Bearer - Authorization: Bearer &lt;token&gt;</option>
-                        <option value="basic" {{if eq .Upstream.AuthType "basic"}}selected{{end}}>Basic - Authorization: Basic &lt;base64&gt;</option>
+                        <option value="none" {{if eq (str .Upstream.AuthType) "none"}}selected{{end}}>None - No authentication</option>
+                        <option value="header" {{if eq (str .Upstream.AuthType) "header"}}selected{{end}}>Header - Custom header (e.g., X-API-Key)</option>
+                        <option value="bearer" {{if eq (str .Upstream.AuthType) "bearer"}}selected{{end}}>Bearer - Authorization: Bearer &lt;token&gt;</option>
+                        <option value="basic" {{if eq (str .Upstream.AuthType) "basic"}}selected{{end}}>Basic - Authorization: Basic &lt;base64&gt;</option>
                     </select>
                 </div>
 
-                <div id="auth-fields" class="{{if eq .Upstream.AuthType "none"}}hidden{{end}}">
+                <div id="auth-fields" class="{{if eq (str .Upstream.AuthType) "none"}}hidden{{end}}">
                     <div class="form-group">
                         <label for="auth_header" class="form-label">
                             Header Name
-                            <span class="info-tooltip" data-tip="The HTTP header name. For Bearer/Basic, use 'Authorization'. For custom headers, use the API's required header name (e.g., 'X-API-Key', 'api-key').">?</span>
+                            <span class="info-tooltip" data-tip="The HTTP header name. For Bearer/Basic, use 'Authorization'. For custom headers, use the API's required header name (e.g., 'X-API-Key', 'api-key').">i</span>
                         </label>
                         <input type="text" id="auth_header" name="auth_header" class="form-input" placeholder="X-API-Key" value="{{.Upstream.AuthHeader}}">
                         <div id="auth-header-hint" class="form-hint"></div>
@@ -116,7 +116,7 @@
                     <div class="form-group">
                         <label for="auth_value" class="form-label">
                             Auth Value
-                            <span class="info-tooltip" data-tip="The authentication credential. Use ${ENV_VAR} syntax to reference environment variables for security. Never commit actual API keys.">?</span>
+                            <span class="info-tooltip" data-tip="The authentication credential. Use ${ENV_VAR} syntax to reference environment variables for security. Never commit actual API keys.">i</span>
                         </label>
                         <input type="password" id="auth_value" name="auth_value" class="form-input" placeholder="${OPENAI_API_KEY}" value="{{.Upstream.AuthValue}}">
                         <div class="field-hint info">
@@ -163,7 +163,7 @@ Value: ${MY_API_KEY}</div>
             <div class="section-header">
                 <div class="section-title">
                     Connection Settings
-                    <span class="info-tooltip" data-tip="Configure timeouts and connection pooling for optimal performance and reliability.">?</span>
+                    <span class="info-tooltip" data-tip="Configure timeouts and connection pooling for optimal performance and reliability.">i</span>
                 </div>
                 <div class="section-actions">
                     <span class="badge badge-info">Advanced</span>
@@ -174,7 +174,7 @@ Value: ${MY_API_KEY}</div>
                     <div class="form-group" style="flex: 1;">
                         <label for="timeout_ms" class="form-label">
                             Request Timeout
-                            <span class="info-tooltip" data-tip="Maximum time to wait for a response in milliseconds. LLM APIs may need longer timeouts (60000+). Default: 30000ms (30 seconds).">?</span>
+                            <span class="info-tooltip" data-tip="Maximum time to wait for a response in milliseconds. LLM APIs may need longer timeouts (60000+). Default: 30000ms (30 seconds).">i</span>
                         </label>
                         <input type="number" id="timeout_ms" name="timeout_ms" class="form-input" placeholder="30000" value="{{.Upstream.Timeout.Milliseconds}}">
                         <div class="form-hint">ms (30000 = 30s, 60000 = 1min)</div>
@@ -182,14 +182,14 @@ Value: ${MY_API_KEY}</div>
                     <div class="form-group" style="flex: 1;">
                         <label for="max_idle_conns" class="form-label">
                             Max Idle Connections
-                            <span class="info-tooltip" data-tip="Number of idle HTTP connections to keep in the pool. Higher values improve performance for high-traffic upstreams. Default: 100.">?</span>
+                            <span class="info-tooltip" data-tip="Number of idle HTTP connections to keep in the pool. Higher values improve performance for high-traffic upstreams. Default: 100.">i</span>
                         </label>
                         <input type="number" id="max_idle_conns" name="max_idle_conns" class="form-input" placeholder="100" value="{{.Upstream.MaxIdleConns}}">
                     </div>
                     <div class="form-group" style="flex: 1;">
                         <label for="idle_conn_timeout_ms" class="form-label">
                             Idle Timeout
-                            <span class="info-tooltip" data-tip="How long to keep idle connections in the pool in milliseconds. Default: 90000ms (90 seconds).">?</span>
+                            <span class="info-tooltip" data-tip="How long to keep idle connections in the pool in milliseconds. Default: 90000ms (90 seconds).">i</span>
                         </label>
                         <input type="number" id="idle_conn_timeout_ms" name="idle_conn_timeout_ms" class="form-input" placeholder="90000" value="{{.Upstream.IdleConnTimeout.Milliseconds}}">
                         <div class="form-hint">ms</div>

@@ -277,6 +277,9 @@ func (h *Handler) SetupRequired(next http.Handler) http.Handler {
 func parseTemplates() (map[string]*template.Template, error) {
 	// Define template functions
 	funcs := template.FuncMap{
+		"str": func(v interface{}) string {
+			return fmt.Sprintf("%s", v)
+		},
 		"formatTime": func(t time.Time) string {
 			return t.Format("Jan 2, 2006 3:04 PM")
 		},
