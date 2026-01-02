@@ -27,6 +27,7 @@ import (
 	"github.com/artpar/apigate/core/capability"
 	capAdapters "github.com/artpar/apigate/core/capability/adapters"
 	"github.com/artpar/apigate/core/convention"
+	"github.com/artpar/apigate/core/openapi"
 	"github.com/artpar/apigate/domain/plan"
 	"github.com/artpar/apigate/domain/settings"
 	"github.com/artpar/apigate/ports"
@@ -289,16 +290,34 @@ func (a *App) initHTTPServer() error {
 		}
 	}
 
-	// Create admin handler
+	// Create OpenAPI service for unified documentation (before admin handler for cache invalidation)
+	openAPIService := openapi.NewService(openapi.ServiceConfig{
+		RouteStore:    routeStore,
+		UpstreamStore: upstreamStore,
+		ModuleGetter: func() map[string]convention.Derived {
+			result := make(map[string]convention.Derived)
+			if a.ModuleRuntime != nil {
+				for _, mod := range a.ModuleRuntime.Modules() {
+					result[mod.Name] = convention.Derive(mod)
+				}
+			}
+			return result
+		},
+		AppName: s.GetOrDefault(settings.KeyPortalAppName, "APIGate"),
+		Logger:  a.Logger,
+	})
+
+	// Create admin handler with cache invalidation callback
 	adminHandler := admin.NewHandler(admin.Deps{
-		Users:     deps.Users,
-		Keys:      deps.Keys,
-		Usage:     usageStore,
-		Routes:    routeStore,
-		Upstreams: upstreamStore,
-		Plans:     planStore,
-		Logger:    a.Logger,
-		Hasher:    bcryptHasher,
+		Users:         deps.Users,
+		Keys:          deps.Keys,
+		Usage:         usageStore,
+		Routes:        routeStore,
+		Upstreams:     upstreamStore,
+		Plans:         planStore,
+		Logger:        a.Logger,
+		Hasher:        bcryptHasher,
+		OnRouteChange: openAPIService.InvalidateCache,
 	})
 
 	// Create web UI handler
@@ -395,19 +414,10 @@ func (a *App) initHTTPServer() error {
 
 	// Create developer documentation portal handler (always enabled for self-service)
 	docsHandler := web.NewDocsHandler(web.DocsDeps{
-		Modules: func() map[string]convention.Derived {
-			result := make(map[string]convention.Derived)
-			if a.ModuleRuntime != nil {
-				for _, mod := range a.ModuleRuntime.Modules() {
-					result[mod.Name] = convention.Derive(mod)
-				}
-			}
-			return result
-		},
-		Routes:   routeStore,
-		Settings: a.Settings.Store(),
-		Logger:   a.Logger,
-		AppName:  s.GetOrDefault(settings.KeyPortalAppName, "APIGate"),
+		OpenAPIService: openAPIService,
+		Settings:       a.Settings.Store(),
+		Logger:         a.Logger,
+		AppName:        s.GetOrDefault(settings.KeyPortalAppName, "APIGate"),
 	})
 	docsRouter := docsHandler.Router()
 	a.Logger.Info().Msg("developer documentation portal enabled at /docs")

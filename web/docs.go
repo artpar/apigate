@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/artpar/apigate/core/convention"
 	"github.com/artpar/apigate/core/openapi"
 	"github.com/artpar/apigate/ports"
 	"github.com/go-chi/chi/v5"
@@ -16,20 +15,18 @@ import (
 
 // DocsHandler provides the developer documentation portal endpoints.
 type DocsHandler struct {
-	modules  func() map[string]convention.Derived
-	routes   ports.RouteStore
-	settings ports.SettingsStore
-	logger   zerolog.Logger
-	appName  string
+	openAPIService *openapi.Service
+	settings       ports.SettingsStore
+	logger         zerolog.Logger
+	appName        string
 }
 
 // DocsDeps contains dependencies for the docs handler.
 type DocsDeps struct {
-	Modules  func() map[string]convention.Derived
-	Routes   ports.RouteStore
-	Settings ports.SettingsStore
-	Logger   zerolog.Logger
-	AppName  string
+	OpenAPIService *openapi.Service
+	Settings       ports.SettingsStore
+	Logger         zerolog.Logger
+	AppName        string
 }
 
 // NewDocsHandler creates a new documentation handler.
@@ -40,11 +37,10 @@ func NewDocsHandler(deps DocsDeps) *DocsHandler {
 	}
 
 	return &DocsHandler{
-		modules:  deps.Modules,
-		routes:   deps.Routes,
-		settings: deps.Settings,
-		logger:   deps.Logger,
-		appName:  appName,
+		openAPIService: deps.OpenAPIService,
+		settings:       deps.Settings,
+		logger:         deps.Logger,
+		appName:        appName,
 	}
 }
 
@@ -89,8 +85,7 @@ func (h *DocsHandler) AuthenticationPage(w http.ResponseWriter, r *http.Request)
 
 // APIReferencePage renders the API reference from OpenAPI spec.
 func (h *DocsHandler) APIReferencePage(w http.ResponseWriter, r *http.Request) {
-	baseURL := h.getBaseURL(r)
-	spec := h.generateOpenAPISpec(baseURL)
+	spec := h.generateOpenAPISpec(r)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(h.renderAPIReference(spec)))
 }
@@ -111,8 +106,7 @@ func (h *DocsHandler) TryItPage(w http.ResponseWriter, r *http.Request) {
 
 // OpenAPISpec returns the OpenAPI JSON specification.
 func (h *DocsHandler) OpenAPISpec(w http.ResponseWriter, r *http.Request) {
-	baseURL := h.getBaseURL(r)
-	spec := h.generateOpenAPISpec(baseURL)
+	spec := h.generateOpenAPISpec(r)
 
 	w.Header().Set("Content-Type", "application/json")
 	data, _ := spec.ToJSON()
@@ -121,8 +115,7 @@ func (h *DocsHandler) OpenAPISpec(w http.ResponseWriter, r *http.Request) {
 
 // OpenAPISpecYAML returns the OpenAPI YAML specification.
 func (h *DocsHandler) OpenAPISpecYAML(w http.ResponseWriter, r *http.Request) {
-	baseURL := h.getBaseURL(r)
-	spec := h.generateOpenAPISpec(baseURL)
+	spec := h.generateOpenAPISpec(r)
 
 	w.Header().Set("Content-Type", "application/x-yaml")
 	// Convert to YAML (simplified - just return JSON for now)
@@ -138,17 +131,22 @@ func (h *DocsHandler) getBaseURL(r *http.Request) string {
 	return scheme + "://" + r.Host
 }
 
-func (h *DocsHandler) generateOpenAPISpec(baseURL string) *openapi.Spec {
-	modules := h.modules()
-	gen := openapi.NewGenerator(modules)
-	gen.SetInfo(openapi.Info{
-		Title:       h.appName + " API",
-		Description: "API documentation for " + h.appName,
-		Version:     "1.0.0",
-	})
-	gen.AddServer(baseURL, "Current server")
-
-	return gen.Generate()
+func (h *DocsHandler) generateOpenAPISpec(r *http.Request) *openapi.Spec {
+	baseURL := h.getBaseURL(r)
+	if h.openAPIService != nil {
+		return h.openAPIService.GetUnifiedSpec(r.Context(), baseURL)
+	}
+	// Fallback to empty spec if service not configured
+	return &openapi.Spec{
+		OpenAPI: "3.0.3",
+		Info: openapi.Info{
+			Title:       h.appName + " API",
+			Description: "API documentation for " + h.appName,
+			Version:     "1.0.0",
+		},
+		Servers: []openapi.Server{{URL: baseURL, Description: "Current server"}},
+		Paths:   make(map[string]openapi.PathItem),
+	}
 }
 
 // =============================================================================

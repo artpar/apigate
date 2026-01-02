@@ -15,9 +15,18 @@ import (
 
 // RoutesHandler handles route and upstream admin endpoints.
 type RoutesHandler struct {
-	routes    ports.RouteStore
-	upstreams ports.UpstreamStore
-	logger    zerolog.Logger
+	routes        ports.RouteStore
+	upstreams     ports.UpstreamStore
+	logger        zerolog.Logger
+	onRouteChange func() // Called when routes or upstreams change
+}
+
+// RoutesHandlerConfig holds configuration for the routes handler.
+type RoutesHandlerConfig struct {
+	Routes        ports.RouteStore
+	Upstreams     ports.UpstreamStore
+	Logger        zerolog.Logger
+	OnRouteChange func() // Optional callback for cache invalidation
 }
 
 // NewRoutesHandler creates a new routes admin handler.
@@ -26,6 +35,23 @@ func NewRoutesHandler(routes ports.RouteStore, upstreams ports.UpstreamStore, lo
 		routes:    routes,
 		upstreams: upstreams,
 		logger:    logger,
+	}
+}
+
+// NewRoutesHandlerWithConfig creates a new routes admin handler with full configuration.
+func NewRoutesHandlerWithConfig(cfg RoutesHandlerConfig) *RoutesHandler {
+	return &RoutesHandler{
+		routes:        cfg.Routes,
+		upstreams:     cfg.Upstreams,
+		logger:        cfg.Logger,
+		onRouteChange: cfg.OnRouteChange,
+	}
+}
+
+// notifyChange calls the route change callback if set.
+func (h *RoutesHandler) notifyChange() {
+	if h.onRouteChange != nil {
+		h.onRouteChange()
 	}
 }
 
@@ -135,6 +161,16 @@ type UpdateRouteRequest struct {
 // -----------------------------------------------------------------------------
 
 // ListRoutes returns all routes.
+//
+//	@Summary		List all routes
+//	@Description	Returns a list of all configured proxy routes
+//	@Tags			Routes
+//	@Accept			json
+//	@Produce		json
+//	@Success		200	{object}	map[string][]RouteResponse	"List of routes"
+//	@Failure		500	{object}	ErrorResponse				"Internal server error"
+//	@Security		BearerAuth
+//	@Router			/admin/routes [get]
 func (h *RoutesHandler) ListRoutes(w http.ResponseWriter, r *http.Request) {
 	routes, err := h.routes.List(r.Context())
 	if err != nil {
@@ -155,6 +191,18 @@ func (h *RoutesHandler) ListRoutes(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreateRoute creates a new route.
+//
+//	@Summary		Create a new route
+//	@Description	Creates a new proxy route configuration
+//	@Tags			Routes
+//	@Accept			json
+//	@Produce		json
+//	@Param			route	body		CreateRouteRequest	true	"Route configuration"
+//	@Success		201		{object}	RouteResponse		"Created route"
+//	@Failure		400		{object}	ErrorResponse		"Invalid request"
+//	@Failure		500		{object}	ErrorResponse		"Internal server error"
+//	@Security		BearerAuth
+//	@Router			/admin/routes [post]
 func (h *RoutesHandler) CreateRoute(w http.ResponseWriter, r *http.Request) {
 	var req CreateRouteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -219,10 +267,22 @@ func (h *RoutesHandler) CreateRoute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.logger.Info().Str("route_id", rt.ID).Str("name", rt.Name).Msg("route created via admin api")
+	h.notifyChange()
 	writeJSON(w, http.StatusCreated, routeToResponse(rt))
 }
 
 // GetRoute returns a single route.
+//
+//	@Summary		Get a route by ID
+//	@Description	Returns a single route by its ID
+//	@Tags			Routes
+//	@Accept			json
+//	@Produce		json
+//	@Param			id	path		string			true	"Route ID"
+//	@Success		200	{object}	RouteResponse	"Route details"
+//	@Failure		404	{object}	ErrorResponse	"Route not found"
+//	@Security		BearerAuth
+//	@Router			/admin/routes/{id} [get]
 func (h *RoutesHandler) GetRoute(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
@@ -236,6 +296,20 @@ func (h *RoutesHandler) GetRoute(w http.ResponseWriter, r *http.Request) {
 }
 
 // UpdateRoute updates a route.
+//
+//	@Summary		Update a route
+//	@Description	Updates an existing proxy route configuration
+//	@Tags			Routes
+//	@Accept			json
+//	@Produce		json
+//	@Param			id		path		string				true	"Route ID"
+//	@Param			route	body		UpdateRouteRequest	true	"Route update data"
+//	@Success		200		{object}	RouteResponse		"Updated route"
+//	@Failure		400		{object}	ErrorResponse		"Invalid request"
+//	@Failure		404		{object}	ErrorResponse		"Route not found"
+//	@Failure		500		{object}	ErrorResponse		"Internal server error"
+//	@Security		BearerAuth
+//	@Router			/admin/routes/{id} [put]
 func (h *RoutesHandler) UpdateRoute(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
@@ -309,10 +383,22 @@ func (h *RoutesHandler) UpdateRoute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.logger.Info().Str("route_id", rt.ID).Msg("route updated via admin api")
+	h.notifyChange()
 	writeJSON(w, http.StatusOK, routeToResponse(rt))
 }
 
 // DeleteRoute deletes a route.
+//
+//	@Summary		Delete a route
+//	@Description	Deletes a proxy route configuration
+//	@Tags			Routes
+//	@Accept			json
+//	@Produce		json
+//	@Param			id	path		string			true	"Route ID"
+//	@Success		200	{object}	map[string]string	"Deletion confirmation"
+//	@Failure		404	{object}	ErrorResponse	"Route not found"
+//	@Security		BearerAuth
+//	@Router			/admin/routes/{id} [delete]
 func (h *RoutesHandler) DeleteRoute(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
@@ -322,6 +408,7 @@ func (h *RoutesHandler) DeleteRoute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.logger.Info().Str("route_id", id).Msg("route deleted via admin api")
+	h.notifyChange()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
@@ -378,6 +465,16 @@ type UpdateUpstreamRequest struct {
 // -----------------------------------------------------------------------------
 
 // ListUpstreams returns all upstreams.
+//
+//	@Summary		List all upstreams
+//	@Description	Returns a list of all configured upstream servers
+//	@Tags			Upstreams
+//	@Accept			json
+//	@Produce		json
+//	@Success		200	{object}	map[string][]UpstreamResponse	"List of upstreams"
+//	@Failure		500	{object}	ErrorResponse					"Internal server error"
+//	@Security		BearerAuth
+//	@Router			/admin/upstreams [get]
 func (h *RoutesHandler) ListUpstreams(w http.ResponseWriter, r *http.Request) {
 	upstreams, err := h.upstreams.List(r.Context())
 	if err != nil {
@@ -398,6 +495,18 @@ func (h *RoutesHandler) ListUpstreams(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreateUpstream creates a new upstream.
+//
+//	@Summary		Create an upstream
+//	@Description	Creates a new upstream server configuration
+//	@Tags			Upstreams
+//	@Accept			json
+//	@Produce		json
+//	@Param			upstream	body		CreateUpstreamRequest	true	"Upstream configuration"
+//	@Success		201			{object}	UpstreamResponse		"Created upstream"
+//	@Failure		400			{object}	ErrorResponse			"Invalid request"
+//	@Failure		500			{object}	ErrorResponse			"Internal server error"
+//	@Security		BearerAuth
+//	@Router			/admin/upstreams [post]
 func (h *RoutesHandler) CreateUpstream(w http.ResponseWriter, r *http.Request) {
 	var req CreateUpstreamRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -454,10 +563,22 @@ func (h *RoutesHandler) CreateUpstream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.logger.Info().Str("upstream_id", u.ID).Str("name", u.Name).Msg("upstream created via admin api")
+	h.notifyChange()
 	writeJSON(w, http.StatusCreated, upstreamToResponse(u))
 }
 
 // GetUpstream returns a single upstream.
+//
+//	@Summary		Get an upstream
+//	@Description	Returns a single upstream server configuration by ID
+//	@Tags			Upstreams
+//	@Accept			json
+//	@Produce		json
+//	@Param			id	path		string				true	"Upstream ID"
+//	@Success		200	{object}	UpstreamResponse	"Upstream details"
+//	@Failure		404	{object}	ErrorResponse		"Upstream not found"
+//	@Security		BearerAuth
+//	@Router			/admin/upstreams/{id} [get]
 func (h *RoutesHandler) GetUpstream(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
@@ -471,6 +592,20 @@ func (h *RoutesHandler) GetUpstream(w http.ResponseWriter, r *http.Request) {
 }
 
 // UpdateUpstream updates an upstream.
+//
+//	@Summary		Update an upstream
+//	@Description	Updates an existing upstream server configuration
+//	@Tags			Upstreams
+//	@Accept			json
+//	@Produce		json
+//	@Param			id			path		string					true	"Upstream ID"
+//	@Param			upstream	body		UpdateUpstreamRequest	true	"Upstream update data"
+//	@Success		200			{object}	UpstreamResponse		"Updated upstream"
+//	@Failure		400			{object}	ErrorResponse			"Invalid request"
+//	@Failure		404			{object}	ErrorResponse			"Upstream not found"
+//	@Failure		500			{object}	ErrorResponse			"Internal server error"
+//	@Security		BearerAuth
+//	@Router			/admin/upstreams/{id} [put]
 func (h *RoutesHandler) UpdateUpstream(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
@@ -526,10 +661,22 @@ func (h *RoutesHandler) UpdateUpstream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.logger.Info().Str("upstream_id", u.ID).Msg("upstream updated via admin api")
+	h.notifyChange()
 	writeJSON(w, http.StatusOK, upstreamToResponse(u))
 }
 
 // DeleteUpstream deletes an upstream.
+//
+//	@Summary		Delete an upstream
+//	@Description	Deletes an upstream server configuration
+//	@Tags			Upstreams
+//	@Accept			json
+//	@Produce		json
+//	@Param			id	path		string				true	"Upstream ID"
+//	@Success		200	{object}	map[string]string	"Deletion confirmation"
+//	@Failure		404	{object}	ErrorResponse		"Upstream not found"
+//	@Security		BearerAuth
+//	@Router			/admin/upstreams/{id} [delete]
 func (h *RoutesHandler) DeleteUpstream(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
@@ -539,6 +686,7 @@ func (h *RoutesHandler) DeleteUpstream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.logger.Info().Str("upstream_id", id).Msg("upstream deleted via admin api")
+	h.notifyChange()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 

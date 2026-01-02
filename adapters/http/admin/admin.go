@@ -33,14 +33,15 @@ type Handler struct {
 
 // Deps contains dependencies for the admin handler.
 type Deps struct {
-	Users     ports.UserStore
-	Keys      ports.KeyStore
-	Usage     ports.UsageStore
-	Routes    ports.RouteStore
-	Upstreams ports.UpstreamStore
-	Plans     ports.PlanStore
-	Logger    zerolog.Logger
-	Hasher    ports.Hasher
+	Users         ports.UserStore
+	Keys          ports.KeyStore
+	Usage         ports.UsageStore
+	Routes        ports.RouteStore
+	Upstreams     ports.UpstreamStore
+	Plans         ports.PlanStore
+	Logger        zerolog.Logger
+	Hasher        ports.Hasher
+	OnRouteChange func() // Optional callback when routes/upstreams change (for cache invalidation)
 }
 
 // NewHandler creates a new admin API handler.
@@ -59,7 +60,12 @@ func NewHandler(deps Deps) *Handler {
 
 	// Create routes handler if stores are provided
 	if deps.Routes != nil && deps.Upstreams != nil {
-		h.routesHandler = NewRoutesHandler(deps.Routes, deps.Upstreams, deps.Logger)
+		h.routesHandler = NewRoutesHandlerWithConfig(RoutesHandlerConfig{
+			Routes:        deps.Routes,
+			Upstreams:     deps.Upstreams,
+			Logger:        deps.Logger,
+			OnRouteChange: deps.OnRouteChange,
+		})
 	}
 
 	return h
