@@ -96,7 +96,7 @@ func init() {
 	plansCreateCmd.Flags().IntVar(&planRateLimit, "rate-limit", 60, "requests per minute")
 	plansCreateCmd.Flags().Int64Var(&planRequests, "requests", 1000, "requests per month (-1 = unlimited)")
 	plansCreateCmd.Flags().Int64Var(&planPrice, "price", 0, "monthly price in cents")
-	plansCreateCmd.Flags().Int64Var(&planOverage, "overage", 0, "overage price in cents per request")
+	plansCreateCmd.Flags().Int64Var(&planOverage, "overage", 0, "overage price in cents per request (e.g., 1 = $0.01)")
 	plansCreateCmd.Flags().BoolVar(&planDefault, "default", false, "set as default plan")
 	plansCreateCmd.MarkFlagRequired("id")
 	plansCreateCmd.MarkFlagRequired("name")
@@ -177,7 +177,7 @@ func runPlansGet(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("Monthly Price:   $%.2f\n", float64(p.PriceMonthly)/100)
 	if p.OveragePrice > 0 {
-		fmt.Printf("Overage Price:   $%.4f/request\n", float64(p.OveragePrice)/100)
+		fmt.Printf("Overage Price:   $%.4f/request\n", float64(p.OveragePrice)/10000)
 	}
 	fmt.Printf("Default:         %v\n", p.IsDefault)
 	fmt.Printf("Enabled:         %v\n", p.Enabled)
@@ -209,7 +209,7 @@ func runPlansCreate(cmd *cobra.Command, args []string) error {
 		RateLimitPerMinute: planRateLimit,
 		RequestsPerMonth:   planRequests,
 		PriceMonthly:       planPrice,
-		OveragePrice:       planOverage,
+		OveragePrice:       planOverage * 100, // Convert cents to hundredths of cents
 		IsDefault:          planDefault,
 		Enabled:            true,
 	}

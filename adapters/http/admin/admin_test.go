@@ -745,9 +745,8 @@ func TestPlan_PriceConversion(t *testing.T) {
 	if plan["price_monthly"].(float64) != 29.99 {
 		t.Errorf("Expected price_monthly=29.99, got %v", plan["price_monthly"])
 	}
-	if plan["overage_price"].(float64) != 0.0 { // 0.005 * 100 = 0.5 cents, truncated to 0
-		// Note: This tests the current behavior which may lose precision
-		t.Logf("overage_price=%v (precision may be lost)", plan["overage_price"])
+	if plan["overage_price"].(float64) != 0.005 { // Now stored as hundredths of cents: 0.005 * 10000 = 50
+		t.Errorf("Expected overage_price=0.005, got %v", plan["overage_price"])
 	}
 }
 

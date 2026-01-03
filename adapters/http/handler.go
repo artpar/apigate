@@ -661,6 +661,12 @@ func NewRouterWithConfig(proxyHandler *ProxyHandler, healthHandler *HealthHandle
 		r.Get("/usage", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
 		r.Get("/settings", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
 		r.Post("/settings", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		// Payment providers
+		r.Get("/payments", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Post("/payments", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		// Email provider
+		r.Get("/email", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Post("/email", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
 		r.Get("/system", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
 		// Routes management
 		r.Get("/routes", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })

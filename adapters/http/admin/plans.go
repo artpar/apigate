@@ -158,7 +158,7 @@ func (h *Handler) CreatePlan(w http.ResponseWriter, r *http.Request) {
 		RateLimitPerMinute: req.RateLimitPerMinute,
 		RequestsPerMonth:   req.RequestsPerMonth,
 		PriceMonthly:       int64(req.PriceMonthly * 100), // Convert to cents
-		OveragePrice:       int64(req.OveragePrice * 100), // Convert to cents
+		OveragePrice:       int64(req.OveragePrice * 10000), // Convert to hundredths of cents
 		StripePriceID:      req.StripePriceID,
 		PaddlePriceID:      req.PaddlePriceID,
 		LemonVariantID:     req.LemonVariantID,
@@ -237,7 +237,7 @@ func (h *Handler) UpdatePlan(w http.ResponseWriter, r *http.Request) {
 		plan.PriceMonthly = int64(*req.PriceMonthly * 100)
 	}
 	if req.OveragePrice != nil {
-		plan.OveragePrice = int64(*req.OveragePrice * 100)
+		plan.OveragePrice = int64(*req.OveragePrice * 10000) // Convert to hundredths of cents
 	}
 	if req.StripePriceID != nil {
 		plan.StripePriceID = *req.StripePriceID
@@ -327,7 +327,7 @@ func planToResponse(p ports.Plan) PlanResponse {
 		RateLimitPerMinute: p.RateLimitPerMinute,
 		RequestsPerMonth:   p.RequestsPerMonth,
 		PriceMonthly:       float64(p.PriceMonthly) / 100,
-		OveragePrice:       float64(p.OveragePrice) / 100,
+		OveragePrice:       float64(p.OveragePrice) / 10000,
 		StripePriceID:      p.StripePriceID,
 		PaddlePriceID:      p.PaddlePriceID,
 		LemonVariantID:     p.LemonVariantID,

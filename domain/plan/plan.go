@@ -17,7 +17,7 @@ type Plan struct {
 	RequestsPerMonth   int64 // -1 = unlimited
 	RateLimitPerMinute int
 	PriceMonthly       int64 // cents
-	OveragePrice       int64 // cents per request
+	OveragePrice       int64 // hundredths of cents per request (10000 = $1)
 	StripePriceID      string
 	QuotaEnforceMode   QuotaEnforceMode // "hard", "warn", "soft" - defaults to "hard"
 	QuotaGracePct      float64          // Grace percentage before hard block (e.g., 0.05 = 5%)

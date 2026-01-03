@@ -718,7 +718,7 @@ func planToInfo(p ports.Plan) PlanInfo {
 		RateLimit:      p.RateLimitPerMinute,
 		MonthlyQuota:   p.RequestsPerMonth,
 		PriceMonthly:   float64(p.PriceMonthly) / 100,
-		OveragePrice:   float64(p.OveragePrice) / 100,
+		OveragePrice:   float64(p.OveragePrice) / 10000,
 		StripePriceID:  p.StripePriceID,
 		PaddlePriceID:  p.PaddlePriceID,
 		LemonVariantID: p.LemonVariantID,
@@ -1026,7 +1026,7 @@ func (h *Handler) PlanCreate(w http.ResponseWriter, r *http.Request) {
 		RateLimitPerMinute: rateLimit,
 		RequestsPerMonth:   monthlyQuota,
 		PriceMonthly:       int64(priceMonthly * 100), // Convert to cents
-		OveragePrice:       int64(overagePrice * 100),
+		OveragePrice:       int64(overagePrice * 10000), // Convert to hundredths of cents
 		StripePriceID:      r.FormValue("stripe_price_id"),
 		PaddlePriceID:      r.FormValue("paddle_price_id"),
 		LemonVariantID:     r.FormValue("lemon_variant_id"),
@@ -1100,7 +1100,7 @@ func (h *Handler) PlanUpdate(w http.ResponseWriter, r *http.Request) {
 	plan.RateLimitPerMinute = rateLimit
 	plan.RequestsPerMonth = monthlyQuota
 	plan.PriceMonthly = int64(priceMonthly * 100)
-	plan.OveragePrice = int64(overagePrice * 100)
+	plan.OveragePrice = int64(overagePrice * 10000) // Convert to hundredths of cents
 	plan.StripePriceID = r.FormValue("stripe_price_id")
 	plan.PaddlePriceID = r.FormValue("paddle_price_id")
 	plan.LemonVariantID = r.FormValue("lemon_variant_id")
@@ -2336,7 +2336,7 @@ func (h *Handler) SetupStepSubmit(w http.ResponseWriter, r *http.Request) {
 			RateLimitPerMinute: rateLimit,
 			RequestsPerMonth:   monthlyQuota,
 			PriceMonthly:       int64(priceMonthly * 100), // Convert to cents
-			OveragePrice:       int64(overagePrice * 100), // Convert to cents
+			OveragePrice:       int64(overagePrice * 10000), // Convert to hundredths of cents
 			IsDefault:          true,
 			Enabled:            true,
 			CreatedAt:          now,

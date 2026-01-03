@@ -136,7 +136,7 @@ type Plan struct {
 	RateLimitPerMinute int
 	RequestsPerMonth   int64
 	PriceMonthly       int64 // cents
-	OveragePrice       int64 // cents per request
+	OveragePrice       int64 // hundredths of cents per request (10000 = $1)
 	IsDefault          bool
 	Enabled            bool
 	QuotaEnforceMode   QuotaEnforceMode // "hard", "warn", "soft" - defaults to "hard"

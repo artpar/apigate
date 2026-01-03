@@ -836,7 +836,7 @@ func (h *PortalHandler) renderPlansPage(user *PortalUser, plans []ports.Plan, cu
 		// Format overage
 		overageDisplay := fmt.Sprintf("%s blocked at limit", labels.UsageUnitPlural)
 		if p.OveragePrice > 0 {
-			overageDisplay = fmt.Sprintf("$%.4f per extra %s", float64(p.OveragePrice)/100, labels.UsageUnit)
+			overageDisplay = fmt.Sprintf("$%.4f per extra %s", float64(p.OveragePrice)/10000, labels.UsageUnit)
 		}
 
 		// Current plan badge
