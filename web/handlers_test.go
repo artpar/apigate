@@ -623,7 +623,7 @@ func TestPlanToInfo(t *testing.T) {
 		RateLimitPerMinute: 1000,
 		RequestsPerMonth:   100000,
 		PriceMonthly:       2999,
-		OveragePrice:       1,
+		OveragePrice:       100, // 100 hundredths of cents = $0.01
 		StripePriceID:      "price_abc",
 		PaddlePriceID:      "123",
 		LemonVariantID:     "var_xyz",
