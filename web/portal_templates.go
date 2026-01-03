@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/artpar/apigate/core/terminology"
 	"github.com/artpar/apigate/domain/billing"
 	"github.com/artpar/apigate/domain/key"
 	"github.com/artpar/apigate/domain/usage"
@@ -106,10 +107,10 @@ func (h *PortalHandler) renderLandingPage() string {
 }
 
 func (h *PortalHandler) renderSignupPage(name, email string, errors map[string]string) string {
-	return h.renderSignupPageWithPlan(name, email, nil, errors)
+	return h.renderSignupPageWithPlan(name, email, nil, terminology.Default(), errors)
 }
 
-func (h *PortalHandler) renderSignupPageWithPlan(name, email string, defaultPlan *ports.Plan, errors map[string]string) string {
+func (h *PortalHandler) renderSignupPageWithPlan(name, email string, defaultPlan *ports.Plan, labels terminology.Labels, errors map[string]string) string {
 	errorHTML := ""
 	if len(errors) > 0 {
 		var msgs []string
@@ -126,12 +127,12 @@ func (h *PortalHandler) renderSignupPageWithPlan(name, email string, defaultPlan
 		if defaultPlan.PriceMonthly > 0 {
 			priceDisplay = fmt.Sprintf("$%.2f/month", float64(defaultPlan.PriceMonthly)/100)
 		}
-		quotaDisplay := "Unlimited requests"
+		quotaDisplay := fmt.Sprintf("Unlimited %s", labels.UsageUnitPlural)
 		if defaultPlan.RequestsPerMonth > 0 {
 			if defaultPlan.RequestsPerMonth >= 1000 {
-				quotaDisplay = fmt.Sprintf("%.0fK requests/month", float64(defaultPlan.RequestsPerMonth)/1000)
+				quotaDisplay = fmt.Sprintf("%.0fK %s/month", float64(defaultPlan.RequestsPerMonth)/1000, labels.UsageUnitPlural)
 			} else {
-				quotaDisplay = fmt.Sprintf("%d requests/month", defaultPlan.RequestsPerMonth)
+				quotaDisplay = fmt.Sprintf("%d %s/month", defaultPlan.RequestsPerMonth, labels.UsageUnitPlural)
 			}
 		}
 		planInfoHTML = fmt.Sprintf(`
@@ -334,7 +335,7 @@ func (h *PortalHandler) renderResetPasswordPage(token string, errors map[string]
 </html>`, h.appName, portalCSS, h.appName, errorHTML, token)
 }
 
-func (h *PortalHandler) renderDashboardPage(user *PortalUser, keyCount int, requestCount int64, planName string, requestsPerMonth int64, rateLimitPerMinute int) string {
+func (h *PortalHandler) renderDashboardPage(user *PortalUser, keyCount int, requestCount int64, planName string, requestsPerMonth int64, rateLimitPerMinute int, labels terminology.Labels) string {
 	// Show getting started section for new users with no API keys
 	gettingStartedSection := ""
 	if keyCount == 0 {
@@ -385,30 +386,30 @@ func (h *PortalHandler) renderDashboardPage(user *PortalUser, keyCount int, requ
                     <span style="color: #666; font-size: 14px;"> - %s Plan</span>
                 </div>
                 <div style="font-size: 14px; color: #666;">
-                    %d / %d requests (%.1f%%)
+                    %d / %d %s (%.1f%%)
                 </div>
             </div>
             <div style="background: #e5e7eb; border-radius: 4px; height: 8px; overflow: hidden;">
                 <div style="background: %s; height: 100%%; width: %.1f%%; transition: width 0.3s;"></div>
             </div>
             <div style="display: flex; justify-content: space-between; margin-top: 12px; font-size: 13px; color: #666;">
-                <span>Rate limit: %d requests/minute</span>
-                <span>%d requests remaining</span>
+                <span>Rate limit: %d %s</span>
+                <span>%d %s remaining</span>
             </div>
-        </div>`, planName, requestCount, requestsPerMonth, usagePercent, progressColor, usagePercent, rateLimitPerMinute, requestsPerMonth-requestCount)
+        </div>`, planName, requestCount, requestsPerMonth, labels.UsageUnitPlural, usagePercent, progressColor, usagePercent, rateLimitPerMinute, labels.RateLimitLabel, requestsPerMonth-requestCount, labels.UsageUnitPlural)
 	} else if planName != "" {
 		quotaSection = fmt.Sprintf(`
         <div class="card" style="margin-bottom: 24px; padding: 20px;">
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <div>
                     <strong>%s Plan</strong>
-                    <span style="color: #22c55e; font-size: 14px;"> - Unlimited requests</span>
+                    <span style="color: #22c55e; font-size: 14px;"> - Unlimited %s</span>
                 </div>
                 <div style="font-size: 14px; color: #666;">
-                    Rate limit: %d requests/minute
+                    Rate limit: %d %s
                 </div>
             </div>
-        </div>`, planName, rateLimitPerMinute)
+        </div>`, planName, labels.UsageUnitPlural, rateLimitPerMinute, labels.RateLimitLabel)
 	}
 
 	return fmt.Sprintf(`
@@ -436,7 +437,7 @@ func (h *PortalHandler) renderDashboardPage(user *PortalUser, keyCount int, requ
             </div>
             <div class="stat-card">
                 <div class="stat-value">%d</div>
-                <div class="stat-label">Requests This Month</div>
+                <div class="stat-label">%s This Month</div>
             </div>
         </div>
         <div class="quick-links">
@@ -462,7 +463,7 @@ func (h *PortalHandler) renderDashboardPage(user *PortalUser, keyCount int, requ
         </div>
     </main>
 </body>
-</html>`, h.appName, portalCSS, h.renderPortalNav(user), user.Name, quotaSection, gettingStartedSection, keyCount, requestCount)
+</html>`, h.appName, portalCSS, h.renderPortalNav(user), user.Name, quotaSection, gettingStartedSection, keyCount, requestCount, labels.QuotaLabel)
 }
 
 func (h *PortalHandler) renderAPIKeysPage(user *PortalUser, keys []key.Key, revokedMsg bool) string {
@@ -621,7 +622,7 @@ func (h *PortalHandler) renderKeyCreatedPage(w http.ResponseWriter, r *http.Requ
 	w.Write([]byte(html))
 }
 
-func (h *PortalHandler) renderUsagePage(user *PortalUser, summary usage.Summary) string {
+func (h *PortalHandler) renderUsagePage(user *PortalUser, summary usage.Summary, labels terminology.Labels) string {
 	return fmt.Sprintf(`
 <!DOCTYPE html>
 <html lang="en">
@@ -641,7 +642,7 @@ func (h *PortalHandler) renderUsagePage(user *PortalUser, summary usage.Summary)
         <div class="stats-grid">
             <div class="stat-card">
                 <div class="stat-value">%d</div>
-                <div class="stat-label">Total Requests</div>
+                <div class="stat-label">Total %s</div>
             </div>
             <div class="stat-card">
                 <div class="stat-value">%d</div>
@@ -658,7 +659,7 @@ func (h *PortalHandler) renderUsagePage(user *PortalUser, summary usage.Summary)
         </div>
     </main>
 </body>
-</html>`, h.appName, portalCSS, h.renderPortalNav(user), summary.RequestCount, summary.ErrorCount, float64(summary.BytesIn)/1024, float64(summary.BytesOut)/1024)
+</html>`, h.appName, portalCSS, h.renderPortalNav(user), summary.RequestCount, labels.QuotaLabel, summary.ErrorCount, float64(summary.BytesIn)/1024, float64(summary.BytesOut)/1024)
 }
 
 func (h *PortalHandler) renderAccountSettingsPage(user *PortalUser, errors map[string]string, success string) string {
@@ -793,7 +794,7 @@ func (h *PortalHandler) renderPortalNav(user *PortalUser) string {
 `, h.appName, user.Email)
 }
 
-func (h *PortalHandler) renderPlansPage(user *PortalUser, plans []ports.Plan, currentPlan *ports.Plan, success, errorMsg string, hasStripeSubscription bool) string {
+func (h *PortalHandler) renderPlansPage(user *PortalUser, plans []ports.Plan, currentPlan *ports.Plan, success, errorMsg string, hasStripeSubscription bool, labels terminology.Labels) string {
 	alertHTML := ""
 	if success != "" {
 		alertHTML = fmt.Sprintf(`<div class="alert alert-success">%s</div>`, success)
@@ -818,24 +819,24 @@ func (h *PortalHandler) renderPlansPage(user *PortalUser, plans []ports.Plan, cu
 		}
 
 		// Format quota
-		quotaDisplay := "Unlimited"
+		quotaDisplay := fmt.Sprintf("Unlimited %s", labels.UsageUnitPlural)
 		if p.RequestsPerMonth > 0 {
 			if p.RequestsPerMonth >= 1000000 {
-				quotaDisplay = fmt.Sprintf("%.1fM requests/mo", float64(p.RequestsPerMonth)/1000000)
+				quotaDisplay = fmt.Sprintf("%.1fM %s/mo", float64(p.RequestsPerMonth)/1000000, labels.UsageUnitPlural)
 			} else if p.RequestsPerMonth >= 1000 {
-				quotaDisplay = fmt.Sprintf("%.0fK requests/mo", float64(p.RequestsPerMonth)/1000)
+				quotaDisplay = fmt.Sprintf("%.0fK %s/mo", float64(p.RequestsPerMonth)/1000, labels.UsageUnitPlural)
 			} else {
-				quotaDisplay = fmt.Sprintf("%d requests/mo", p.RequestsPerMonth)
+				quotaDisplay = fmt.Sprintf("%d %s/mo", p.RequestsPerMonth, labels.UsageUnitPlural)
 			}
 		}
 
 		// Format rate limit
-		rateDisplay := fmt.Sprintf("%d req/min", p.RateLimitPerMinute)
+		rateDisplay := fmt.Sprintf("%d %s", p.RateLimitPerMinute, labels.RateLimitLabel)
 
 		// Format overage
-		overageDisplay := "Requests blocked"
+		overageDisplay := fmt.Sprintf("%s blocked at limit", labels.UsageUnitPlural)
 		if p.OveragePrice > 0 {
-			overageDisplay = fmt.Sprintf("$%.4f per extra request", float64(p.OveragePrice)/100)
+			overageDisplay = fmt.Sprintf("$%.4f per extra %s", float64(p.OveragePrice)/100, labels.UsageUnit)
 		}
 
 		// Current plan badge

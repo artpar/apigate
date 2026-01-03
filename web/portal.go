@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/artpar/apigate/adapters/auth"
+	"github.com/artpar/apigate/core/terminology"
 	domainAuth "github.com/artpar/apigate/domain/auth"
 	"github.com/artpar/apigate/domain/billing"
 	"github.com/artpar/apigate/domain/key"
@@ -88,6 +89,18 @@ func NewPortalHandler(deps PortalDeps) (*PortalHandler, error) {
 		baseURL:       deps.BaseURL,
 		appName:       appName,
 	}, nil
+}
+
+// getLabels returns the terminology labels based on settings.
+func (h *PortalHandler) getLabels(ctx context.Context) terminology.Labels {
+	if h.settings == nil {
+		return terminology.Default()
+	}
+	setting, err := h.settings.Get(ctx, "metering_unit")
+	if err != nil || setting.Value == "" {
+		return terminology.Default()
+	}
+	return terminology.ForUnit(setting.Value)
 }
 
 // Router returns the portal router.
@@ -291,7 +304,7 @@ func (h *PortalHandler) SignupPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(h.renderSignupPageWithPlan("", "", defaultPlan, nil)))
+	w.Write([]byte(h.renderSignupPageWithPlan("", "", defaultPlan, h.getLabels(r.Context()), nil)))
 }
 
 func (h *PortalHandler) SignupSubmit(w http.ResponseWriter, r *http.Request) {
@@ -325,7 +338,7 @@ func (h *PortalHandler) SignupSubmit(w http.ResponseWriter, r *http.Request) {
 	if !result.Valid {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		w.Write([]byte(h.renderSignupPageWithPlan(req.Name, req.Email, getDefaultPlan(), result.Errors)))
+		w.Write([]byte(h.renderSignupPageWithPlan(req.Name, req.Email, getDefaultPlan(), h.getLabels(ctx), result.Errors)))
 		return
 	}
 
@@ -333,7 +346,7 @@ func (h *PortalHandler) SignupSubmit(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.users.GetByEmail(ctx, req.Email); err == nil {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusConflict)
-		w.Write([]byte(h.renderSignupPageWithPlan(req.Name, req.Email, getDefaultPlan(), map[string]string{"email": "Email already registered"})))
+		w.Write([]byte(h.renderSignupPageWithPlan(req.Name, req.Email, getDefaultPlan(), h.getLabels(ctx), map[string]string{"email": "Email already registered"})))
 		return
 	}
 
@@ -827,7 +840,7 @@ func (h *PortalHandler) PortalDashboard(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(h.renderDashboardPage(user, len(keys), summary.RequestCount, planName, requestsPerMonth, rateLimitPerMinute)))
+	w.Write([]byte(h.renderDashboardPage(user, len(keys), summary.RequestCount, planName, requestsPerMonth, rateLimitPerMinute, h.getLabels(ctx))))
 }
 
 // -----------------------------------------------------------------------------
@@ -938,7 +951,7 @@ func (h *PortalHandler) PortalUsagePage(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(h.renderUsagePage(user, summary)))
+	w.Write([]byte(h.renderUsagePage(user, summary, h.getLabels(ctx))))
 }
 
 // -----------------------------------------------------------------------------
@@ -1239,7 +1252,7 @@ func (h *PortalHandler) PlansPage(w http.ResponseWriter, r *http.Request) {
 	hasStripeSubscription := dbUser.StripeID != ""
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(h.renderPlansPage(user, plans, currentPlan, success, errorMsg, hasStripeSubscription)))
+	w.Write([]byte(h.renderPlansPage(user, plans, currentPlan, success, errorMsg, hasStripeSubscription, h.getLabels(ctx))))
 }
 
 func (h *PortalHandler) ChangePlan(w http.ResponseWriter, r *http.Request) {
