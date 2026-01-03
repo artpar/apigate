@@ -201,6 +201,14 @@ func (h *Handler) Router() chi.Router {
 		r.Get("/settings", h.SettingsPage)
 		r.Post("/settings", h.SettingsUpdate)
 
+		// Payment Providers
+		r.Get("/payments", h.PaymentsPage)
+		r.Post("/payments", h.PaymentsUpdate)
+
+		// Email Provider
+		r.Get("/email", h.EmailPage)
+		r.Post("/email", h.EmailUpdate)
+
 		// System Status
 		r.Get("/system", h.HealthPage)
 

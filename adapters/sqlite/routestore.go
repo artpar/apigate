@@ -27,7 +27,7 @@ func (s *RouteStore) Get(ctx context.Context, id string) (route.Route, error) {
 		SELECT id, name, description, path_pattern, match_type, methods, headers,
 		       upstream_id, path_rewrite, method_override,
 		       request_transform, response_transform,
-		       metering_expr, metering_mode, protocol,
+		       metering_expr, metering_mode, metering_unit, protocol,
 		       priority, enabled, created_at, updated_at
 		FROM routes
 		WHERE id = ?
@@ -41,7 +41,7 @@ func (s *RouteStore) List(ctx context.Context) ([]route.Route, error) {
 		SELECT id, name, description, path_pattern, match_type, methods, headers,
 		       upstream_id, path_rewrite, method_override,
 		       request_transform, response_transform,
-		       metering_expr, metering_mode, protocol,
+		       metering_expr, metering_mode, metering_unit, protocol,
 		       priority, enabled, created_at, updated_at
 		FROM routes
 		ORDER BY priority DESC, name ASC
@@ -68,7 +68,7 @@ func (s *RouteStore) ListEnabled(ctx context.Context) ([]route.Route, error) {
 		SELECT id, name, description, path_pattern, match_type, methods, headers,
 		       upstream_id, path_rewrite, method_override,
 		       request_transform, response_transform,
-		       metering_expr, metering_mode, protocol,
+		       metering_expr, metering_mode, metering_unit, protocol,
 		       priority, enabled, created_at, updated_at
 		FROM routes
 		WHERE enabled = 1
@@ -125,15 +125,15 @@ func (s *RouteStore) Create(ctx context.Context, r route.Route) error {
 			id, name, description, path_pattern, match_type, methods, headers,
 			upstream_id, path_rewrite, method_override,
 			request_transform, response_transform,
-			metering_expr, metering_mode, protocol,
+			metering_expr, metering_mode, metering_unit, protocol,
 			priority, enabled, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		r.ID, r.Name, r.Description, r.PathPattern, string(r.MatchType),
 		methodsJSON, headersJSON,
 		r.UpstreamID, nullString(r.PathRewrite), nullString(r.MethodOverride),
 		reqTransformJSON, respTransformJSON,
-		r.MeteringExpr, r.MeteringMode, string(r.Protocol),
+		r.MeteringExpr, r.MeteringMode, r.MeteringUnit, string(r.Protocol),
 		r.Priority, boolToInt(r.Enabled), r.CreatedAt, r.UpdatedAt,
 	)
 
@@ -173,7 +173,7 @@ func (s *RouteStore) Update(ctx context.Context, r route.Route) error {
 		    methods = ?, headers = ?,
 		    upstream_id = ?, path_rewrite = ?, method_override = ?,
 		    request_transform = ?, response_transform = ?,
-		    metering_expr = ?, metering_mode = ?, protocol = ?,
+		    metering_expr = ?, metering_mode = ?, metering_unit = ?, protocol = ?,
 		    priority = ?, enabled = ?, updated_at = ?
 		WHERE id = ?
 	`,
@@ -181,7 +181,7 @@ func (s *RouteStore) Update(ctx context.Context, r route.Route) error {
 		methodsJSON, headersJSON,
 		r.UpstreamID, nullString(r.PathRewrite), nullString(r.MethodOverride),
 		reqTransformJSON, respTransformJSON,
-		r.MeteringExpr, r.MeteringMode, string(r.Protocol),
+		r.MeteringExpr, r.MeteringMode, r.MeteringUnit, string(r.Protocol),
 		r.Priority, boolToInt(r.Enabled), r.UpdatedAt, r.ID,
 	)
 	if err != nil {
@@ -227,7 +227,7 @@ func scanRoute(row *sql.Row) (route.Route, error) {
 		&methodsJSON, &headersJSON,
 		&r.UpstreamID, &pathRewrite, &methodOverride,
 		&reqTransformJSON, &respTransformJSON,
-		&r.MeteringExpr, &r.MeteringMode, &protocol,
+		&r.MeteringExpr, &r.MeteringMode, &r.MeteringUnit, &protocol,
 		&r.Priority, &enabled, &r.CreatedAt, &r.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -292,7 +292,7 @@ func scanRouteRows(rows *sql.Rows) (route.Route, error) {
 		&methodsJSON, &headersJSON,
 		&r.UpstreamID, &pathRewrite, &methodOverride,
 		&reqTransformJSON, &respTransformJSON,
-		&r.MeteringExpr, &r.MeteringMode, &protocol,
+		&r.MeteringExpr, &r.MeteringMode, &r.MeteringUnit, &protocol,
 		&r.Priority, &enabled, &r.CreatedAt, &r.UpdatedAt,
 	)
 	if err != nil {

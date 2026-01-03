@@ -26,8 +26,9 @@ type Service struct {
 	appName       string
 	logger        zerolog.Logger
 
-	cache atomic.Pointer[cachedSpec]
-	mu    sync.Mutex // Protects cache generation
+	cache         atomic.Pointer[cachedSpec] // Full spec cache (admin + customer)
+	customerCache atomic.Pointer[cachedSpec] // Customer-only spec cache
+	mu            sync.Mutex                 // Protects cache generation
 }
 
 // cachedSpec holds a cached OpenAPI spec with metadata.
@@ -117,7 +118,158 @@ func (s *Service) GetUnifiedSpec(ctx context.Context, baseURL string) *Spec {
 // InvalidateCache forces the next GetUnifiedSpec call to regenerate the spec.
 func (s *Service) InvalidateCache() {
 	s.cache.Store(nil)
+	s.customerCache.Store(nil)
 	s.logger.Debug().Msg("OpenAPI cache invalidated")
+}
+
+// GetCustomerSpec returns an OpenAPI spec containing only customer-facing routes.
+// This excludes all admin/module endpoints - suitable for public API documentation.
+func (s *Service) GetCustomerSpec(ctx context.Context, baseURL string) *Spec {
+	// Check cache validity
+	cached := s.customerCache.Load()
+	if cached != nil && time.Since(cached.generatedAt) < 30*time.Second {
+		spec := s.cloneSpecWithServer(cached.spec, baseURL)
+		return spec
+	}
+
+	// Generate new spec (with mutex to prevent thundering herd)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Double-check after acquiring lock
+	cached = s.customerCache.Load()
+	if cached != nil && time.Since(cached.generatedAt) < 30*time.Second {
+		spec := s.cloneSpecWithServer(cached.spec, baseURL)
+		return spec
+	}
+
+	// Load only enabled routes (customer-facing)
+	routes, upstreams := s.loadEnabledData(ctx)
+
+	// Compute hash for change detection
+	dataHash := s.computeDataHash(routes, upstreams)
+
+	// Check if data hasn't changed
+	if cached != nil && cached.dataHash == dataHash {
+		newCached := &cachedSpec{
+			spec:        cached.spec,
+			generatedAt: time.Now(),
+			dataHash:    dataHash,
+		}
+		s.customerCache.Store(newCached)
+		return s.cloneSpecWithServer(cached.spec, baseURL)
+	}
+
+	// Generate customer-only spec (no module endpoints)
+	spec := s.generateCustomerSpec(routes, upstreams, baseURL)
+
+	// Cache it
+	s.customerCache.Store(&cachedSpec{
+		spec:        spec,
+		generatedAt: time.Now(),
+		dataHash:    dataHash,
+	})
+
+	return spec
+}
+
+// loadEnabledData loads only enabled routes and upstreams.
+func (s *Service) loadEnabledData(ctx context.Context) ([]route.Route, map[string]route.Upstream) {
+	routes, err := s.routeStore.ListEnabled(ctx)
+	if err != nil {
+		s.logger.Warn().Err(err).Msg("Failed to load enabled routes for OpenAPI spec")
+		routes = nil
+	}
+
+	upstreamsList, err := s.upstreamStore.ListEnabled(ctx)
+	if err != nil {
+		s.logger.Warn().Err(err).Msg("Failed to load enabled upstreams for OpenAPI spec")
+		upstreamsList = nil
+	}
+
+	// Convert to map for easy lookup
+	upstreams := make(map[string]route.Upstream, len(upstreamsList))
+	for _, u := range upstreamsList {
+		upstreams[u.ID] = u
+	}
+
+	return routes, upstreams
+}
+
+// generateCustomerSpec creates an OpenAPI spec with only customer-facing routes.
+func (s *Service) generateCustomerSpec(routes []route.Route, upstreams map[string]route.Upstream, baseURL string) *Spec {
+	spec := &Spec{
+		OpenAPI: "3.0.3",
+		Info: Info{
+			Title:       s.appName + " API",
+			Description: "API documentation for " + s.appName + ". Use your API key in the X-API-Key header to authenticate requests.",
+			Version:     "1.0.0",
+			Contact: &Contact{
+				Name: s.appName + " Support",
+			},
+		},
+		Servers: []Server{
+			{URL: baseURL, Description: "Current server"},
+		},
+		Paths: make(map[string]PathItem),
+		Components: Components{
+			Schemas:         make(map[string]*Schema),
+			SecuritySchemes: make(map[string]SecurityScheme),
+		},
+		Tags: make([]Tag, 0),
+	}
+
+	// Add API key security scheme (customer authentication)
+	spec.Components.SecuritySchemes["apiKey"] = SecurityScheme{
+		Type:        "apiKey",
+		In:          "header",
+		Name:        "X-API-Key",
+		Description: "API key for authenticating requests. Get your key from the customer portal.",
+	}
+
+	// Generate route spec (customer endpoints only)
+	if len(routes) > 0 {
+		routeGen := NewRouteGenerator(routes, upstreams)
+		routeSpec := routeGen.Generate()
+
+		// Merge route paths
+		for path, item := range routeSpec.Paths {
+			spec.Paths[path] = item
+		}
+
+		// Merge route security schemes
+		for name, scheme := range routeSpec.Components.SecuritySchemes {
+			if _, exists := spec.Components.SecuritySchemes[name]; !exists {
+				spec.Components.SecuritySchemes[name] = scheme
+			}
+		}
+
+		// Add tags for each upstream
+		existingTags := make(map[string]bool)
+		for _, tag := range routeSpec.Tags {
+			if !existingTags[tag.Name] {
+				spec.Tags = append(spec.Tags, tag)
+				existingTags[tag.Name] = true
+			}
+		}
+
+		for _, u := range upstreams {
+			if u.Enabled && !existingTags[u.Name] {
+				spec.Tags = append(spec.Tags, Tag{
+					Name:        u.Name,
+					Description: u.Description,
+				})
+				existingTags[u.Name] = true
+			}
+		}
+	}
+
+	// Sort tags alphabetically
+	sort.Slice(spec.Tags, func(i, j int) bool {
+		return spec.Tags[i].Name < spec.Tags[j].Name
+	})
+
+	return spec
 }
 
 // loadData loads routes and upstreams from stores.

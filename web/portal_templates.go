@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/artpar/apigate/domain/billing"
 	"github.com/artpar/apigate/domain/key"
 	"github.com/artpar/apigate/domain/usage"
 	"github.com/artpar/apigate/ports"
@@ -12,6 +13,97 @@ import (
 
 // Portal HTML templates - simple inline templates for the user portal.
 // These are separate from the admin templates to keep the portal lightweight.
+
+// renderLandingPage renders the public landing page
+func (h *PortalHandler) renderLandingPage() string {
+	return fmt.Sprintf(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>%s - API Gateway</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%); min-height: 100vh; color: #333; }
+
+        .header { padding: 20px 40px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { color: white; font-size: 24px; font-weight: 700; text-decoration: none; }
+        .header-actions { display: flex; gap: 12px; }
+        .header-actions a { padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: 500; transition: all 0.2s; }
+        .btn-login { color: white; border: 1px solid rgba(255,255,255,0.3); }
+        .btn-login:hover { background: rgba(255,255,255,0.1); }
+        .btn-signup { background: white; color: #667eea; }
+        .btn-signup:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+
+        .hero { max-width: 800px; margin: 80px auto; text-align: center; padding: 0 20px; }
+        .hero h1 { color: white; font-size: 48px; margin-bottom: 24px; line-height: 1.2; }
+        .hero p { color: rgba(255,255,255,0.9); font-size: 20px; margin-bottom: 40px; line-height: 1.6; }
+        .hero-actions { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+        .hero-actions a { padding: 16px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 18px; transition: all 0.2s; }
+        .btn-primary { background: white; color: #667eea; }
+        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.2); }
+        .btn-secondary { color: white; border: 2px solid white; }
+        .btn-secondary:hover { background: rgba(255,255,255,0.1); }
+
+        .features { max-width: 1000px; margin: 80px auto; padding: 0 20px; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; }
+        .feature { background: white; padding: 32px; border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,0.1); }
+        .feature-icon { width: 48px; height: 48px; background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%); border-radius: 10px; margin-bottom: 20px; display: flex; align-items: center; justify-content: center; }
+        .feature-icon svg { width: 24px; height: 24px; color: white; }
+        .feature h3 { font-size: 18px; margin-bottom: 12px; color: #111827; }
+        .feature p { color: #6b7280; line-height: 1.6; }
+
+        .footer { text-align: center; padding: 40px 20px; color: rgba(255,255,255,0.7); font-size: 14px; }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <a href="/portal" class="logo">%s</a>
+        <div class="header-actions">
+            <a href="/portal/login" class="btn-login">Log In</a>
+            <a href="/portal/signup" class="btn-signup">Sign Up Free</a>
+        </div>
+    </header>
+
+    <section class="hero">
+        <h1>Your API, Managed Simply</h1>
+        <p>Get started with our API platform in minutes. Create API keys, monitor usage, and manage your subscription all in one place.</p>
+        <div class="hero-actions">
+            <a href="/portal/signup" class="btn-primary">Get Started Free</a>
+            <a href="/docs" class="btn-secondary">View API Docs</a>
+        </div>
+    </section>
+
+    <section class="features">
+        <div class="feature">
+            <div class="feature-icon">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
+            </div>
+            <h3>Easy API Key Management</h3>
+            <p>Create and manage API keys with just a few clicks. Revoke access instantly when needed.</p>
+        </div>
+        <div class="feature">
+            <div class="feature-icon">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+            </div>
+            <h3>Usage Analytics</h3>
+            <p>Track your API usage in real-time. Monitor requests, understand patterns, and optimize your integration.</p>
+        </div>
+        <div class="feature">
+            <div class="feature-icon">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/></svg>
+            </div>
+            <h3>Flexible Billing</h3>
+            <p>Choose a plan that fits your needs. Upgrade anytime, manage your subscription, and view invoices.</p>
+        </div>
+    </section>
+
+    <footer class="footer">
+        <p>&copy; 2024 %s. All rights reserved.</p>
+    </footer>
+</body>
+</html>`, h.appName, h.appName, h.appName)
+}
 
 func (h *PortalHandler) renderSignupPage(name, email string, errors map[string]string) string {
 	return h.renderSignupPageWithPlan(name, email, nil, errors)
@@ -870,6 +962,327 @@ func (h *PortalHandler) renderPlansPage(user *PortalUser, plans []ports.Plan, cu
     </main>
 </body>
 </html>`, h.appName, portalCSS, h.renderPortalNav(user), alertHTML, planCards, subscriptionSection)
+}
+
+func (h *PortalHandler) renderBillingPage(user *PortalUser, subscription *billing.Subscription, plan *ports.Plan, invoices []billing.Invoice, successMsg, errorMsg string) string {
+	// Alert messages
+	alertHTML := ""
+	if successMsg != "" {
+		alertHTML = fmt.Sprintf(`
+			<div style="background: #dcfce7; border: 1px solid #86efac; color: #166534; padding: 16px; border-radius: 8px; margin-bottom: 24px; display: flex; align-items: center; gap: 12px;">
+				<svg style="width: 20px; height: 20px; flex-shrink: 0;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+				</svg>
+				<span>%s</span>
+			</div>`, successMsg)
+	}
+	if errorMsg != "" {
+		alertHTML = fmt.Sprintf(`
+			<div style="background: #fee2e2; border: 1px solid #fecaca; color: #b91c1c; padding: 16px; border-radius: 8px; margin-bottom: 24px; display: flex; align-items: center; gap: 12px;">
+				<svg style="width: 20px; height: 20px; flex-shrink: 0;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+				</svg>
+				<span>%s</span>
+			</div>`, errorMsg)
+	}
+
+	// Subscription status section
+	subscriptionHTML := ""
+	if subscription != nil {
+		statusBadge := ""
+		switch subscription.Status {
+		case billing.SubscriptionStatusActive:
+			statusBadge = `<span style="background: #dcfce7; color: #15803d; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500;">Active</span>`
+		case billing.SubscriptionStatusTrialing:
+			statusBadge = `<span style="background: #dbeafe; color: #1d4ed8; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500;">Trial</span>`
+		case billing.SubscriptionStatusPastDue:
+			statusBadge = `<span style="background: #fef3c7; color: #b45309; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500;">Past Due</span>`
+		case billing.SubscriptionStatusCancelled:
+			statusBadge = `<span style="background: #fee2e2; color: #b91c1c; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500;">Cancelled</span>`
+		default:
+			statusBadge = fmt.Sprintf(`<span style="background: #f3f4f6; color: #6b7280; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500;">%s</span>`, subscription.Status)
+		}
+
+		cancelNotice := ""
+		if subscription.CancelAtPeriodEnd {
+			cancelNotice = fmt.Sprintf(`
+				<div style="margin-top: 16px; padding: 12px; background: #fef3c7; border-radius: 8px; display: flex; align-items: center; gap: 8px;">
+					<span style="color: #b45309;">&#9888;</span>
+					<span style="color: #92400e;">Your subscription will end on %s</span>
+				</div>`, subscription.CurrentPeriodEnd.Format("January 2, 2006"))
+		}
+
+		planName := "Unknown Plan"
+		if plan != nil {
+			planName = plan.Name
+		}
+
+		subscriptionHTML = fmt.Sprintf(`
+			<div class="card" style="margin-bottom: 24px;">
+				<div style="padding: 24px; border-bottom: 1px solid #e5e7eb;">
+					<div style="display: flex; justify-content: space-between; align-items: center;">
+						<h2 style="margin: 0; font-size: 18px;">Current Subscription</h2>
+						%s
+					</div>
+				</div>
+				<div style="padding: 24px;">
+					<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 24px;">
+						<div>
+							<div style="color: #6b7280; font-size: 14px; margin-bottom: 4px;">Plan</div>
+							<div style="font-size: 18px; font-weight: 600;">%s</div>
+						</div>
+						<div>
+							<div style="color: #6b7280; font-size: 14px; margin-bottom: 4px;">Current Period</div>
+							<div>%s - %s</div>
+						</div>
+						<div>
+							<div style="color: #6b7280; font-size: 14px; margin-bottom: 4px;">Next Billing Date</div>
+							<div>%s</div>
+						</div>
+					</div>
+					%s
+					<div style="margin-top: 24px; display: flex; gap: 12px; flex-wrap: wrap;">
+						<a href="/portal/plans" class="btn btn-secondary" style="text-decoration: none;">Change Plan</a>
+						<a href="/portal/subscription/manage" class="btn btn-primary" style="text-decoration: none;">Manage Payment</a>
+						%s
+					</div>
+				</div>
+			</div>`,
+			statusBadge,
+			planName,
+			subscription.CurrentPeriodStart.Format("Jan 2, 2006"),
+			subscription.CurrentPeriodEnd.Format("Jan 2, 2006"),
+			subscription.CurrentPeriodEnd.Format("January 2, 2006"),
+			cancelNotice,
+			func() string {
+				if subscription.Status == billing.SubscriptionStatusActive || subscription.Status == billing.SubscriptionStatusTrialing {
+					if subscription.CancelAtPeriodEnd {
+						return ""
+					}
+					return `<a href="/portal/subscription/cancel" style="padding: 8px 16px; border: 1px solid #dc2626; border-radius: 6px; color: #dc2626; text-decoration: none; font-size: 14px;">Cancel Subscription</a>`
+				}
+				return ""
+			}(),
+		)
+	} else if plan != nil {
+		// User has a plan but no subscription record (likely free plan or local-only)
+		subscriptionHTML = fmt.Sprintf(`
+			<div class="card" style="margin-bottom: 24px;">
+				<div style="padding: 24px; border-bottom: 1px solid #e5e7eb;">
+					<div style="display: flex; justify-content: space-between; align-items: center;">
+						<h2 style="margin: 0; font-size: 18px;">Current Plan</h2>
+						<span style="background: #dcfce7; color: #15803d; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500;">Active</span>
+					</div>
+				</div>
+				<div style="padding: 24px;">
+					<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 24px;">
+						<div>
+							<div style="color: #6b7280; font-size: 14px; margin-bottom: 4px;">Plan</div>
+							<div style="font-size: 18px; font-weight: 600;">%s</div>
+						</div>
+						<div>
+							<div style="color: #6b7280; font-size: 14px; margin-bottom: 4px;">Price</div>
+							<div>%s/month</div>
+						</div>
+					</div>
+					<div style="margin-top: 24px;">
+						<a href="/portal/plans" class="btn btn-primary" style="text-decoration: none;">Upgrade Plan</a>
+					</div>
+				</div>
+			</div>`, plan.Name, billing.FormatAmount(plan.PriceMonthly))
+	} else {
+		subscriptionHTML = `
+			<div class="card" style="margin-bottom: 24px;">
+				<div style="padding: 24px; text-align: center;">
+					<p style="color: #6b7280; margin: 0 0 16px 0;">No active subscription found.</p>
+					<a href="/portal/plans" class="btn btn-primary" style="text-decoration: none;">View Plans</a>
+				</div>
+			</div>`
+	}
+
+	// Invoices table
+	invoicesHTML := ""
+	if len(invoices) > 0 {
+		invoiceRows := ""
+		for _, inv := range invoices {
+			statusBadge := ""
+			switch inv.Status {
+			case billing.InvoiceStatusPaid:
+				statusBadge = `<span style="background: #dcfce7; color: #15803d; padding: 2px 8px; border-radius: 4px; font-size: 12px;">Paid</span>`
+			case billing.InvoiceStatusOpen:
+				statusBadge = `<span style="background: #dbeafe; color: #1d4ed8; padding: 2px 8px; border-radius: 4px; font-size: 12px;">Open</span>`
+			case billing.InvoiceStatusDraft:
+				statusBadge = `<span style="background: #f3f4f6; color: #6b7280; padding: 2px 8px; border-radius: 4px; font-size: 12px;">Draft</span>`
+			case billing.InvoiceStatusVoid:
+				statusBadge = `<span style="background: #fee2e2; color: #b91c1c; padding: 2px 8px; border-radius: 4px; font-size: 12px;">Void</span>`
+			default:
+				statusBadge = fmt.Sprintf(`<span style="background: #f3f4f6; color: #6b7280; padding: 2px 8px; border-radius: 4px; font-size: 12px;">%s</span>`, inv.Status)
+			}
+
+			downloadLink := ""
+			if inv.InvoiceURL != "" {
+				downloadLink = fmt.Sprintf(`<a href="%s" target="_blank" style="color: #3b82f6; text-decoration: none; font-size: 14px;">Download</a>`, inv.InvoiceURL)
+			}
+
+			invoiceRows += fmt.Sprintf(`
+				<tr>
+					<td style="padding: 12px 16px; border-bottom: 1px solid #e5e7eb;">%s</td>
+					<td style="padding: 12px 16px; border-bottom: 1px solid #e5e7eb;">%s - %s</td>
+					<td style="padding: 12px 16px; border-bottom: 1px solid #e5e7eb;">%s</td>
+					<td style="padding: 12px 16px; border-bottom: 1px solid #e5e7eb;">%s</td>
+					<td style="padding: 12px 16px; border-bottom: 1px solid #e5e7eb;">%s</td>
+				</tr>`,
+				inv.CreatedAt.Format("Jan 2, 2006"),
+				inv.PeriodStart.Format("Jan 2"),
+				inv.PeriodEnd.Format("Jan 2, 2006"),
+				billing.FormatAmount(inv.Total),
+				statusBadge,
+				downloadLink,
+			)
+		}
+
+		invoicesHTML = fmt.Sprintf(`
+			<div class="card">
+				<div style="padding: 24px; border-bottom: 1px solid #e5e7eb;">
+					<h2 style="margin: 0; font-size: 18px;">Billing History</h2>
+				</div>
+				<div style="overflow-x: auto;">
+					<table style="width: 100%%; border-collapse: collapse;">
+						<thead>
+							<tr style="background: #f9fafb;">
+								<th style="padding: 12px 16px; text-align: left; font-weight: 500; color: #6b7280; font-size: 14px;">Date</th>
+								<th style="padding: 12px 16px; text-align: left; font-weight: 500; color: #6b7280; font-size: 14px;">Period</th>
+								<th style="padding: 12px 16px; text-align: left; font-weight: 500; color: #6b7280; font-size: 14px;">Amount</th>
+								<th style="padding: 12px 16px; text-align: left; font-weight: 500; color: #6b7280; font-size: 14px;">Status</th>
+								<th style="padding: 12px 16px; text-align: left; font-weight: 500; color: #6b7280; font-size: 14px;"></th>
+							</tr>
+						</thead>
+						<tbody>
+							%s
+						</tbody>
+					</table>
+				</div>
+			</div>`, invoiceRows)
+	} else {
+		invoicesHTML = `
+			<div class="card">
+				<div style="padding: 24px; border-bottom: 1px solid #e5e7eb;">
+					<h2 style="margin: 0; font-size: 18px;">Billing History</h2>
+				</div>
+				<div style="padding: 40px; text-align: center;">
+					<p style="color: #6b7280; margin: 0;">No invoices yet.</p>
+				</div>
+			</div>`
+	}
+
+	return fmt.Sprintf(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Billing - %s</title>
+    <style>%s</style>
+</head>
+<body>
+    %s
+    <main class="main-content">
+        <div class="page-header">
+            <h1>Billing</h1>
+            <p>Manage your subscription and view invoices</p>
+        </div>
+        %s
+        %s
+        %s
+    </main>
+</body>
+</html>`, h.appName, portalCSS, h.renderPortalNav(user), alertHTML, subscriptionHTML, invoicesHTML)
+}
+
+// renderCancelSubscriptionPage renders the cancel subscription confirmation page
+func (h *PortalHandler) renderCancelSubscriptionPage(user *PortalUser, subscription *billing.Subscription, plan *ports.Plan) string {
+	periodEndDate := subscription.CurrentPeriodEnd.Format("January 2, 2006")
+	planName := "Current Plan"
+	if plan != nil {
+		planName = plan.Name
+	}
+
+	return fmt.Sprintf(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cancel Subscription - %s</title>
+    <style>%s</style>
+</head>
+<body>
+    %s
+    <main class="main-content">
+        <div class="page-header">
+            <h1>Cancel Subscription</h1>
+            <p>We're sorry to see you go</p>
+        </div>
+
+        <div class="card" style="max-width: 600px; margin: 0 auto;">
+            <div style="padding: 32px;">
+                <div style="text-align: center; margin-bottom: 32px;">
+                    <div style="width: 64px; height: 64px; background: #fef2f2; border-radius: 50%%; margin: 0 auto 16px; display: flex; align-items: center; justify-content: center;">
+                        <svg style="width: 32px; height: 32px; color: #dc2626;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                        </svg>
+                    </div>
+                    <h2 style="margin: 0 0 8px; font-size: 20px;">Cancel %s?</h2>
+                    <p style="color: #6b7280; margin: 0;">Please review what happens when you cancel.</p>
+                </div>
+
+                <div style="background: #f9fafb; border-radius: 8px; padding: 20px; margin-bottom: 24px;">
+                    <h3 style="margin: 0 0 16px; font-size: 16px; color: #111827;">What happens when you cancel</h3>
+                    <ul style="margin: 0; padding-left: 20px; color: #4b5563; line-height: 1.8;">
+                        <li>You'll lose access to premium features</li>
+                        <li>Your API quota will be reduced to the free plan limits</li>
+                        <li>Any unused quota will not be refunded</li>
+                        <li>Your API keys will continue to work (with free plan limits)</li>
+                        <li>You can resubscribe anytime</li>
+                    </ul>
+                </div>
+
+                <form method="POST" action="/portal/subscription/cancel">
+                    <div style="background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 24px;">
+                        <label style="display: flex; align-items: start; padding: 16px; cursor: pointer; border-bottom: 1px solid #e5e7eb;">
+                            <input type="radio" name="cancel_mode" value="end_of_period" checked style="margin-right: 12px; margin-top: 4px;">
+                            <div>
+                                <div style="font-weight: 500; color: #111827;">Cancel at end of billing period</div>
+                                <div style="color: #6b7280; font-size: 14px; margin-top: 4px;">
+                                    Keep access until <strong>%s</strong>, then downgrade to free plan
+                                </div>
+                            </div>
+                        </label>
+                        <label style="display: flex; align-items: start; padding: 16px; cursor: pointer;">
+                            <input type="radio" name="cancel_mode" value="immediately" style="margin-right: 12px; margin-top: 4px;">
+                            <div>
+                                <div style="font-weight: 500; color: #111827;">Cancel immediately</div>
+                                <div style="color: #6b7280; font-size: 14px; margin-top: 4px;">
+                                    Lose access right now, no prorated refund
+                                </div>
+                            </div>
+                        </label>
+                    </div>
+
+                    <div style="display: flex; gap: 12px; justify-content: flex-end;">
+                        <a href="/portal/billing" style="padding: 10px 20px; border: 1px solid #e5e7eb; border-radius: 6px; color: #374151; text-decoration: none; font-weight: 500;">
+                            Keep Subscription
+                        </a>
+                        <button type="submit" style="padding: 10px 20px; background: #dc2626; color: white; border: none; border-radius: 6px; font-weight: 500; cursor: pointer;">
+                            Cancel Subscription
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </main>
+</body>
+</html>`, h.appName, portalCSS, h.renderPortalNav(user), planName, periodEndDate)
 }
 
 // Portal CSS styles

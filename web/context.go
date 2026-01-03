@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/artpar/apigate/adapters/auth"
+	"github.com/artpar/apigate/core/terminology"
 )
 
 type ctxKey string
@@ -31,6 +32,7 @@ type PageData struct {
 	CurrentPath string
 	Flash       *FlashMessage
 	Config      *ConfigInfo
+	Labels      terminology.Labels // UI labels for metering units
 }
 
 // UserInfo represents the logged-in user.
@@ -60,6 +62,14 @@ func (h *Handler) newPageData(ctx context.Context, title string) PageData {
 			UpstreamURL: h.appSettings.UpstreamURL,
 			Version:     "dev",
 		},
+		Labels: terminology.Default(),
+	}
+
+	// Load terminology labels from settings
+	if h.settings != nil {
+		if setting, err := h.settings.Get(ctx, "metering.unit"); err == nil && setting.Value != "" {
+			data.Labels = terminology.ForUnit(setting.Value)
+		}
 	}
 
 	if claims := getClaims(ctx); claims != nil {

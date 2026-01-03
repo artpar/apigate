@@ -115,6 +115,7 @@
             <th>Name</th>
             <th>Path Pattern</th>
             <th>Upstream</th>
+            <th>Metering</th>
             <th>Protocol</th>
             <th>Status</th>
             <th class="cell-actions">Actions</th>
@@ -132,6 +133,14 @@
                 <div class="cell-secondary">{{.MatchType}}{{if .Methods}} | {{range $i, $m := .Methods}}{{if $i}}, {{end}}{{$m}}{{end}}{{end}}</div>
             </td>
             <td class="text-muted">{{index $.UpstreamMap .UpstreamID}}</td>
+            <td class="text-muted">
+                {{if .MeteringExpr}}
+                    <span class="badge badge-info" title="{{.MeteringExpr}}">{{.MeteringUnit}}</span>
+                    <div class="cell-secondary" style="max-width: 120px; overflow: hidden; text-overflow: ellipsis;">{{.MeteringMode}}</div>
+                {{else}}
+                    <span class="text-muted">1 request</span>
+                {{end}}
+            </td>
             <td class="text-muted">{{.Protocol}}</td>
             <td>
                 <span class="badge {{if .Enabled}}badge-success{{else}}badge-error{{end}}">{{if .Enabled}}enabled{{else}}disabled{{end}}</span>
@@ -142,7 +151,7 @@
             </td>
         </tr>
         {{else}}
-        <tr><td colspan="6" class="table-empty">
+        <tr><td colspan="7" class="table-empty">
             <div class="empty-state-inline">
                 <strong>No routes configured</strong>
                 <p>Routes define how incoming requests are mapped to your APIs. First <a href="/upstreams/new" class="link">add an upstream</a>, then <a href="/routes/new" class="link">create a route</a>.</p>
@@ -198,8 +207,9 @@
         <tr>
             <th>Name</th>
             <th>Rate Limit</th>
-            <th>Monthly Quota</th>
+            <th>{{$.Labels.QuotaLabel}}</th>
             <th>Price</th>
+            <th>Over Quota</th>
             <th>Users</th>
             <th>Status</th>
             <th class="cell-actions">Actions</th>
@@ -209,9 +219,10 @@
         {{range .Plans}}
         <tr>
             <td class="cell-primary">{{.Name}}</td>
-            <td class="text-muted">{{.RateLimit}} req/min</td>
+            <td class="text-muted">{{.RateLimit}} {{$.Labels.RateLimitLabel}}</td>
             <td class="text-muted">{{if eq .MonthlyQuota 0}}Unlimited{{else}}{{.MonthlyQuota}}{{end}}</td>
             <td class="text-muted">${{printf "%.2f" .PriceMonthly}}/mo</td>
+            <td class="text-muted">{{if gt .OveragePrice 0.0}}<span class="badge badge-info">${{printf "%.4f" .OveragePrice}} {{$.Labels.OverageLabel}}</span>{{else}}<span class="badge badge-warning">Blocked</span>{{end}}</td>
             <td class="text-muted">{{.UserCount}}</td>
             <td>
                 {{if .IsDefault}}<span class="badge badge-info" style="margin-right: 4px;">default</span>{{end}}
@@ -223,7 +234,7 @@
             </td>
         </tr>
         {{else}}
-        <tr><td colspan="7" class="table-empty">
+        <tr><td colspan="8" class="table-empty">
             <div class="empty-state-inline">
                 <strong>No plans configured</strong>
                 <p>Plans define rate limits and quotas for your users. <a href="/plans/new" class="link">Create a plan</a></p>

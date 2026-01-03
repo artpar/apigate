@@ -25,15 +25,24 @@
         <li><strong>Rate Limit</strong> - Maximum requests per minute</li>
         <li><strong>Monthly Quota</strong> - Total requests allowed per month (0 = unlimited)</li>
         <li><strong>Price</strong> - Monthly subscription cost</li>
+        <li><strong>Over Quota</strong> - What happens when quota is exceeded</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>Over Quota Behavior</h4>
+    <ul class="panel-list">
+        <li><strong>Blocked</strong> - Requests return 429 until next billing period</li>
+        <li><strong>Overage Pricing</strong> - Allow continued usage at per-request rate (e.g., $0.001/request)</li>
     </ul>
 </div>
 
 <div class="panel-section">
     <h4>Typical Plan Structure</h4>
     <ul class="panel-list">
-        <li><strong>Free</strong> - Low limits for testing (e.g., 60 req/min, 1K/month)</li>
-        <li><strong>Starter</strong> - Small projects (e.g., 120 req/min, 10K/month)</li>
-        <li><strong>Pro</strong> - Production use (e.g., 600 req/min, 100K/month)</li>
+        <li><strong>Free</strong> - Low limits, blocked when exceeded</li>
+        <li><strong>Starter</strong> - Moderate limits, blocked or low overage</li>
+        <li><strong>Pro</strong> - Higher limits with overage pricing</li>
         <li><strong>Enterprise</strong> - Unlimited or custom limits</li>
     </ul>
 </div>

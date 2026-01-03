@@ -60,6 +60,7 @@ type Route struct {
 	// Metering configuration
 	MeteringExpr string // Expr to extract usage value from response
 	MeteringMode string // "request", "response_field", "bytes", "custom"
+	MeteringUnit string // Display unit: "requests", "tokens", "data_points", "bytes" (for UI labels)
 
 	// Protocol behavior
 	Protocol Protocol // http, http_stream, sse, websocket
@@ -129,6 +130,7 @@ func NewRoute(id, name, pathPattern string, upstreamID string) Route {
 		UpstreamID:   upstreamID,
 		MeteringExpr: "1", // Default: count requests
 		MeteringMode: "request",
+		MeteringUnit: "requests", // Display unit for UI
 		Protocol:     ProtocolHTTP,
 		Priority:     0,
 		Enabled:      true,

@@ -1,0 +1,214 @@
+{{define "content"}}
+<div class="page" style="max-width: 900px;">
+    <div class="page-header">
+        <h1 class="page-title">Payment Providers</h1>
+    </div>
+
+    {{if .Success}}
+    <div class="alert alert-success mb-4">{{.Success}}</div>
+    {{end}}
+    {{if .Error}}
+    <div class="alert alert-error mb-4">{{.Error}}</div>
+    {{end}}
+
+    <div class="alert alert-info mb-4">
+        <strong>Note:</strong> Configure one payment provider to enable paid plans. Customers will be redirected to the provider's checkout page when upgrading.
+    </div>
+
+    <form action="/payments" method="POST">
+        <!-- Active Provider Selection -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <h3 class="card-title mb-4">Active Provider</h3>
+                <div class="form">
+                    <div class="form-group">
+                        <label class="form-label" for="active_provider">Select Payment Provider</label>
+                        <select id="active_provider" name="active_provider" class="form-input">
+                            <option value="none" {{if eq .ActiveProvider "none"}}selected{{end}}>None (Free plans only)</option>
+                            <option value="stripe" {{if eq .ActiveProvider "stripe"}}selected{{end}}>Stripe</option>
+                            <option value="paddle" {{if eq .ActiveProvider "paddle"}}selected{{end}}>Paddle</option>
+                            <option value="lemonsqueezy" {{if eq .ActiveProvider "lemonsqueezy"}}selected{{end}}>LemonSqueezy</option>
+                        </select>
+                        <p class="form-hint">The selected provider will be used for all paid plan checkouts</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stripe Configuration -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                    <div style="width: 40px; height: 40px; background: #635bff; border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="white"><path d="M13.976 9.15c-2.172-.806-3.356-1.426-3.356-2.409 0-.831.683-1.305 1.901-1.305 2.227 0 4.515.858 6.09 1.631l.89-5.494C18.252.975 15.697 0 12.165 0 9.667 0 7.589.654 6.104 1.872 4.56 3.147 3.757 4.992 3.757 7.218c0 4.039 2.467 5.76 6.476 7.219 2.585.92 3.445 1.574 3.445 2.583 0 .98-.84 1.545-2.354 1.545-1.875 0-4.965-.921-6.99-2.109l-.9 5.555C5.175 22.99 8.385 24 11.714 24c2.641 0 4.843-.624 6.328-1.813 1.664-1.305 2.525-3.236 2.525-5.732 0-4.128-2.524-5.851-6.591-7.305z"/></svg>
+                    </div>
+                    <div>
+                        <h3 class="card-title" style="margin: 0;">Stripe</h3>
+                        <p class="text-muted" style="margin: 0; font-size: 13px;">Most popular payment platform worldwide</p>
+                    </div>
+                    {{if .StripeConfigured}}
+                    <span class="badge badge-success" style="margin-left: auto;">Configured</span>
+                    {{else}}
+                    <span class="badge badge-secondary" style="margin-left: auto;">Not Configured</span>
+                    {{end}}
+                </div>
+
+                <div class="form">
+                    <div class="form-group">
+                        <label class="form-label" for="stripe_secret_key">Secret Key</label>
+                        <input type="password" id="stripe_secret_key" name="stripe_secret_key" class="form-input" value="{{.StripeSecretKey}}" placeholder="sk_live_... or sk_test_...">
+                        <p class="form-hint">Found in <a href="https://dashboard.stripe.com/apikeys" target="_blank">Stripe Dashboard</a> &rarr; Developers &rarr; API Keys</p>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="stripe_webhook_secret">Webhook Secret</label>
+                        <input type="password" id="stripe_webhook_secret" name="stripe_webhook_secret" class="form-input" value="{{.StripeWebhookSecret}}" placeholder="whsec_...">
+                        <p class="form-hint">Create a webhook at <a href="https://dashboard.stripe.com/webhooks" target="_blank">Stripe Webhooks</a></p>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Webhook URL</label>
+                        <div class="input-group">
+                            <input type="text" class="form-input" value="{{.BaseURL}}/webhooks/stripe" readonly id="stripe-webhook-url">
+                            <button type="button" class="btn btn-secondary" onclick="copyToClipboard('stripe-webhook-url')">Copy</button>
+                        </div>
+                        <p class="form-hint">Add this URL to your Stripe webhook configuration</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Paddle Configuration -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                    <div style="width: 40px; height: 40px; background: #2e6ed5; border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="white"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/></svg>
+                    </div>
+                    <div>
+                        <h3 class="card-title" style="margin: 0;">Paddle</h3>
+                        <p class="text-muted" style="margin: 0; font-size: 13px;">Merchant of Record - handles taxes globally</p>
+                    </div>
+                    {{if .PaddleConfigured}}
+                    <span class="badge badge-success" style="margin-left: auto;">Configured</span>
+                    {{else}}
+                    <span class="badge badge-secondary" style="margin-left: auto;">Not Configured</span>
+                    {{end}}
+                </div>
+
+                <div class="form">
+                    <div class="form-group">
+                        <label class="form-label" for="paddle_vendor_id">Vendor ID</label>
+                        <input type="text" id="paddle_vendor_id" name="paddle_vendor_id" class="form-input" value="{{.PaddleVendorID}}" placeholder="123456">
+                        <p class="form-hint">Found in Paddle Dashboard &rarr; Developer Tools &rarr; Authentication</p>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="paddle_api_key">API Key</label>
+                        <input type="password" id="paddle_api_key" name="paddle_api_key" class="form-input" value="{{.PaddleAPIKey}}" placeholder="Your Paddle API Key">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="paddle_webhook_secret">Webhook Secret</label>
+                        <input type="password" id="paddle_webhook_secret" name="paddle_webhook_secret" class="form-input" value="{{.PaddleWebhookSecret}}" placeholder="pdl_ntfset_...">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Webhook URL</label>
+                        <div class="input-group">
+                            <input type="text" class="form-input" value="{{.BaseURL}}/webhooks/paddle" readonly id="paddle-webhook-url">
+                            <button type="button" class="btn btn-secondary" onclick="copyToClipboard('paddle-webhook-url')">Copy</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- LemonSqueezy Configuration -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                    <div style="width: 40px; height: 40px; background: #ffc233; border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+                        <span style="font-size: 20px;">🍋</span>
+                    </div>
+                    <div>
+                        <h3 class="card-title" style="margin: 0;">LemonSqueezy</h3>
+                        <p class="text-muted" style="margin: 0; font-size: 13px;">Simple payments for indie developers</p>
+                    </div>
+                    {{if .LemonConfigured}}
+                    <span class="badge badge-success" style="margin-left: auto;">Configured</span>
+                    {{else}}
+                    <span class="badge badge-secondary" style="margin-left: auto;">Not Configured</span>
+                    {{end}}
+                </div>
+
+                <div class="form">
+                    <div class="form-group">
+                        <label class="form-label" for="lemon_api_key">API Key</label>
+                        <input type="password" id="lemon_api_key" name="lemon_api_key" class="form-input" value="{{.LemonAPIKey}}" placeholder="Your LemonSqueezy API Key">
+                        <p class="form-hint">Found in <a href="https://app.lemonsqueezy.com/settings/api" target="_blank">LemonSqueezy Settings</a> &rarr; API</p>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="lemon_webhook_secret">Webhook Signing Secret</label>
+                        <input type="password" id="lemon_webhook_secret" name="lemon_webhook_secret" class="form-input" value="{{.LemonWebhookSecret}}" placeholder="Your signing secret">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Webhook URL</label>
+                        <div class="input-group">
+                            <input type="text" class="form-input" value="{{.BaseURL}}/webhooks/lemonsqueezy" readonly id="lemon-webhook-url">
+                            <button type="button" class="btn btn-secondary" onclick="copyToClipboard('lemon-webhook-url')">Copy</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <button type="submit" class="btn btn-primary">Save Payment Settings</button>
+            </div>
+        </div>
+    </form>
+</div>
+
+<script>
+function copyToClipboard(elementId) {
+    const input = document.getElementById(elementId);
+    input.select();
+    document.execCommand('copy');
+
+    // Show feedback
+    const btn = input.nextElementSibling;
+    const originalText = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = originalText, 2000);
+}
+</script>
+{{end}}
+
+{{define "panel-docs"}}
+<div class="panel-section">
+    <h3>Payment Providers</h3>
+    <p>Configure payment integration for monetizing your API with paid plans.</p>
+</div>
+
+<div class="panel-section">
+    <h4>Choosing a Provider</h4>
+    <ul class="panel-list">
+        <li><strong>Stripe</strong> - Best for most use cases. Wide coverage, excellent API.</li>
+        <li><strong>Paddle</strong> - Handles all tax compliance as Merchant of Record.</li>
+        <li><strong>LemonSqueezy</strong> - Simple setup, great for indie developers.</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>Setup Steps</h4>
+    <ol class="panel-list">
+        <li>Create an account with your chosen provider</li>
+        <li>Get your API keys from their dashboard</li>
+        <li>Enter the keys in this form</li>
+        <li>Copy the webhook URL and add it to your provider</li>
+        <li>Select the provider as "Active"</li>
+    </ol>
+</div>
+
+<div class="panel-section">
+    <h4>Plan Price IDs</h4>
+    <p>After setting up your provider, create products/prices in their dashboard. Then enter the Price ID in each plan's configuration.</p>
+</div>
+{{end}}

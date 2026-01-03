@@ -1189,9 +1189,11 @@ func (h *Handler) PartialPlans(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := struct {
+		PageData
 		Plans []PlanWithCount
 	}{
-		Plans: plansWithCount,
+		PageData: h.newPageData(ctx, "Plans"),
+		Plans:    plansWithCount,
 	}
 
 	h.renderPartial(w, "partial_plans", data)
@@ -1348,6 +1350,7 @@ func (h *Handler) SettingsPage(w http.ResponseWriter, r *http.Request) {
 			AuthHeader               string
 			RateLimitStrategy        string
 			DatabaseDSN              string
+			MeteringUnit             string
 			PortalEnabled            bool
 			PortalAppName            string
 			PortalBaseURL            string
@@ -1388,6 +1391,7 @@ func (h *Handler) SettingsPage(w http.ResponseWriter, r *http.Request) {
 	data.Settings.PortalAppName = allSettings.GetOrDefault(settings.KeyPortalAppName, "APIGate")
 	data.Settings.PortalBaseURL = allSettings.Get(settings.KeyPortalBaseURL)
 	data.Settings.RequireEmailVerification = allSettings.GetBool(settings.KeyAuthRequireEmailVerification)
+	data.Settings.MeteringUnit = allSettings.GetOrDefault(settings.KeyMeteringUnit, "requests")
 
 	// Email provider settings
 	data.Settings.EmailProvider = allSettings.GetOrDefault(settings.KeyEmailProvider, "none")
@@ -1438,10 +1442,14 @@ func (h *Handler) SettingsUpdate(w http.ResponseWriter, r *http.Request) {
 	portalAppName := strings.TrimSpace(r.FormValue("portal_app_name"))
 	portalBaseURL := strings.TrimSpace(r.FormValue("portal_base_url"))
 	requireEmailVerification := r.FormValue("require_email_verification") == "on"
+	meteringUnit := strings.TrimSpace(r.FormValue("metering_unit"))
 
 	// Validate
 	if portalAppName == "" {
 		portalAppName = "APIGate"
+	}
+	if meteringUnit == "" {
+		meteringUnit = "requests"
 	}
 
 	// Save settings
@@ -1449,6 +1457,7 @@ func (h *Handler) SettingsUpdate(w http.ResponseWriter, r *http.Request) {
 		settings.KeyPortalEnabled:                boolToString(portalEnabled),
 		settings.KeyPortalAppName:                portalAppName,
 		settings.KeyAuthRequireEmailVerification: boolToString(requireEmailVerification),
+		settings.KeyMeteringUnit:                 meteringUnit,
 	}
 	if portalBaseURL != "" {
 		settingsToSave[settings.KeyPortalBaseURL] = portalBaseURL
@@ -1506,6 +1515,201 @@ func (h *Handler) SettingsUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Redirect(w, r, "/settings?success=Settings+saved.+Some+changes+may+require+a+server+restart.", http.StatusSeeOther)
+}
+
+// PaymentsPage shows payment provider configuration.
+func (h *Handler) PaymentsPage(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	allSettings, err := h.settings.GetAll(ctx)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to load settings")
+	}
+
+	// Determine base URL for webhook URLs
+	baseURL := allSettings.Get(settings.KeyPortalBaseURL)
+	if baseURL == "" {
+		scheme := "http"
+		if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+			scheme = "https"
+		}
+		baseURL = scheme + "://" + r.Host
+	}
+
+	// Check which providers are configured
+	stripeConfigured := allSettings.Get(settings.KeyPaymentStripeSecretKey) != ""
+	paddleConfigured := allSettings.Get(settings.KeyPaymentPaddleAPIKey) != ""
+	lemonConfigured := allSettings.Get(settings.KeyPaymentLemonAPIKey) != ""
+
+	data := struct {
+		PageData
+		ActiveProvider      string
+		BaseURL             string
+		StripeSecretKey     string
+		StripeWebhookSecret string
+		StripeConfigured    bool
+		PaddleVendorID      string
+		PaddleAPIKey        string
+		PaddleWebhookSecret string
+		PaddleConfigured    bool
+		LemonAPIKey         string
+		LemonWebhookSecret  string
+		LemonConfigured     bool
+		Success             string
+		Error               string
+	}{
+		PageData:            h.newPageData(ctx, "Payment Providers"),
+		ActiveProvider:      allSettings.GetOrDefault(settings.KeyPaymentProvider, "none"),
+		BaseURL:             baseURL,
+		StripeSecretKey:     maskSecret(allSettings.Get(settings.KeyPaymentStripeSecretKey)),
+		StripeWebhookSecret: maskSecret(allSettings.Get(settings.KeyPaymentStripeWebhookSecret)),
+		StripeConfigured:    stripeConfigured,
+		PaddleVendorID:      allSettings.Get(settings.KeyPaymentPaddleVendorID),
+		PaddleAPIKey:        maskSecret(allSettings.Get(settings.KeyPaymentPaddleAPIKey)),
+		PaddleWebhookSecret: maskSecret(allSettings.Get(settings.KeyPaymentPaddleWebhookSecret)),
+		PaddleConfigured:    paddleConfigured,
+		LemonAPIKey:         maskSecret(allSettings.Get(settings.KeyPaymentLemonAPIKey)),
+		LemonWebhookSecret:  maskSecret(allSettings.Get(settings.KeyPaymentLemonWebhookSecret)),
+		LemonConfigured:     lemonConfigured,
+		Success:             r.URL.Query().Get("success"),
+		Error:               r.URL.Query().Get("error"),
+	}
+	data.CurrentPath = "/payments"
+
+	h.render(w, "payments", data)
+}
+
+// PaymentsUpdate saves payment provider settings.
+func (h *Handler) PaymentsUpdate(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	if err := r.ParseForm(); err != nil {
+		http.Redirect(w, r, "/payments?error=Invalid+form+data", http.StatusSeeOther)
+		return
+	}
+
+	settingsToSave := map[string]string{
+		settings.KeyPaymentProvider: strings.TrimSpace(r.FormValue("active_provider")),
+	}
+
+	// Payment provider settings - only save if provided (not masked/empty)
+	paymentSettings := map[string]string{
+		settings.KeyPaymentStripeSecretKey:     strings.TrimSpace(r.FormValue("stripe_secret_key")),
+		settings.KeyPaymentStripeWebhookSecret: strings.TrimSpace(r.FormValue("stripe_webhook_secret")),
+		settings.KeyPaymentPaddleVendorID:      strings.TrimSpace(r.FormValue("paddle_vendor_id")),
+		settings.KeyPaymentPaddleAPIKey:        strings.TrimSpace(r.FormValue("paddle_api_key")),
+		settings.KeyPaymentPaddleWebhookSecret: strings.TrimSpace(r.FormValue("paddle_webhook_secret")),
+		settings.KeyPaymentLemonAPIKey:         strings.TrimSpace(r.FormValue("lemon_api_key")),
+		settings.KeyPaymentLemonWebhookSecret:  strings.TrimSpace(r.FormValue("lemon_webhook_secret")),
+	}
+
+	// Only save if value doesn't look like masked (contain "...")
+	for key, value := range paymentSettings {
+		if value != "" && !strings.Contains(value, "...") {
+			settingsToSave[key] = value
+		}
+	}
+
+	for key, value := range settingsToSave {
+		encrypted := settings.IsSensitive(key)
+		if err := h.settings.Set(ctx, key, value, encrypted); err != nil {
+			h.logger.Error().Err(err).Str("key", key).Msg("failed to save payment setting")
+			http.Redirect(w, r, "/payments?error=Failed+to+save+settings", http.StatusSeeOther)
+			return
+		}
+	}
+
+	http.Redirect(w, r, "/payments?success=Payment+settings+saved", http.StatusSeeOther)
+}
+
+// EmailPage shows email provider configuration.
+func (h *Handler) EmailPage(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	allSettings, err := h.settings.GetAll(ctx)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to load settings")
+	}
+
+	data := struct {
+		PageData
+		AppName          string
+		EmailProvider    string
+		EmailFromAddress string
+		EmailFromName    string
+		SMTPHost         string
+		SMTPPort         string
+		SMTPUsername     string
+		SMTPPassword     string
+		SMTPUseTLS       bool
+		SendGridAPIKey   string
+		Success          string
+		Error            string
+	}{
+		PageData:         h.newPageData(ctx, "Email Provider"),
+		AppName:          allSettings.GetOrDefault(settings.KeyPortalAppName, "APIGate"),
+		EmailProvider:    allSettings.GetOrDefault(settings.KeyEmailProvider, "none"),
+		EmailFromAddress: allSettings.Get(settings.KeyEmailFromAddress),
+		EmailFromName:    allSettings.Get(settings.KeyEmailFromName),
+		SMTPHost:         allSettings.Get(settings.KeyEmailSMTPHost),
+		SMTPPort:         allSettings.Get(settings.KeyEmailSMTPPort),
+		SMTPUsername:     allSettings.Get(settings.KeyEmailSMTPUsername),
+		SMTPPassword:     maskSecret(allSettings.Get(settings.KeyEmailSMTPPassword)),
+		SMTPUseTLS:       allSettings.GetBool(settings.KeyEmailSMTPUseTLS),
+		SendGridAPIKey:   maskSecret(allSettings.Get(settings.KeyEmailSendGridKey)),
+		Success:          r.URL.Query().Get("success"),
+		Error:            r.URL.Query().Get("error"),
+	}
+	data.CurrentPath = "/email"
+
+	h.render(w, "email", data)
+}
+
+// EmailUpdate saves email provider settings.
+func (h *Handler) EmailUpdate(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	if err := r.ParseForm(); err != nil {
+		http.Redirect(w, r, "/email?error=Invalid+form+data", http.StatusSeeOther)
+		return
+	}
+
+	emailProvider := strings.TrimSpace(r.FormValue("email_provider"))
+	if emailProvider == "" {
+		emailProvider = "none"
+	}
+
+	settingsToSave := map[string]string{
+		settings.KeyEmailProvider:    emailProvider,
+		settings.KeyEmailFromAddress: strings.TrimSpace(r.FormValue("email_from_address")),
+		settings.KeyEmailFromName:    strings.TrimSpace(r.FormValue("email_from_name")),
+		settings.KeyEmailSMTPHost:    strings.TrimSpace(r.FormValue("smtp_host")),
+		settings.KeyEmailSMTPPort:    strings.TrimSpace(r.FormValue("smtp_port")),
+		settings.KeyEmailSMTPUsername: strings.TrimSpace(r.FormValue("smtp_username")),
+		settings.KeyEmailSMTPUseTLS:  boolToString(r.FormValue("smtp_use_tls") == "on"),
+	}
+
+	// Sensitive settings - only save if provided (not masked/empty)
+	sensitiveSettings := map[string]string{
+		settings.KeyEmailSMTPPassword: strings.TrimSpace(r.FormValue("smtp_password")),
+		settings.KeyEmailSendGridKey:  strings.TrimSpace(r.FormValue("sendgrid_api_key")),
+	}
+	for key, value := range sensitiveSettings {
+		if value != "" && !strings.Contains(value, "...") {
+			settingsToSave[key] = value
+		}
+	}
+
+	for key, value := range settingsToSave {
+		encrypted := settings.IsSensitive(key)
+		if err := h.settings.Set(ctx, key, value, encrypted); err != nil {
+			h.logger.Error().Err(err).Str("key", key).Msg("failed to save email setting")
+			http.Redirect(w, r, "/email?error=Failed+to+save+settings", http.StatusSeeOther)
+			return
+		}
+	}
+
+	http.Redirect(w, r, "/email?success=Email+settings+saved", http.StatusSeeOther)
 }
 
 func boolToString(b bool) string {
@@ -1621,16 +1825,20 @@ func (h *Handler) PartialStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := struct {
-		TotalUsers    int
-		ActiveKeys    int
-		RequestsToday int64
-		MRR           float64 // in dollars
+		PageData
+		Stats struct {
+			TotalUsers    int
+			ActiveKeys    int
+			RequestsToday int64
+			MRR           float64
+		}
 	}{
-		TotalUsers:    len(users),
-		ActiveKeys:    activeKeys,
-		RequestsToday: requestsToday,
-		MRR:           float64(mrr) / 100,
+		PageData: h.newPageData(ctx, "Stats"),
 	}
+	data.Stats.TotalUsers = len(users)
+	data.Stats.ActiveKeys = activeKeys
+	data.Stats.RequestsToday = requestsToday
+	data.Stats.MRR = float64(mrr) / 100
 
 	h.renderPartial(w, "stats", data)
 }

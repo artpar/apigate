@@ -67,11 +67,17 @@ func (h *Handler) RouteCreate(w http.ResponseWriter, r *http.Request) {
 		MethodOverride: r.FormValue("method_override"),
 		MeteringExpr:   r.FormValue("metering_expr"),
 		MeteringMode:   r.FormValue("metering_mode"),
+		MeteringUnit:   r.FormValue("metering_unit"),
 		Protocol:       route.Protocol(r.FormValue("protocol")),
 		Priority:       parseInt(r.FormValue("priority")),
 		Enabled:        r.FormValue("enabled") == "on",
 		CreatedAt:      time.Now(),
 		UpdatedAt:      time.Now(),
+	}
+
+	// Default metering unit if not provided
+	if rt.MeteringUnit == "" {
+		rt.MeteringUnit = "requests"
 	}
 
 	// Parse transforms
@@ -136,11 +142,17 @@ func (h *Handler) RouteUpdate(w http.ResponseWriter, r *http.Request) {
 		MethodOverride: r.FormValue("method_override"),
 		MeteringExpr:   r.FormValue("metering_expr"),
 		MeteringMode:   r.FormValue("metering_mode"),
+		MeteringUnit:   r.FormValue("metering_unit"),
 		Protocol:       route.Protocol(r.FormValue("protocol")),
 		Priority:       parseInt(r.FormValue("priority")),
 		Enabled:        r.FormValue("enabled") == "on",
 		CreatedAt:      existing.CreatedAt,
 		UpdatedAt:      time.Now(),
+	}
+
+	// Default metering unit if not provided
+	if rt.MeteringUnit == "" {
+		rt.MeteringUnit = "requests"
 	}
 
 	// Parse transforms

@@ -340,14 +340,27 @@ func TestPortalHandler_SignupSubmit_Success(t *testing.T) {
 
 	handler.SignupSubmit(w, req)
 
-	// Should redirect to login with ready message (no email verification required by default)
+	// Should redirect to dashboard (auto-login when no email verification required)
 	if w.Code != http.StatusFound {
 		t.Errorf("Status = %d, want %d", w.Code, http.StatusFound)
 	}
 
 	location := w.Header().Get("Location")
-	if !strings.Contains(location, "/portal/login?signup=ready") {
-		t.Errorf("Location = %s, want to contain /portal/login?signup=ready", location)
+	if !strings.Contains(location, "/portal/dashboard") {
+		t.Errorf("Location = %s, want to contain /portal/dashboard", location)
+	}
+
+	// Should set portal_token cookie for auto-login
+	cookies := w.Result().Cookies()
+	foundToken := false
+	for _, c := range cookies {
+		if c.Name == "portal_token" && c.Value != "" {
+			foundToken = true
+			break
+		}
+	}
+	if !foundToken {
+		t.Error("Expected portal_token cookie to be set for auto-login")
 	}
 
 	// User should be created
@@ -1834,9 +1847,14 @@ func TestPortalHandler_CancelSubscription(t *testing.T) {
 
 	handler.CancelSubscription(w, req)
 
-	// Should redirect or error since payment provider is nil
-	if w.Code != http.StatusFound && w.Code != http.StatusInternalServerError {
-		t.Errorf("Status = %d, want Found or InternalServerError", w.Code)
+	// Should redirect with error since subscription store is nil
+	if w.Code != http.StatusFound {
+		t.Errorf("Status = %d, want Found", w.Code)
+	}
+
+	location := w.Header().Get("Location")
+	if !strings.Contains(location, "/portal/billing?error=") {
+		t.Errorf("Location = %s, want to contain /portal/billing?error=", location)
 	}
 }
 

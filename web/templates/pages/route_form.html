@@ -224,6 +224,18 @@
                             <option value="custom" {{if eq (str .Route.MeteringMode) "custom"}}selected{{end}}>Custom Expression</option>
                         </select>
                     </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="metering_unit" class="form-label">
+                            Display Unit
+                            <span class="info-tooltip" data-tip="How usage is displayed in the UI (e.g., 'tokens' for LLM APIs, 'requests' for standard APIs). This affects labels in usage reports and dashboards.">i</span>
+                        </label>
+                        <select id="metering_unit" name="metering_unit" class="form-input">
+                            <option value="requests" {{if eq .Route.MeteringUnit "requests"}}selected{{end}}>Requests (API calls)</option>
+                            <option value="tokens" {{if eq .Route.MeteringUnit "tokens"}}selected{{end}}>Tokens (LLM APIs)</option>
+                            <option value="data_points" {{if eq .Route.MeteringUnit "data_points"}}selected{{end}}>Data Points (analytics)</option>
+                            <option value="bytes" {{if eq .Route.MeteringUnit "bytes"}}selected{{end}}>KB (data transfer)</option>
+                        </select>
+                    </div>
                     <div class="form-group" style="flex: 2;">
                         <label for="metering_expr" class="form-label">
                             Metering Expression
@@ -513,6 +525,7 @@ function applyTemplate(template) {
             match_type: 'prefix',
             protocol: 'http',
             metering_mode: 'request',
+            metering_unit: 'requests',
             metering_expr: '1'
         },
         'llm': {
@@ -522,6 +535,7 @@ function applyTemplate(template) {
             methods: 'POST',
             protocol: 'sse',
             metering_mode: 'custom',
+            metering_unit: 'tokens',
             metering_expr: 'json(sseLastData(allData)).usage.total_tokens ?? 1'
         },
         'sse': {
@@ -530,6 +544,7 @@ function applyTemplate(template) {
             match_type: 'prefix',
             protocol: 'sse',
             metering_mode: 'custom',
+            metering_unit: 'data_points',
             metering_expr: 'count(sseEvents(allData))'
         },
         'rewrite': {
@@ -539,6 +554,7 @@ function applyTemplate(template) {
             protocol: 'http',
             path_rewrite: '"/v2" + trimPrefix(path, "/v1")',
             metering_mode: 'request',
+            metering_unit: 'requests',
             metering_expr: '1'
         }
     };

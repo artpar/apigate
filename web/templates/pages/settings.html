@@ -14,6 +14,24 @@
     <!-- Editable Settings -->
     <form action="/settings" method="POST">
         <div class="card mb-4">
+            <!-- Metering & Terminology Settings -->
+            <div class="card-body" style="border-bottom: 1px solid #e5e7eb;">
+                <h3 class="card-title mb-4">Metering & Terminology</h3>
+                <p class="text-muted mb-4">Configure how usage is measured and displayed throughout the UI.</p>
+                <div class="form">
+                    <div class="form-group">
+                        <label class="form-label" for="metering_unit">Usage Unit</label>
+                        <select id="metering_unit" name="metering_unit" class="form-input">
+                            <option value="requests" {{if eq .Settings.MeteringUnit "requests"}}selected{{end}}>Requests (API calls)</option>
+                            <option value="tokens" {{if eq .Settings.MeteringUnit "tokens"}}selected{{end}}>Tokens (for LLM APIs)</option>
+                            <option value="data_points" {{if eq .Settings.MeteringUnit "data_points"}}selected{{end}}>Data Points (for analytics)</option>
+                            <option value="bytes" {{if eq .Settings.MeteringUnit "bytes"}}selected{{end}}>KB (for data transfer)</option>
+                        </select>
+                        <p class="form-hint">This affects labels shown in dashboards, plans, and usage reports</p>
+                    </div>
+                </div>
+            </div>
+
             <!-- Customer Portal Settings -->
             <div class="card-body" style="border-bottom: 1px solid #e5e7eb;">
                 <h3 class="card-title mb-4">Customer Portal</h3>
@@ -49,140 +67,6 @@
                             Require Email Verification
                         </label>
                         <p class="form-hint">When enabled, customers must verify their email before accessing the portal. Requires email provider configuration.</p>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Email Provider Settings -->
-            <div class="card-body" style="border-bottom: 1px solid #e5e7eb;">
-                <h3 class="card-title mb-4">Email Provider</h3>
-                <p class="text-muted mb-4">Configure email delivery for verification emails and notifications.</p>
-                <div class="form">
-                    <div class="form-group">
-                        <label class="form-label" for="email_provider">Provider</label>
-                        <select id="email_provider" name="email_provider" class="form-input">
-                            <option value="none" {{if eq .Settings.EmailProvider "none"}}selected{{end}}>None (Disabled)</option>
-                            <option value="smtp" {{if eq .Settings.EmailProvider "smtp"}}selected{{end}}>SMTP</option>
-                            <option value="sendgrid" {{if eq .Settings.EmailProvider "sendgrid"}}selected{{end}}>SendGrid</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label" for="email_from_address">From Address</label>
-                        <input type="email" id="email_from_address" name="email_from_address" class="form-input" value="{{.Settings.EmailFromAddress}}" placeholder="noreply@example.com">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label" for="email_from_name">From Name</label>
-                        <input type="text" id="email_from_name" name="email_from_name" class="form-input" value="{{.Settings.EmailFromName}}" placeholder="My API">
-                    </div>
-                </div>
-
-                <!-- SMTP Settings -->
-                <div style="background: #f9fafb; padding: 16px; border-radius: 8px; margin-top: 16px;">
-                    <h4 style="margin: 0 0 12px 0; font-size: 14px; font-weight: 600; color: #374151;">SMTP Settings</h4>
-                    <div class="form">
-                        <div style="display: grid; grid-template-columns: 1fr 120px; gap: 12px; margin-bottom: 12px;">
-                            <div class="form-group" style="margin-bottom: 0;">
-                                <label class="form-label" for="smtp_host">Host</label>
-                                <input type="text" id="smtp_host" name="smtp_host" class="form-input" value="{{.Settings.SMTPHost}}" placeholder="smtp.example.com">
-                            </div>
-                            <div class="form-group" style="margin-bottom: 0;">
-                                <label class="form-label" for="smtp_port">Port</label>
-                                <input type="number" id="smtp_port" name="smtp_port" class="form-input" value="{{.Settings.SMTPPort}}" placeholder="587">
-                            </div>
-                        </div>
-                        <div class="form-group" style="margin-bottom: 12px;">
-                            <label class="form-label" for="smtp_username">Username</label>
-                            <input type="text" id="smtp_username" name="smtp_username" class="form-input" value="{{.Settings.SMTPUsername}}" placeholder="username">
-                        </div>
-                        <div class="form-group" style="margin-bottom: 12px;">
-                            <label class="form-label" for="smtp_password">Password</label>
-                            <input type="password" id="smtp_password" name="smtp_password" class="form-input" value="{{.Settings.SMTPPassword}}" placeholder="Enter password to change">
-                        </div>
-                        <div class="form-group" style="margin-bottom: 0;">
-                            <label class="form-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                                <input type="checkbox" name="smtp_use_tls" {{if .Settings.SMTPUseTLS}}checked{{end}} style="width: 18px; height: 18px;">
-                                Use TLS
-                            </label>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- SendGrid Settings -->
-                <div style="background: #f9fafb; padding: 16px; border-radius: 8px; margin-top: 12px;">
-                    <h4 style="margin: 0 0 12px 0; font-size: 14px; font-weight: 600; color: #374151;">SendGrid</h4>
-                    <div class="form">
-                        <div class="form-group" style="margin-bottom: 0;">
-                            <label class="form-label" for="sendgrid_api_key">API Key</label>
-                            <input type="password" id="sendgrid_api_key" name="sendgrid_api_key" class="form-input" value="{{.Settings.SendGridAPIKey}}" placeholder="SG.xxxx...">
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Payment Provider Settings -->
-            <div class="card-body" style="border-bottom: 1px solid #e5e7eb;">
-                <h3 class="card-title mb-4">Payment Providers</h3>
-                <p class="text-muted mb-4">Configure payment integration for paid plans. You only need to set up one provider.</p>
-
-                <!-- Stripe -->
-                <div style="background: #f9fafb; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
-                    <h4 style="margin: 0 0 12px 0; font-size: 14px; font-weight: 600; color: #374151;">
-                        <span style="display: inline-block; width: 20px; height: 20px; background: #635bff; color: white; border-radius: 4px; text-align: center; line-height: 20px; font-size: 12px; margin-right: 8px;">S</span>
-                        Stripe
-                    </h4>
-                    <div class="form">
-                        <div class="form-group" style="margin-bottom: 12px;">
-                            <label class="form-label" for="stripe_secret_key">Secret Key</label>
-                            <input type="password" id="stripe_secret_key" name="stripe_secret_key" class="form-input" value="{{.Settings.StripeSecretKey}}" placeholder="sk_live_... or sk_test_...">
-                            <p class="form-hint">Found in Stripe Dashboard → Developers → API Keys</p>
-                        </div>
-                        <div class="form-group" style="margin-bottom: 0;">
-                            <label class="form-label" for="stripe_webhook_secret">Webhook Secret</label>
-                            <input type="password" id="stripe_webhook_secret" name="stripe_webhook_secret" class="form-input" value="{{.Settings.StripeWebhookSecret}}" placeholder="whsec_...">
-                            <p class="form-hint">Create a webhook endpoint at <code>/webhooks/stripe</code></p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Paddle -->
-                <div style="background: #f9fafb; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
-                    <h4 style="margin: 0 0 12px 0; font-size: 14px; font-weight: 600; color: #374151;">
-                        <span style="display: inline-block; width: 20px; height: 20px; background: #2e6ed5; color: white; border-radius: 4px; text-align: center; line-height: 20px; font-size: 12px; margin-right: 8px;">P</span>
-                        Paddle
-                    </h4>
-                    <div class="form">
-                        <div class="form-group" style="margin-bottom: 12px;">
-                            <label class="form-label" for="paddle_vendor_id">Vendor ID</label>
-                            <input type="text" id="paddle_vendor_id" name="paddle_vendor_id" class="form-input" value="{{.Settings.PaddleVendorID}}" placeholder="123456">
-                        </div>
-                        <div class="form-group" style="margin-bottom: 12px;">
-                            <label class="form-label" for="paddle_api_key">API Key</label>
-                            <input type="password" id="paddle_api_key" name="paddle_api_key" class="form-input" value="{{.Settings.PaddleAPIKey}}" placeholder="Your Paddle API Key">
-                        </div>
-                        <div class="form-group" style="margin-bottom: 0;">
-                            <label class="form-label" for="paddle_webhook_secret">Webhook Secret</label>
-                            <input type="password" id="paddle_webhook_secret" name="paddle_webhook_secret" class="form-input" value="{{.Settings.PaddleWebhookSecret}}" placeholder="pdl_...">
-                            <p class="form-hint">Webhook endpoint: <code>/webhooks/paddle</code></p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- LemonSqueezy -->
-                <div style="background: #f9fafb; padding: 16px; border-radius: 8px;">
-                    <h4 style="margin: 0 0 12px 0; font-size: 14px; font-weight: 600; color: #374151;">
-                        <span style="display: inline-block; width: 20px; height: 20px; background: #ffc233; color: #1a1a1a; border-radius: 4px; text-align: center; line-height: 20px; font-size: 12px; margin-right: 8px;">L</span>
-                        LemonSqueezy
-                    </h4>
-                    <div class="form">
-                        <div class="form-group" style="margin-bottom: 12px;">
-                            <label class="form-label" for="lemon_api_key">API Key</label>
-                            <input type="password" id="lemon_api_key" name="lemon_api_key" class="form-input" value="{{.Settings.LemonAPIKey}}" placeholder="Your LemonSqueezy API Key">
-                        </div>
-                        <div class="form-group" style="margin-bottom: 0;">
-                            <label class="form-label" for="lemon_webhook_secret">Webhook Secret</label>
-                            <input type="password" id="lemon_webhook_secret" name="lemon_webhook_secret" class="form-input" value="{{.Settings.LemonWebhookSecret}}" placeholder="Your signing secret">
-                            <p class="form-hint">Webhook endpoint: <code>/webhooks/lemonsqueezy</code></p>
-                        </div>
                     </div>
                 </div>
             </div>

@@ -1,0 +1,211 @@
+{{define "content"}}
+<div class="page" style="max-width: 800px;">
+    <div class="page-header">
+        <h1 class="page-title">Email Provider</h1>
+    </div>
+
+    {{if .Success}}
+    <div class="alert alert-success mb-4">{{.Success}}</div>
+    {{end}}
+    {{if .Error}}
+    <div class="alert alert-error mb-4">{{.Error}}</div>
+    {{end}}
+
+    <div class="alert alert-info mb-4">
+        <strong>Required for:</strong> Email verification, password reset, and notification emails. Configure either SMTP or SendGrid.
+    </div>
+
+    <form action="/email" method="POST">
+        <!-- Provider Selection -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <h3 class="card-title mb-4">Provider Selection</h3>
+                <div class="form">
+                    <div class="form-group">
+                        <label class="form-label" for="email_provider">Email Provider</label>
+                        <select id="email_provider" name="email_provider" class="form-input" onchange="toggleProviderSettings()">
+                            <option value="none" {{if eq .EmailProvider "none"}}selected{{end}}>None (Disabled)</option>
+                            <option value="smtp" {{if eq .EmailProvider "smtp"}}selected{{end}}>SMTP Server</option>
+                            <option value="sendgrid" {{if eq .EmailProvider "sendgrid"}}selected{{end}}>SendGrid</option>
+                        </select>
+                        <p class="form-hint">Select how emails will be delivered</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sender Settings -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <h3 class="card-title mb-4">Sender Information</h3>
+                <div class="form">
+                    <div class="form-group">
+                        <label class="form-label" for="email_from_address">From Address</label>
+                        <input type="email" id="email_from_address" name="email_from_address" class="form-input" value="{{.EmailFromAddress}}" placeholder="noreply@example.com">
+                        <p class="form-hint">The email address that will appear in the "From" field</p>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="email_from_name">From Name</label>
+                        <input type="text" id="email_from_name" name="email_from_name" class="form-input" value="{{.EmailFromName}}" placeholder="{{.AppName}}">
+                        <p class="form-hint">The name that will appear alongside the email address</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SMTP Settings -->
+        <div class="card mb-4" id="smtp-settings">
+            <div class="card-body">
+                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                    <div style="width: 40px; height: 40px; background: #6366f1; border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="white"><path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>
+                    </div>
+                    <div>
+                        <h3 class="card-title" style="margin: 0;">SMTP Server</h3>
+                        <p class="text-muted" style="margin: 0; font-size: 13px;">Connect to any SMTP server (Gmail, AWS SES, Mailgun, etc.)</p>
+                    </div>
+                </div>
+
+                <div class="form">
+                    <div style="display: grid; grid-template-columns: 1fr 120px; gap: 12px;">
+                        <div class="form-group">
+                            <label class="form-label" for="smtp_host">Host</label>
+                            <input type="text" id="smtp_host" name="smtp_host" class="form-input" value="{{.SMTPHost}}" placeholder="smtp.example.com">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="smtp_port">Port</label>
+                            <input type="number" id="smtp_port" name="smtp_port" class="form-input" value="{{.SMTPPort}}" placeholder="587">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="smtp_username">Username</label>
+                        <input type="text" id="smtp_username" name="smtp_username" class="form-input" value="{{.SMTPUsername}}" placeholder="username or email">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="smtp_password">Password</label>
+                        <input type="password" id="smtp_password" name="smtp_password" class="form-input" value="{{.SMTPPassword}}" placeholder="Enter password to change">
+                        <p class="form-hint">Leave blank to keep existing password</p>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" name="smtp_use_tls" {{if .SMTPUseTLS}}checked{{end}} style="width: 18px; height: 18px;">
+                            Use TLS Encryption
+                        </label>
+                        <p class="form-hint">Recommended for port 587. Required for most email providers.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SendGrid Settings -->
+        <div class="card mb-4" id="sendgrid-settings">
+            <div class="card-body">
+                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                    <div style="width: 40px; height: 40px; background: #1a82e2; border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="white"><path d="M0 0h8v8H0zM8 8h8v8H8zM16 16h8v8h-8z"/></svg>
+                    </div>
+                    <div>
+                        <h3 class="card-title" style="margin: 0;">SendGrid</h3>
+                        <p class="text-muted" style="margin: 0; font-size: 13px;">Cloud email delivery with analytics</p>
+                    </div>
+                </div>
+
+                <div class="form">
+                    <div class="form-group">
+                        <label class="form-label" for="sendgrid_api_key">API Key</label>
+                        <input type="password" id="sendgrid_api_key" name="sendgrid_api_key" class="form-input" value="{{.SendGridAPIKey}}" placeholder="SG.xxxx...">
+                        <p class="form-hint">Create an API key at <a href="https://app.sendgrid.com/settings/api_keys" target="_blank">SendGrid Settings</a></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Test Email -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <h3 class="card-title mb-4">Test Configuration</h3>
+                <div class="form">
+                    <div class="form-group">
+                        <label class="form-label" for="test_email">Send Test Email To</label>
+                        <div class="input-group">
+                            <input type="email" id="test_email" name="test_email" class="form-input" placeholder="your@email.com">
+                            <button type="button" class="btn btn-secondary" onclick="sendTestEmail()">Send Test</button>
+                        </div>
+                        <p class="form-hint">Save settings first, then send a test email to verify configuration</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <button type="submit" class="btn btn-primary">Save Email Settings</button>
+            </div>
+        </div>
+    </form>
+</div>
+
+<script>
+function toggleProviderSettings() {
+    const provider = document.getElementById('email_provider').value;
+    document.getElementById('smtp-settings').style.display = provider === 'smtp' ? 'block' : 'none';
+    document.getElementById('sendgrid-settings').style.display = provider === 'sendgrid' ? 'block' : 'none';
+}
+
+function sendTestEmail() {
+    const testEmail = document.getElementById('test_email').value;
+    if (!testEmail) {
+        alert('Please enter an email address');
+        return;
+    }
+    // Submit form with test flag
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/email/test';
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'test_email';
+    input.value = testEmail;
+    form.appendChild(input);
+    document.body.appendChild(form);
+    form.submit();
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', toggleProviderSettings);
+</script>
+{{end}}
+
+{{define "panel-docs"}}
+<div class="panel-section">
+    <h3>Email Provider</h3>
+    <p>Configure email delivery for user notifications, password resets, and email verification.</p>
+</div>
+
+<div class="panel-section">
+    <h4>SMTP vs SendGrid</h4>
+    <ul class="panel-list">
+        <li><strong>SMTP</strong> - Works with any email provider (Gmail, AWS SES, Mailgun, custom server)</li>
+        <li><strong>SendGrid</strong> - Easy setup with built-in analytics and deliverability tracking</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>Common SMTP Settings</h4>
+    <table class="panel-table">
+        <tr><th>Provider</th><th>Host</th><th>Port</th></tr>
+        <tr><td>Gmail</td><td>smtp.gmail.com</td><td>587</td></tr>
+        <tr><td>AWS SES</td><td>email-smtp.region.amazonaws.com</td><td>587</td></tr>
+        <tr><td>Mailgun</td><td>smtp.mailgun.org</td><td>587</td></tr>
+    </table>
+</div>
+
+<div class="panel-section">
+    <h4>Troubleshooting</h4>
+    <ul class="panel-list">
+        <li>Use port 587 with TLS for most providers</li>
+        <li>For Gmail, enable "App passwords" or "Less secure apps"</li>
+        <li>Check spam folder for test emails</li>
+    </ul>
+</div>
+{{end}}

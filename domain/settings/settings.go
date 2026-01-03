@@ -121,6 +121,9 @@ const (
 	KeyUpstreamTimeout        = "upstream.timeout"
 	KeyUpstreamMaxIdleConns   = "upstream.max_idle_conns"
 	KeyUpstreamIdleConnTimeout = "upstream.idle_conn_timeout"
+
+	// Terminology settings (customize UI labels for different metering modes)
+	KeyMeteringUnit = "metering.unit" // requests, tokens, data_points, bytes
 )
 
 // SensitiveKeys returns keys that contain secrets and should be encrypted.
@@ -171,6 +174,7 @@ func Defaults() Settings {
 		KeyUpstreamTimeout:      "30s",
 		KeyUpstreamMaxIdleConns: "100",
 		KeyUpstreamIdleConnTimeout: "90s",
+		KeyMeteringUnit:         "requests",
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/artpar/apigate/adapters/auth"
 	domainAuth "github.com/artpar/apigate/domain/auth"
+	"github.com/artpar/apigate/domain/billing"
 	"github.com/artpar/apigate/domain/key"
 	"github.com/artpar/apigate/domain/settings"
 	"github.com/artpar/apigate/ports"
@@ -19,42 +20,46 @@ import (
 
 // PortalHandler provides the user portal endpoints.
 type PortalHandler struct {
-	tokens       *auth.TokenService
-	users        ports.UserStore
-	keys         ports.KeyStore
-	usage        ports.UsageStore
-	plans        ports.PlanStore
-	sessions     ports.SessionStore
-	authTokens   ports.TokenStore
-	emailSender  ports.EmailSender
-	settings     ports.SettingsStore
-	logger       zerolog.Logger
-	hasher       ports.Hasher
-	idGen        ports.IDGenerator
-	payment      ports.PaymentProvider
+	tokens        *auth.TokenService
+	users         ports.UserStore
+	keys          ports.KeyStore
+	usage         ports.UsageStore
+	plans         ports.PlanStore
+	sessions      ports.SessionStore
+	authTokens    ports.TokenStore
+	emailSender   ports.EmailSender
+	settings      ports.SettingsStore
+	subscriptions ports.SubscriptionStore
+	invoices      ports.InvoiceStore
+	logger        zerolog.Logger
+	hasher        ports.Hasher
+	idGen         ports.IDGenerator
+	payment       ports.PaymentProvider
 
 	// Portal-specific settings
-	baseURL      string
-	appName      string
+	baseURL string
+	appName string
 }
 
 // PortalDeps contains dependencies for the portal handler.
 type PortalDeps struct {
-	Users       ports.UserStore
-	Keys        ports.KeyStore
-	Usage       ports.UsageStore
-	Plans       ports.PlanStore
-	Sessions    ports.SessionStore
-	AuthTokens  ports.TokenStore
-	EmailSender ports.EmailSender
-	Settings    ports.SettingsStore
-	Logger      zerolog.Logger
-	Hasher      ports.Hasher
-	IDGen       ports.IDGenerator
-	Payment     ports.PaymentProvider
-	JWTSecret   string
-	BaseURL     string
-	AppName     string
+	Users         ports.UserStore
+	Keys          ports.KeyStore
+	Usage         ports.UsageStore
+	Plans         ports.PlanStore
+	Sessions      ports.SessionStore
+	AuthTokens    ports.TokenStore
+	EmailSender   ports.EmailSender
+	Settings      ports.SettingsStore
+	Subscriptions ports.SubscriptionStore
+	Invoices      ports.InvoiceStore
+	Logger        zerolog.Logger
+	Hasher        ports.Hasher
+	IDGen         ports.IDGenerator
+	Payment       ports.PaymentProvider
+	JWTSecret     string
+	BaseURL       string
+	AppName       string
 }
 
 // NewPortalHandler creates a new user portal handler.
@@ -65,27 +70,32 @@ func NewPortalHandler(deps PortalDeps) (*PortalHandler, error) {
 	}
 
 	return &PortalHandler{
-		tokens:      auth.NewTokenService(deps.JWTSecret, 7*24*time.Hour), // 7 day sessions
-		users:       deps.Users,
-		keys:        deps.Keys,
-		usage:       deps.Usage,
-		plans:       deps.Plans,
-		sessions:    deps.Sessions,
-		authTokens:  deps.AuthTokens,
-		emailSender: deps.EmailSender,
-		settings:    deps.Settings,
-		logger:      deps.Logger,
-		hasher:      deps.Hasher,
-		idGen:       deps.IDGen,
-		payment:     deps.Payment,
-		baseURL:     deps.BaseURL,
-		appName:     appName,
+		tokens:        auth.NewTokenService(deps.JWTSecret, 7*24*time.Hour), // 7 day sessions
+		users:         deps.Users,
+		keys:          deps.Keys,
+		usage:         deps.Usage,
+		plans:         deps.Plans,
+		sessions:      deps.Sessions,
+		authTokens:    deps.AuthTokens,
+		emailSender:   deps.EmailSender,
+		settings:      deps.Settings,
+		subscriptions: deps.Subscriptions,
+		invoices:      deps.Invoices,
+		logger:        deps.Logger,
+		hasher:        deps.Hasher,
+		idGen:         deps.IDGen,
+		payment:       deps.Payment,
+		baseURL:       deps.BaseURL,
+		appName:       appName,
 	}, nil
 }
 
 // Router returns the portal router.
 func (h *PortalHandler) Router() chi.Router {
 	r := chi.NewRouter()
+
+	// Landing page (public, redirects to dashboard if logged in)
+	r.Get("/", h.LandingPage)
 
 	// Public routes (no auth required)
 	r.Get("/signup", h.SignupPage)
@@ -104,7 +114,6 @@ func (h *PortalHandler) Router() chi.Router {
 		r.Use(h.PortalAuthMiddleware)
 
 		// Dashboard
-		r.Get("/", h.PortalDashboard)
 		r.Get("/dashboard", h.PortalDashboard)
 
 		// API Keys
@@ -115,6 +124,9 @@ func (h *PortalHandler) Router() chi.Router {
 		// Usage
 		r.Get("/usage", h.PortalUsagePage)
 
+		// Billing
+		r.Get("/billing", h.BillingPage)
+
 		// Plans (upgrade/downgrade)
 		r.Get("/plans", h.PlansPage)
 		r.Post("/plans/change", h.ChangePlan)
@@ -123,6 +135,7 @@ func (h *PortalHandler) Router() chi.Router {
 		r.Get("/subscription/checkout-success", h.CheckoutSuccess)
 		r.Get("/subscription/checkout-cancel", h.CheckoutCancel)
 		r.Get("/subscription/manage", h.ManageSubscription)
+		r.Get("/subscription/cancel", h.CancelSubscriptionPage)
 		r.Post("/subscription/cancel", h.CancelSubscription)
 
 		// Account settings
@@ -230,6 +243,33 @@ func (h *PortalHandler) clearPortalCookie(w http.ResponseWriter) {
 		Secure:   true,
 		MaxAge:   -1,
 	})
+}
+
+// -----------------------------------------------------------------------------
+// Landing Page
+// -----------------------------------------------------------------------------
+
+// LandingPage shows a public landing page or redirects to dashboard if logged in
+func (h *PortalHandler) LandingPage(w http.ResponseWriter, r *http.Request) {
+	// Check if user is logged in via JWT cookie
+	cookie, err := r.Cookie("portal_token")
+	if err == nil && cookie.Value != "" {
+		// Validate JWT token
+		claims, err := h.tokens.ValidateToken(cookie.Value)
+		if err == nil {
+			// Verify user still exists and is active
+			user, err := h.users.Get(r.Context(), claims.UserID)
+			if err == nil && user.Status == "active" {
+				// User is logged in, redirect to dashboard
+				http.Redirect(w, r, "/portal/dashboard", http.StatusFound)
+				return
+			}
+		}
+	}
+
+	// Show landing page
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(h.renderLandingPage()))
 }
 
 // -----------------------------------------------------------------------------
@@ -368,8 +408,20 @@ func (h *PortalHandler) SignupSubmit(w http.ResponseWriter, r *http.Request) {
 		// Redirect to login with verification message, pre-fill email
 		http.Redirect(w, r, "/portal/login?signup=success&email="+url.QueryEscape(req.Email), http.StatusFound)
 	} else {
-		// Redirect to login with ready-to-login message, pre-fill email
-		http.Redirect(w, r, "/portal/login?signup=ready&email="+url.QueryEscape(req.Email), http.StatusFound)
+		// Auto-login: generate JWT and set cookie, then redirect to dashboard
+		token, _, err := h.tokens.GenerateToken(userID, req.Email, "user")
+		if err != nil {
+			h.logger.Error().Err(err).Msg("failed to generate token after signup")
+			// Fall back to login redirect
+			http.Redirect(w, r, "/portal/login?signup=ready&email="+url.QueryEscape(req.Email), http.StatusFound)
+			return
+		}
+
+		h.setPortalCookie(w, token)
+		h.logger.Info().Str("user_id", userID).Str("email", req.Email).Msg("user signed up and auto-logged in")
+
+		// Redirect to dashboard
+		http.Redirect(w, r, "/portal/dashboard", http.StatusFound)
 	}
 }
 
@@ -1060,6 +1112,77 @@ func (h *PortalHandler) CloseAccount(w http.ResponseWriter, r *http.Request) {
 }
 
 // -----------------------------------------------------------------------------
+// Billing
+// -----------------------------------------------------------------------------
+
+func (h *PortalHandler) BillingPage(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := getPortalUser(ctx)
+
+	// Get user's subscription
+	var subscription *billing.Subscription
+	var currentPlan *ports.Plan
+	if h.subscriptions != nil {
+		sub, err := h.subscriptions.GetByUser(ctx, user.ID)
+		if err == nil {
+			subscription = &sub
+			// Get the plan for this subscription
+			if h.plans != nil {
+				plan, err := h.plans.Get(ctx, sub.PlanID)
+				if err == nil {
+					currentPlan = &plan
+				}
+			}
+		}
+	}
+
+	// If no subscription found, get user's plan directly
+	if currentPlan == nil && h.plans != nil {
+		dbUser, err := h.users.Get(ctx, user.ID)
+		if err == nil && dbUser.PlanID != "" {
+			plan, err := h.plans.Get(ctx, dbUser.PlanID)
+			if err == nil {
+				currentPlan = &plan
+			}
+		}
+	}
+
+	// Get user's invoices
+	var invoices []billing.Invoice
+	if h.invoices != nil {
+		inv, err := h.invoices.ListByUser(ctx, user.ID, 10)
+		if err == nil {
+			invoices = inv
+		}
+	}
+
+	// Check for confirmation messages
+	var successMsg, errorMsg string
+	cancelled := r.URL.Query().Get("cancelled")
+	if cancelled == "now" {
+		successMsg = "Your subscription has been cancelled. You've been downgraded to the free plan."
+	} else if cancelled == "end_of_period" {
+		successMsg = "Your subscription has been set to cancel at the end of the current billing period."
+	}
+
+	if errType := r.URL.Query().Get("error"); errType != "" {
+		switch errType {
+		case "payment":
+			errorMsg = "There was an error processing your request with the payment provider."
+		case "internal":
+			errorMsg = "An internal error occurred. Please try again."
+		case "no_subscription":
+			errorMsg = "No active subscription found."
+		default:
+			errorMsg = "An error occurred. Please try again."
+		}
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(h.renderBillingPage(user, subscription, currentPlan, invoices, successMsg, errorMsg)))
+}
+
+// -----------------------------------------------------------------------------
 // Plans (Upgrade/Downgrade)
 // -----------------------------------------------------------------------------
 
@@ -1321,54 +1444,105 @@ func (h *PortalHandler) ManageSubscription(w http.ResponseWriter, r *http.Reques
 	http.Redirect(w, r, portalURL, http.StatusFound)
 }
 
+// CancelSubscriptionPage shows the cancel confirmation page
+func (h *PortalHandler) CancelSubscriptionPage(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := getPortalUser(ctx)
+
+	// Get user's subscription
+	subscription, err := h.subscriptions.GetByUser(ctx, user.ID)
+	if err != nil {
+		// No active subscription - redirect to plans
+		http.Redirect(w, r, "/portal/plans", http.StatusFound)
+		return
+	}
+
+	// Get current plan
+	plan, err := h.plans.Get(ctx, subscription.PlanID)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to get plan for cancel page")
+		http.Redirect(w, r, "/portal/billing?error=internal", http.StatusFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(h.renderCancelSubscriptionPage(user, &subscription, &plan)))
+}
+
 // CancelSubscription handles subscription cancellation
 func (h *PortalHandler) CancelSubscription(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := getPortalUser(ctx)
 
-	// For now, redirect to Stripe Customer Portal for cancellation
-	// The portal provides a better UX for handling cancellation reasons, prorations, etc.
-	if h.payment == nil {
-		http.Redirect(w, r, "/portal/plans?error=payment", http.StatusFound)
+	// Check if subscription store is configured
+	if h.subscriptions == nil {
+		http.Redirect(w, r, "/portal/billing?error=not_configured", http.StatusFound)
 		return
 	}
 
+	// Parse form for cancel mode
+	if err := r.ParseForm(); err != nil {
+		http.Redirect(w, r, "/portal/billing?error=invalid", http.StatusFound)
+		return
+	}
+	cancelImmediately := r.FormValue("cancel_mode") == "immediately"
+
+	// Get user's subscription
+	subscription, err := h.subscriptions.GetByUser(ctx, user.ID)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to get subscription for cancellation")
+		http.Redirect(w, r, "/portal/billing?error=no_subscription", http.StatusFound)
+		return
+	}
+
+	// Get user for Stripe info
 	dbUser, err := h.users.Get(ctx, user.ID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("failed to get user for cancellation")
-		http.Redirect(w, r, "/portal/plans?error=internal", http.StatusFound)
+		http.Redirect(w, r, "/portal/billing?error=internal", http.StatusFound)
 		return
 	}
 
-	if dbUser.StripeID == "" {
-		// No Stripe subscription - just set to free plan
-		dbUser.PlanID = "free"
-		dbUser.UpdatedAt = time.Now().UTC()
-		if err := h.users.Update(ctx, dbUser); err != nil {
-			h.logger.Error().Err(err).Msg("failed to downgrade to free plan")
-			http.Redirect(w, r, "/portal/plans?error=internal", http.StatusFound)
+	now := time.Now().UTC()
+
+	// If there's a payment provider and subscription has provider ID, cancel via provider
+	if h.payment != nil && subscription.ProviderID != "" {
+		if err := h.payment.CancelSubscription(ctx, subscription.ProviderID, cancelImmediately); err != nil {
+			h.logger.Error().Err(err).Msg("failed to cancel subscription via payment provider")
+			http.Redirect(w, r, "/portal/billing?error=payment", http.StatusFound)
 			return
 		}
-		http.Redirect(w, r, "/portal/plans?changed=true", http.StatusFound)
-		return
 	}
 
-	// Build return URL
-	scheme := "http"
-	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
-		scheme = "https"
-	}
-	returnURL := scheme + "://" + r.Host + "/portal/plans"
-
-	// Redirect to Stripe Customer Portal for cancellation
-	portalURL, err := h.payment.CreatePortalSession(ctx, dbUser.StripeID, returnURL)
-	if err != nil {
-		h.logger.Error().Err(err).Msg("failed to create portal session for cancellation")
-		http.Redirect(w, r, "/portal/plans?error=payment", http.StatusFound)
-		return
+	// Update local subscription record
+	if cancelImmediately {
+		subscription.Status = billing.SubscriptionStatusCancelled
+		subscription.CancelledAt = &now
+	} else {
+		subscription.CancelAtPeriodEnd = true
+		subscription.CancelledAt = &now
 	}
 
-	http.Redirect(w, r, portalURL, http.StatusFound)
+	if err := h.subscriptions.Update(ctx, subscription); err != nil {
+		h.logger.Error().Err(err).Msg("failed to update subscription status")
+		// Don't fail - provider cancellation already happened
+	}
+
+	// If cancelled immediately, downgrade user to free plan
+	if cancelImmediately {
+		dbUser.PlanID = "free"
+		dbUser.UpdatedAt = now
+		if err := h.users.Update(ctx, dbUser); err != nil {
+			h.logger.Error().Err(err).Msg("failed to downgrade user to free plan")
+		}
+	}
+
+	// Redirect to billing with confirmation
+	if cancelImmediately {
+		http.Redirect(w, r, "/portal/billing?cancelled=now", http.StatusFound)
+	} else {
+		http.Redirect(w, r, "/portal/billing?cancelled=end_of_period", http.StatusFound)
+	}
 }
 
 // -----------------------------------------------------------------------------

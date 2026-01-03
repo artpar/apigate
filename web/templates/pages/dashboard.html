@@ -119,7 +119,7 @@
 
     <!-- Stats -->
     <div class="grid grid-4 mb-4" hx-get="/partials/stats" hx-trigger="load, every 30s" hx-swap="innerHTML">
-        {{template "stats" .Stats}}
+        {{template "stats" .}}
     </div>
 
     <!-- Recent Data -->
@@ -164,7 +164,7 @@
             Total Users
             <span class="info-tooltip" data-tip="The total number of registered users who can access your API. Each user can have multiple API keys.">i</span>
         </div>
-        <div class="stat-value">{{.TotalUsers}}</div>
+        <div class="stat-value">{{.Stats.TotalUsers}}</div>
     </div>
 </div>
 <div class="card">
@@ -173,16 +173,16 @@
             Active API Keys
             <span class="info-tooltip" data-tip="API keys that are currently active and can make requests. Revoked keys are not counted here.">i</span>
         </div>
-        <div class="stat-value">{{.ActiveKeys}}</div>
+        <div class="stat-value">{{.Stats.ActiveKeys}}</div>
     </div>
 </div>
 <div class="card">
     <div class="stat">
         <div class="stat-label">
-            Requests Today
-            <span class="info-tooltip" data-tip="Total API requests processed through your gateway since midnight (local time). Updates every 30 seconds.">i</span>
+            {{.Labels.UsageUnitPlural}} Today
+            <span class="info-tooltip" data-tip="Total API {{.Labels.UsageUnitPlural}} processed through your gateway since midnight (local time). Updates every 30 seconds.">i</span>
         </div>
-        <div class="stat-value">{{.RequestsToday}}</div>
+        <div class="stat-value">{{.Stats.RequestsToday}}</div>
     </div>
 </div>
 <div class="card">
@@ -191,7 +191,7 @@
             Monthly Revenue
             <span class="info-tooltip" data-tip="Monthly Recurring Revenue (MRR) based on active users and their plan prices.">i</span>
         </div>
-        <div class="stat-value">${{printf "%.2f" .MRR}}</div>
+        <div class="stat-value">${{printf "%.2f" .Stats.MRR}}</div>
     </div>
 </div>
 {{end}}

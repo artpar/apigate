@@ -134,7 +134,8 @@ func (h *DocsHandler) getBaseURL(r *http.Request) string {
 func (h *DocsHandler) generateOpenAPISpec(r *http.Request) *openapi.Spec {
 	baseURL := h.getBaseURL(r)
 	if h.openAPIService != nil {
-		return h.openAPIService.GetUnifiedSpec(r.Context(), baseURL)
+		// Use customer-only spec for public documentation (excludes admin endpoints)
+		return h.openAPIService.GetCustomerSpec(r.Context(), baseURL)
 	}
 	// Fallback to empty spec if service not configured
 	return &openapi.Spec{
