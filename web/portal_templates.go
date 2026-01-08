@@ -7,6 +7,7 @@ import (
 
 	"github.com/artpar/apigate/core/terminology"
 	"github.com/artpar/apigate/domain/billing"
+	"github.com/artpar/apigate/domain/entitlement"
 	"github.com/artpar/apigate/domain/key"
 	"github.com/artpar/apigate/domain/usage"
 	"github.com/artpar/apigate/ports"
@@ -23,84 +24,81 @@ func (h *PortalHandler) renderLandingPage() string {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>%s - API Gateway</title>
+    <title>%s</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%); min-height: 100vh; color: #333; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #fff; min-height: 100vh; color: #111; }
 
-        .header { padding: 20px 40px; display: flex; justify-content: space-between; align-items: center; }
-        .logo { color: white; font-size: 24px; font-weight: 700; text-decoration: none; }
-        .header-actions { display: flex; gap: 12px; }
-        .header-actions a { padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: 500; transition: all 0.2s; }
-        .btn-login { color: white; border: 1px solid rgba(255,255,255,0.3); }
-        .btn-login:hover { background: rgba(255,255,255,0.1); }
-        .btn-signup { background: white; color: #667eea; }
-        .btn-signup:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+        .header { padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e5e5e5; }
+        .logo { color: #111; font-size: 18px; font-weight: 600; text-decoration: none; letter-spacing: -0.02em; }
+        .header-actions { display: flex; gap: 8px; }
+        .header-actions a { padding: 8px 16px; border-radius: 4px; text-decoration: none; font-size: 14px; }
+        .btn-login { color: #666; }
+        .btn-login:hover { color: #111; }
+        .btn-signup { background: #111; color: #fff; }
+        .btn-signup:hover { background: #333; }
 
-        .hero { max-width: 800px; margin: 80px auto; text-align: center; padding: 0 20px; }
-        .hero h1 { color: white; font-size: 48px; margin-bottom: 24px; line-height: 1.2; }
-        .hero p { color: rgba(255,255,255,0.9); font-size: 20px; margin-bottom: 40px; line-height: 1.6; }
-        .hero-actions { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
-        .hero-actions a { padding: 16px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 18px; transition: all 0.2s; }
-        .btn-primary { background: white; color: #667eea; }
-        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.2); }
-        .btn-secondary { color: white; border: 2px solid white; }
-        .btn-secondary:hover { background: rgba(255,255,255,0.1); }
+        .hero { max-width: 640px; margin: 120px auto 80px; text-align: center; padding: 0 24px; }
+        .hero h1 { font-size: 40px; font-weight: 600; margin-bottom: 16px; line-height: 1.1; letter-spacing: -0.03em; }
+        .hero p { color: #666; font-size: 18px; margin-bottom: 32px; line-height: 1.5; }
+        .hero-actions { display: flex; gap: 12px; justify-content: center; }
+        .hero-actions a { padding: 12px 24px; border-radius: 4px; text-decoration: none; font-size: 15px; }
+        .btn-primary { background: #111; color: #fff; }
+        .btn-primary:hover { background: #333; }
+        .btn-secondary { color: #111; border: 1px solid #ddd; }
+        .btn-secondary:hover { border-color: #111; }
 
-        .features { max-width: 1000px; margin: 80px auto; padding: 0 20px; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; }
-        .feature { background: white; padding: 32px; border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,0.1); }
-        .feature-icon { width: 48px; height: 48px; background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%); border-radius: 10px; margin-bottom: 20px; display: flex; align-items: center; justify-content: center; }
-        .feature-icon svg { width: 24px; height: 24px; color: white; }
-        .feature h3 { font-size: 18px; margin-bottom: 12px; color: #111827; }
-        .feature p { color: #6b7280; line-height: 1.6; }
+        .features { max-width: 800px; margin: 0 auto 80px; padding: 0 24px; }
+        .features-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px; }
+        .feature { text-align: center; }
+        .feature h3 { font-size: 15px; font-weight: 500; margin-bottom: 8px; color: #111; }
+        .feature p { color: #666; font-size: 14px; line-height: 1.5; }
 
-        .footer { text-align: center; padding: 40px 20px; color: rgba(255,255,255,0.7); font-size: 14px; }
+        .footer { text-align: center; padding: 32px 24px; color: #999; font-size: 13px; border-top: 1px solid #e5e5e5; }
+
+        @media (max-width: 640px) {
+            .hero h1 { font-size: 28px; }
+            .features-grid { grid-template-columns: 1fr; gap: 24px; }
+        }
     </style>
 </head>
 <body>
     <header class="header">
         <a href="/portal" class="logo">%s</a>
         <div class="header-actions">
-            <a href="/portal/login" class="btn-login">Log In</a>
-            <a href="/portal/signup" class="btn-signup">Sign Up Free</a>
+            <a href="/portal/login" class="btn-login">Log in</a>
+            <a href="/portal/signup" class="btn-signup">Get started</a>
         </div>
     </header>
 
     <section class="hero">
-        <h1>Your API, Managed Simply</h1>
-        <p>Get started with our API platform in minutes. Create API keys, monitor usage, and manage your subscription all in one place.</p>
+        <h1>Build with our API</h1>
+        <p>Simple, reliable API access. Get your API key and start building in minutes.</p>
         <div class="hero-actions">
-            <a href="/portal/signup" class="btn-primary">Get Started Free</a>
-            <a href="/docs" class="btn-secondary">View API Docs</a>
+            <a href="/portal/signup" class="btn-primary">Get API key</a>
+            <a href="/docs" class="btn-secondary">Documentation</a>
         </div>
     </section>
 
     <section class="features">
-        <div class="feature">
-            <div class="feature-icon">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
+        <div class="features-grid">
+            <div class="feature">
+                <h3>Quick setup</h3>
+                <p>Create an account, get your API key, and make your first request in under a minute.</p>
             </div>
-            <h3>Easy API Key Management</h3>
-            <p>Create and manage API keys with just a few clicks. Revoke access instantly when needed.</p>
-        </div>
-        <div class="feature">
-            <div class="feature-icon">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+            <div class="feature">
+                <h3>Usage tracking</h3>
+                <p>Monitor your API calls and data usage from your dashboard.</p>
             </div>
-            <h3>Usage Analytics</h3>
-            <p>Track your API usage in real-time. Monitor requests, understand patterns, and optimize your integration.</p>
-        </div>
-        <div class="feature">
-            <div class="feature-icon">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/></svg>
+            <div class="feature">
+                <h3>Flexible plans</h3>
+                <p>Start free, upgrade when you need more. Pay only for what you use.</p>
             </div>
-            <h3>Flexible Billing</h3>
-            <p>Choose a plan that fits your needs. Upgrade anytime, manage your subscription, and view invoices.</p>
         </div>
     </section>
 
     <footer class="footer">
-        <p>&copy; 2024 %s. All rights reserved.</p>
+        <p>%s</p>
     </footer>
 </body>
 </html>`, h.appName, h.appName, h.appName)
@@ -195,6 +193,18 @@ func (h *PortalHandler) renderSignupPageWithPlan(name, email string, defaultPlan
             </div>
         </div>
     </div>
+    <script>
+    (function() {
+        var alert = document.querySelector('.alert-error');
+        if (alert) {
+            document.querySelectorAll('input').forEach(function(input) {
+                input.addEventListener('input', function() {
+                    alert.style.display = 'none';
+                });
+            });
+        }
+    })();
+    </script>
 </body>
 </html>`, h.appName, portalCSS, h.appName, planInfoHTML, errorHTML, name, email)
 }
@@ -246,6 +256,18 @@ func (h *PortalHandler) renderLoginPage(email, message, messageType string, erro
             </div>
         </div>
     </div>
+    <script>
+    (function() {
+        var alert = document.querySelector('.alert-error');
+        if (alert) {
+            document.querySelectorAll('input').forEach(function(input) {
+                input.addEventListener('input', function() {
+                    alert.style.display = 'none';
+                });
+            });
+        }
+    })();
+    </script>
 </body>
 </html>`, h.appName, portalCSS, h.appName, alertHTML, email)
 }
@@ -335,33 +357,64 @@ func (h *PortalHandler) renderResetPasswordPage(token string, errors map[string]
 </html>`, h.appName, portalCSS, h.appName, errorHTML, token)
 }
 
-func (h *PortalHandler) renderDashboardPage(user *PortalUser, keyCount int, requestCount int64, planName string, requestsPerMonth int64, rateLimitPerMinute int, labels terminology.Labels) string {
+func (h *PortalHandler) renderDashboardPage(user *PortalUser, keyCount int, requestCount int64, planName string, requestsPerMonth int64, rateLimitPerMinute int, userEntitlements []entitlement.UserEntitlement, labels terminology.Labels) string {
 	// Show getting started section for new users with no API keys
 	gettingStartedSection := ""
 	if keyCount == 0 {
 		gettingStartedSection = `
-        <div class="card" style="margin-bottom: 24px; padding: 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 12px;">
-            <h2 style="margin: 0 0 12px 0; font-size: 20px;">Welcome! Let's get you started</h2>
-            <p style="margin: 0 0 16px 0; opacity: 0.9;">Follow these simple steps to start using the API:</p>
-            <div style="display: flex; flex-direction: column; gap: 12px;">
-                <div style="display: flex; align-items: center; gap: 12px;">
-                    <span style="background: rgba(255,255,255,0.2); width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold;">1</span>
-                    <span><strong>Create an API Key</strong> - Click the button below to generate your first key</span>
+        <div class="card" style="margin-bottom: 24px;">
+            <h2 style="margin: 0 0 16px 0; font-size: 16px; font-weight: 500;">Get started</h2>
+            <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px;">
+                <div style="display: flex; align-items: baseline; gap: 12px;">
+                    <span style="color: #666; font-size: 14px; min-width: 16px;">1.</span>
+                    <span style="font-size: 14px;"><strong>Create an API key</strong> to authenticate your requests</span>
                 </div>
-                <div style="display: flex; align-items: center; gap: 12px;">
-                    <span style="background: rgba(255,255,255,0.2); width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold;">2</span>
-                    <span><strong>Read the Docs</strong> - Learn how to authenticate and make API calls</span>
+                <div style="display: flex; align-items: baseline; gap: 12px;">
+                    <span style="color: #666; font-size: 14px; min-width: 16px;">2.</span>
+                    <span style="font-size: 14px;"><strong>Read the documentation</strong> to learn the API</span>
                 </div>
-                <div style="display: flex; align-items: center; gap: 12px;">
-                    <span style="background: rgba(255,255,255,0.2); width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold;">3</span>
-                    <span><strong>Make your first request</strong> - Use your key to call the API</span>
+                <div style="display: flex; align-items: baseline; gap: 12px;">
+                    <span style="color: #666; font-size: 14px; min-width: 16px;">3.</span>
+                    <span style="font-size: 14px;"><strong>Make your first request</strong></span>
                 </div>
             </div>
-            <div style="margin-top: 20px; display: flex; gap: 12px;">
-                <a href="/portal/api-keys" style="background: white; color: #667eea; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: 600;">Create API Key</a>
-                <a href="/docs" target="_blank" style="background: rgba(255,255,255,0.2); color: white; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: 600;">View Documentation</a>
+            <div style="display: flex; gap: 8px;">
+                <a href="/portal/api-keys" class="btn btn-primary">Create API key</a>
+                <a href="/docs" target="_blank" class="btn btn-secondary">Documentation</a>
             </div>
         </div>`
+	}
+
+	// Build entitlements section
+	entitlementsSection := ""
+	if len(userEntitlements) > 0 {
+		entitlementItems := ""
+		for _, ue := range userEntitlements {
+			displayName := ue.DisplayName
+			if displayName == "" {
+				displayName = ue.Name
+			}
+			valueDisplay := ue.Value
+			if ue.ValueType == "boolean" {
+				if ue.Value == "true" {
+					valueDisplay = `<span style="color: #15803d;">Enabled</span>`
+				} else {
+					valueDisplay = `<span style="color: #b91c1c;">Disabled</span>`
+				}
+			}
+			entitlementItems += fmt.Sprintf(`
+				<div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f0f0f0;">
+					<span style="color: #333;">%s</span>
+					<span style="font-weight: 500;">%s</span>
+				</div>`, displayName, valueDisplay)
+		}
+		entitlementsSection = fmt.Sprintf(`
+        <div class="card" style="margin-bottom: 16px;">
+            <h2 style="margin: 0 0 16px 0; font-size: 16px; font-weight: 500;">Your Features</h2>
+            <div style="font-size: 14px;">
+                %s
+            </div>
+        </div>`, entitlementItems)
 	}
 
 	// Calculate quota usage
@@ -371,42 +424,39 @@ func (h *PortalHandler) renderDashboardPage(user *PortalUser, keyCount int, requ
 		if usagePercent > 100 {
 			usagePercent = 100
 		}
-		progressColor := "#22c55e" // green
-		if usagePercent > 80 {
-			progressColor = "#f59e0b" // amber
-		}
-		if usagePercent > 95 {
-			progressColor = "#ef4444" // red
+		progressColor := "#111"
+		if usagePercent > 90 {
+			progressColor = "#b91c1c"
 		}
 		quotaSection = fmt.Sprintf(`
-        <div class="card" style="margin-bottom: 24px; padding: 20px;">
+        <div class="card" style="margin-bottom: 16px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                <div>
-                    <strong>Monthly Quota</strong>
-                    <span style="color: #666; font-size: 14px;"> - %s Plan</span>
+                <div style="font-size: 14px;">
+                    <strong>%s</strong>
+                    <span style="color: #666;"> · %d / %d %s</span>
                 </div>
-                <div style="font-size: 14px; color: #666;">
-                    %d / %d %s (%.1f%%)
+                <div style="font-size: 13px; color: #666;">
+                    %.0f%% used
                 </div>
             </div>
-            <div style="background: #e5e7eb; border-radius: 4px; height: 8px; overflow: hidden;">
-                <div style="background: %s; height: 100%%; width: %.1f%%; transition: width 0.3s;"></div>
+            <div style="background: #e5e5e5; border-radius: 2px; height: 4px; overflow: hidden;">
+                <div style="background: %s; height: 100%%; width: %.1f%%;"></div>
             </div>
-            <div style="display: flex; justify-content: space-between; margin-top: 12px; font-size: 13px; color: #666;">
-                <span>Rate limit: %d %s</span>
-                <span>%d %s remaining</span>
+            <div style="display: flex; justify-content: space-between; margin-top: 8px; font-size: 13px; color: #666;">
+                <span>%d %s rate limit</span>
+                <span>%d remaining</span>
             </div>
-        </div>`, planName, requestCount, requestsPerMonth, labels.UsageUnitPlural, usagePercent, progressColor, usagePercent, rateLimitPerMinute, labels.RateLimitLabel, requestsPerMonth-requestCount, labels.UsageUnitPlural)
+        </div>`, planName, requestCount, requestsPerMonth, labels.UsageUnitPlural, usagePercent, progressColor, usagePercent, rateLimitPerMinute, labels.RateLimitLabel, requestsPerMonth-requestCount)
 	} else if planName != "" {
 		quotaSection = fmt.Sprintf(`
-        <div class="card" style="margin-bottom: 24px; padding: 20px;">
+        <div class="card" style="margin-bottom: 16px;">
             <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                    <strong>%s Plan</strong>
-                    <span style="color: #22c55e; font-size: 14px;"> - Unlimited %s</span>
+                <div style="font-size: 14px;">
+                    <strong>%s</strong>
+                    <span style="color: #666;"> · Unlimited %s</span>
                 </div>
-                <div style="font-size: 14px; color: #666;">
-                    Rate limit: %d %s
+                <div style="font-size: 13px; color: #666;">
+                    %d %s rate limit
                 </div>
             </div>
         </div>`, planName, labels.UsageUnitPlural, rateLimitPerMinute, labels.RateLimitLabel)
@@ -440,6 +490,7 @@ func (h *PortalHandler) renderDashboardPage(user *PortalUser, keyCount int, requ
                 <div class="stat-label">%s This Month</div>
             </div>
         </div>
+        %s
         <div class="quick-links">
             <h2>Quick Actions</h2>
             <div class="link-grid">
@@ -463,7 +514,7 @@ func (h *PortalHandler) renderDashboardPage(user *PortalUser, keyCount int, requ
         </div>
     </main>
 </body>
-</html>`, h.appName, portalCSS, h.renderPortalNav(user), user.Name, quotaSection, gettingStartedSection, keyCount, requestCount, labels.QuotaLabel)
+</html>`, h.appName, portalCSS, h.renderPortalNav(user), user.Name, quotaSection, gettingStartedSection, keyCount, requestCount, labels.QuotaLabel, entitlementsSection)
 }
 
 func (h *PortalHandler) renderAPIKeysPage(user *PortalUser, keys []key.Key, revokedMsg bool) string {
@@ -477,7 +528,7 @@ func (h *PortalHandler) renderAPIKeysPage(user *PortalUser, keys []key.Key, revo
 			statusClass = "status-revoked"
 			revokeBtn = "-" // Already revoked
 		} else {
-			revokeBtn = fmt.Sprintf(`<form method="POST" action="/portal/api-keys/%s/revoke" style="display:inline" onsubmit="return confirm('Are you sure you want to revoke this API key? This cannot be undone.')"><button type="submit" class="btn btn-sm btn-danger">Revoke</button></form>`, k.ID)
+			revokeBtn = fmt.Sprintf(`<form method="POST" action="/portal/api-keys/%s/revoke" style="display:inline" onsubmit="showConfirmModal(this, 'Are you sure you want to revoke this API key? This cannot be undone.', 'Revoke API Key'); return false;"><button type="submit" class="btn btn-sm btn-danger">Revoke</button></form>`, k.ID)
 		}
 		keyRows += fmt.Sprintf(`
             <tr>
@@ -554,8 +605,9 @@ func (h *PortalHandler) renderAPIKeysPage(user *PortalUser, keys []key.Key, revo
             </form>
         </div>
     </div>
+    %s
 </body>
-</html>`, h.appName, portalCSS, h.renderPortalNav(user), successMsg, keyRows)
+</html>`, h.appName, portalCSS, h.renderPortalNav(user), successMsg, keyRows, portalConfirmJS)
 }
 
 func (h *PortalHandler) renderKeyCreatedPage(w http.ResponseWriter, r *http.Request, user *PortalUser, rawKey, keyName string) {
@@ -731,7 +783,7 @@ func (h *PortalHandler) renderAccountSettingsPage(user *PortalUser, errors map[s
         <div class="card card-danger">
             <h2>Danger Zone</h2>
             <p>Closing your account will revoke all API keys and delete your data.</p>
-            <form method="POST" action="/portal/settings/close-account" onsubmit="return confirm('Are you sure? This cannot be undone.')">
+            <form method="POST" action="/portal/settings/close-account" onsubmit="showConfirmModal(this, 'Are you sure you want to close your account? This will revoke all API keys and delete your data. This cannot be undone.', 'Close Account'); return false;">
                 <div class="form-group">
                     <label for="password">Confirm with your password</label>
                     <input type="password" id="password" name="password" required>
@@ -740,8 +792,9 @@ func (h *PortalHandler) renderAccountSettingsPage(user *PortalUser, errors map[s
             </form>
         </div>
     </main>
+    %s
 </body>
-</html>`, h.appName, portalCSS, h.renderPortalNav(user), successHTML, errorHTML, user.Name, user.Email)
+</html>`, h.appName, portalCSS, h.renderPortalNav(user), successHTML, errorHTML, user.Name, user.Email, portalConfirmJS)
 }
 
 func (h *PortalHandler) renderErrorPage(message string) string {
@@ -781,6 +834,7 @@ func (h *PortalHandler) renderPortalNav(user *PortalUser) string {
             <a href="/portal/api-keys">API Keys</a>
             <a href="/portal/usage">Usage</a>
             <a href="/portal/plans">Plans</a>
+            <a href="/portal/webhooks">Webhooks</a>
             <a href="/docs" target="_blank">Docs</a>
             <a href="/portal/settings">Settings</a>
         </div>
@@ -842,13 +896,13 @@ func (h *PortalHandler) renderPlansPage(user *PortalUser, plans []ports.Plan, cu
 		// Current plan badge
 		currentBadge := ""
 		if isCurrent {
-			currentBadge = `<span style="display: inline-block; background: #22c55e; color: white; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; margin-left: 8px;">Current Plan</span>`
+			currentBadge = `<span style="display: inline-block; background: #111; color: white; padding: 3px 8px; border-radius: 3px; font-size: 11px; font-weight: 500; margin-left: 8px;">Current</span>`
 		}
 
 		// Trial badge
 		trialBadge := ""
 		if p.TrialDays > 0 {
-			trialBadge = fmt.Sprintf(`<div style="color: #7c3aed; font-size: 13px; font-weight: 500; margin-top: 4px;">%d-day free trial</div>`, p.TrialDays)
+			trialBadge = fmt.Sprintf(`<div style="color: #666; font-size: 13px; margin-top: 4px;">%d-day trial</div>`, p.TrialDays)
 		}
 
 		// Action button
@@ -862,50 +916,50 @@ func (h *PortalHandler) renderPlansPage(user *PortalUser, plans []ports.Plan, cu
 				buttonText = fmt.Sprintf("Start %d-Day Trial", p.TrialDays)
 			}
 			actionBtn = fmt.Sprintf(`
-				<form method="POST" action="/portal/plans/change" onsubmit="return confirm('Change to %s plan?')">
+				<form method="POST" action="/portal/plans/change" onsubmit="showConfirmModal(this, 'Upgrade to the %s plan?', 'Confirm Plan Change'); return false;">
 					<input type="hidden" name="plan_id" value="%s">
 					<button type="submit" class="btn btn-primary">%s</button>
 				</form>`, p.Name, p.ID, buttonText)
 		} else {
 			// Free plan - show downgrade button
 			actionBtn = fmt.Sprintf(`
-				<form method="POST" action="/portal/plans/change" onsubmit="return confirm('Change to %s plan? You will lose access to higher limits.')">
+				<form method="POST" action="/portal/plans/change" onsubmit="showConfirmModal(this, 'Switch to the %s plan? You will lose access to higher limits.', 'Confirm Plan Change'); return false;">
 					<input type="hidden" name="plan_id" value="%s">
 					<button type="submit" class="btn btn-secondary">Switch Plan</button>
 				</form>`, p.Name, p.ID)
 		}
 
 		// Card highlight for current plan
-		cardStyle := ""
+		cardStyle := "border: 1px solid #e5e5e5;"
 		if isCurrent {
-			cardStyle = "border: 2px solid #22c55e;"
+			cardStyle = "border: 1px solid #111;"
 		}
 
 		planCards += fmt.Sprintf(`
-			<div class="plan-card" style="background: white; padding: 24px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); %s">
+			<div class="plan-card" style="background: white; padding: 20px; border-radius: 6px; %s">
 				<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
 					<div>
-						<h3 style="margin: 0; font-size: 20px;">%s%s</h3>
-						<p style="margin: 4px 0 0 0; color: #6b7280; font-size: 14px;">%s</p>
+						<h3 style="margin: 0; font-size: 16px; font-weight: 500;">%s%s</h3>
+						<p style="margin: 4px 0 0 0; color: #666; font-size: 13px;">%s</p>
 					</div>
 					<div style="text-align: right;">
-						<div style="font-size: 28px; font-weight: bold; color: #111827;">%s</div>
+						<div style="font-size: 20px; font-weight: 600; color: #111;">%s</div>
 						%s
 					</div>
 				</div>
-				<div style="border-top: 1px solid #e5e7eb; padding-top: 16px; margin-bottom: 16px;">
-					<div style="display: grid; gap: 8px;">
+				<div style="border-top: 1px solid #e5e5e5; padding-top: 16px; margin-bottom: 16px;">
+					<div style="display: grid; gap: 6px; font-size: 14px;">
 						<div style="display: flex; align-items: center; gap: 8px;">
-							<span style="color: #22c55e;">&#10003;</span>
+							<span style="color: #666;">-</span>
 							<span>%s</span>
 						</div>
 						<div style="display: flex; align-items: center; gap: 8px;">
-							<span style="color: #22c55e;">&#10003;</span>
+							<span style="color: #666;">-</span>
 							<span>%s rate limit</span>
 						</div>
 						<div style="display: flex; align-items: center; gap: 8px;">
-							<span style="color: #6b7280;">&#8226;</span>
-							<span style="color: #6b7280; font-size: 13px;">Over quota: %s</span>
+							<span style="color: #666;">-</span>
+							<span style="color: #666; font-size: 13px;">%s</span>
 						</div>
 					</div>
 				</div>
@@ -927,7 +981,7 @@ func (h *PortalHandler) renderPlansPage(user *PortalUser, plans []ports.Plan, cu
             <p style="margin: 0 0 16px 0; color: #6b7280;">Manage your billing, payment methods, and invoices through the customer portal.</p>
             <div style="display: flex; gap: 12px; flex-wrap: wrap;">
                 <a href="/portal/subscription/manage" class="btn btn-primary" style="text-decoration: none;">Manage Billing</a>
-                <form method="POST" action="/portal/subscription/cancel" onsubmit="return confirm('Are you sure you want to cancel your subscription?')">
+                <form method="POST" action="/portal/subscription/cancel" onsubmit="showConfirmModal(this, 'Are you sure you want to cancel your subscription? You will lose access to your current plan features at the end of the billing period.', 'Cancel Subscription'); return false;">
                     <button type="submit" class="btn btn-secondary" style="background: #fef2f2; color: #dc2626; border: 1px solid #fecaca;">Cancel Subscription</button>
                 </form>
             </div>
@@ -961,8 +1015,9 @@ func (h *PortalHandler) renderPlansPage(user *PortalUser, plans []ports.Plan, cu
             </p>
         </div>
     </main>
+    %s
 </body>
-</html>`, h.appName, portalCSS, h.renderPortalNav(user), alertHTML, planCards, subscriptionSection)
+</html>`, h.appName, portalCSS, h.renderPortalNav(user), alertHTML, planCards, subscriptionSection, portalConfirmJS)
 }
 
 func (h *PortalHandler) renderBillingPage(user *PortalUser, subscription *billing.Subscription, plan *ports.Plan, invoices []billing.Invoice, successMsg, errorMsg string) string {
@@ -1289,88 +1344,131 @@ func (h *PortalHandler) renderCancelSubscriptionPage(user *PortalUser, subscript
 // Portal CSS styles
 const portalCSS = `
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; line-height: 1.6; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #fafafa; color: #111; line-height: 1.5; }
 
-.auth-container { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
-.auth-box { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); width: 100%; max-width: 400px; }
-.auth-header { text-align: center; margin-bottom: 30px; }
-.auth-header h1 { color: #007bff; font-size: 24px; margin-bottom: 10px; }
-.auth-header p { color: #666; }
-.auth-form { margin-bottom: 20px; }
+.auth-container { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; background: #fff; }
+.auth-box { width: 100%; max-width: 360px; }
+.auth-header { margin-bottom: 32px; }
+.auth-header h1 { font-size: 18px; font-weight: 600; margin-bottom: 4px; letter-spacing: -0.02em; }
+.auth-header p { color: #666; font-size: 14px; }
+.auth-form { margin-bottom: 24px; }
 .auth-footer { text-align: center; }
-.auth-footer p { margin: 10px 0; color: #666; }
-.auth-footer a { color: #007bff; text-decoration: none; }
+.auth-footer p { margin: 8px 0; color: #666; font-size: 14px; }
+.auth-footer a { color: #111; text-decoration: underline; }
 
-.form-group { margin-bottom: 20px; }
-.form-group label { display: block; margin-bottom: 5px; font-weight: 500; }
-.form-group input { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 16px; }
-.form-group input:focus { border-color: #007bff; outline: none; }
-.form-group small { display: block; margin-top: 5px; color: #666; font-size: 12px; }
+.form-group { margin-bottom: 16px; }
+.form-group label { display: block; margin-bottom: 6px; font-size: 14px; font-weight: 500; }
+.form-group input { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
+.form-group input:focus { border-color: #111; outline: none; }
+.form-group small { display: block; margin-top: 4px; color: #888; font-size: 12px; }
 
-.btn { display: inline-block; padding: 10px 20px; border: none; border-radius: 4px; font-size: 14px; cursor: pointer; text-decoration: none; }
+.btn { display: inline-block; padding: 10px 16px; border: none; border-radius: 4px; font-size: 14px; cursor: pointer; text-decoration: none; font-weight: 500; }
 .btn-block { width: 100%; }
-.btn-primary { background: #007bff; color: white; }
-.btn-primary:hover { background: #0056b3; }
-.btn-danger { background: #dc3545; color: white; }
-.btn-danger:hover { background: #c82333; }
-.btn-sm { padding: 5px 10px; font-size: 12px; }
+.btn-primary { background: #111; color: #fff; }
+.btn-primary:hover { background: #333; }
+.btn-secondary { background: #fff; color: #111; border: 1px solid #ddd; }
+.btn-secondary:hover { border-color: #111; }
+.btn-danger { background: #fff; color: #b91c1c; border: 1px solid #fca5a5; }
+.btn-danger:hover { background: #fef2f2; }
+.btn-sm { padding: 6px 12px; font-size: 13px; }
 
-.alert { padding: 15px; border-radius: 4px; margin-bottom: 20px; }
-.alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-.alert-error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-.alert-warning { background: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
-.alert-info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+.alert { padding: 12px 16px; border-radius: 4px; margin-bottom: 16px; font-size: 14px; }
+.alert-success { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
+.alert-error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+.alert-warning { background: #fffbeb; color: #92400e; border: 1px solid #fed7aa; }
+.alert-info { background: #f0f9ff; color: #075985; border: 1px solid #bae6fd; }
 
-.portal-nav { background: white; padding: 15px 30px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #ddd; }
-.nav-brand a { font-size: 20px; font-weight: bold; color: #007bff; text-decoration: none; }
-.nav-links { display: flex; gap: 20px; }
-.nav-links a { color: #333; text-decoration: none; }
-.nav-links a:hover { color: #007bff; }
-.nav-user { display: flex; align-items: center; gap: 15px; }
-.nav-user span { color: #666; }
+.portal-nav { background: #fff; padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #e5e5e5; }
+.nav-brand a { font-size: 16px; font-weight: 600; color: #111; text-decoration: none; letter-spacing: -0.02em; }
+.nav-links { display: flex; gap: 24px; }
+.nav-links a { color: #666; text-decoration: none; font-size: 14px; }
+.nav-links a:hover { color: #111; }
+.nav-user { display: flex; align-items: center; gap: 12px; }
+.nav-user span { color: #666; font-size: 13px; }
 
-.main-content { max-width: 1200px; margin: 0 auto; padding: 30px; }
-.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
-.page-header h1 { font-size: 28px; }
-.page-header p { color: #666; }
+.main-content { max-width: 960px; margin: 0 auto; padding: 32px 24px; }
+.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+.page-header h1 { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
+.page-header p { color: #666; font-size: 14px; }
 
-.card { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px; }
-.card h2 { font-size: 18px; margin-bottom: 20px; }
-.card-danger { border-left: 4px solid #dc3545; }
+.card { background: #fff; padding: 24px; border-radius: 6px; border: 1px solid #e5e5e5; margin-bottom: 16px; }
+.card h2 { font-size: 16px; font-weight: 500; margin-bottom: 16px; }
+.card-danger { border-color: #fca5a5; }
 
-.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }
-.stat-card { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); text-align: center; }
-.stat-value { font-size: 32px; font-weight: bold; color: #007bff; }
-.stat-label { color: #666; margin-top: 5px; }
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 24px; }
+.stat-card { background: #fff; padding: 20px; border-radius: 6px; border: 1px solid #e5e5e5; }
+.stat-value { font-size: 28px; font-weight: 600; color: #111; letter-spacing: -0.02em; }
+.stat-label { color: #666; margin-top: 4px; font-size: 13px; }
 
-.quick-links h2 { margin-bottom: 15px; }
-.link-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; }
-.link-card { display: block; padding: 20px; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); text-decoration: none; color: #333; transition: box-shadow 0.2s; }
-.link-card:hover { box-shadow: 0 3px 10px rgba(0,0,0,0.15); }
-.link-card strong { display: block; margin-bottom: 5px; }
-.link-card span { color: #666; font-size: 14px; }
+.quick-links h2 { margin-bottom: 12px; font-size: 16px; font-weight: 500; }
+.link-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.link-card { display: block; padding: 16px; background: #fff; border-radius: 6px; border: 1px solid #e5e5e5; text-decoration: none; color: #111; }
+.link-card:hover { border-color: #111; }
+.link-card strong { display: block; margin-bottom: 4px; font-size: 14px; }
+.link-card span { color: #666; font-size: 13px; }
 
 .table { width: 100%; border-collapse: collapse; }
-.table th, .table td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
-.table th { background: #f9f9f9; font-weight: 500; }
+.table th, .table td { padding: 12px; text-align: left; border-bottom: 1px solid #e5e5e5; font-size: 14px; }
+.table th { font-weight: 500; color: #666; font-size: 13px; }
 .text-center { text-align: center; }
 
-.status-active { color: #28a745; }
-.status-revoked { color: #dc3545; }
+.status-active { color: #166534; }
+.status-revoked { color: #991b1b; }
 
-code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-family: monospace; }
+code { background: #f5f5f5; padding: 2px 6px; border-radius: 3px; font-family: ui-monospace, monospace; font-size: 13px; }
 
-.modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-.modal-box { background: white; padding: 30px; border-radius: 8px; width: 100%; max-width: 450px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); }
-.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-.modal-header h3 { font-size: 20px; }
-.modal-close { background: none; border: none; font-size: 24px; cursor: pointer; color: #666; }
-.modal-close:hover { color: #333; }
-.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
-.btn-secondary { background: #6c757d; color: white; }
-.btn-secondary:hover { background: #545b62; }
+.modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.modal-box { background: #fff; padding: 24px; border-radius: 6px; width: 100%; max-width: 400px; }
+.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.modal-header h3 { font-size: 16px; font-weight: 500; }
+.modal-close { background: none; border: none; font-size: 20px; cursor: pointer; color: #666; }
+.modal-close:hover { color: #111; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
 
-.key-display { background: #f8f9fa; border: 1px solid #dee2e6; padding: 15px; border-radius: 4px; margin: 15px 0; }
-.key-display code { background: none; padding: 0; font-size: 14px; word-break: break-all; }
-.key-warning { color: #856404; font-size: 13px; margin-top: 10px; }
+.key-display { background: #f5f5f5; border: 1px solid #e5e5e5; padding: 12px; border-radius: 4px; margin: 12px 0; }
+.key-display code { background: none; padding: 0; font-size: 13px; word-break: break-all; }
+.key-warning { color: #92400e; font-size: 13px; margin-top: 8px; }
+
+.confirm-modal-message { color: #333; font-size: 14px; margin-bottom: 20px; line-height: 1.6; }
+.confirm-modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+`
+
+// portalConfirmJS provides custom confirm dialog functionality to replace native browser confirms
+const portalConfirmJS = `
+<div id="confirm-modal" class="modal-overlay" style="display:none">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h3 id="confirm-modal-title">Confirm</h3>
+            <button onclick="closeConfirmModal()" class="modal-close">&times;</button>
+        </div>
+        <p id="confirm-modal-message" class="confirm-modal-message"></p>
+        <div class="confirm-modal-actions">
+            <button type="button" onclick="closeConfirmModal()" class="btn btn-secondary">Cancel</button>
+            <button type="button" id="confirm-modal-ok" class="btn btn-danger">Confirm</button>
+        </div>
+    </div>
+</div>
+<script>
+var pendingConfirmForm = null;
+function showConfirmModal(form, message, title) {
+    pendingConfirmForm = form;
+    document.getElementById('confirm-modal-title').textContent = title || 'Confirm';
+    document.getElementById('confirm-modal-message').textContent = message;
+    document.getElementById('confirm-modal').style.display = 'flex';
+}
+function closeConfirmModal() {
+    document.getElementById('confirm-modal').style.display = 'none';
+    pendingConfirmForm = null;
+}
+function confirmAndSubmit() {
+    if (pendingConfirmForm) {
+        pendingConfirmForm.submit();
+    }
+    closeConfirmModal();
+}
+document.getElementById('confirm-modal-ok').onclick = confirmAndSubmit;
+document.getElementById('confirm-modal').onclick = function(e) {
+    if (e.target === this) closeConfirmModal();
+};
+</script>
 `

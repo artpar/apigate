@@ -12,6 +12,7 @@ import (
 	"github.com/artpar/apigate/adapters/hasher"
 	"github.com/artpar/apigate/core/runtime"
 	"github.com/artpar/apigate/domain/key"
+	"github.com/artpar/apigate/ports"
 	"github.com/rs/zerolog"
 )
 
@@ -33,6 +34,12 @@ var routerReloader RouterReloader
 // planReloader holds the plan reloader instance (set after bootstrap).
 var planReloader PlanReloader
 
+// planStore holds the plan store instance for the clear_other_defaults function.
+var planStore ports.PlanStore
+
+// emailSender holds the email sender instance for email-related hooks.
+var emailSender ports.EmailSender
+
 // SetRouterReloader sets the router reloader for the reload_router function.
 // This should be called after the route service is initialized.
 func SetRouterReloader(r RouterReloader) {
@@ -43,6 +50,18 @@ func SetRouterReloader(r RouterReloader) {
 // This should be called after the app is initialized.
 func SetPlanReloader(r PlanReloader) {
 	planReloader = r
+}
+
+// SetPlanStore sets the plan store for the clear_other_defaults function.
+// This should be called after the plan store is initialized.
+func SetPlanStore(s ports.PlanStore) {
+	planStore = s
+}
+
+// SetEmailSender sets the email sender for email-related hooks.
+// This should be called after the email sender is initialized.
+func SetEmailSender(s ports.EmailSender) {
+	emailSender = s
 }
 
 // TriggerPlanReload triggers a reload of plans in the proxy service.
@@ -85,20 +104,55 @@ func registerBuiltinFunctions(rt *runtime.Runtime, logger zerolog.Logger) {
 
 	// send_verification_email - sends email verification after user creation
 	rt.RegisterFunction("send_verification_email", func(ctx context.Context, event runtime.HookEvent) error {
+		if emailSender == nil {
+			logger.Debug().Msg("send_verification_email: email sender not set, skipping")
+			return nil
+		}
+
 		email, _ := event.Data["email"].(string)
-		logger.Info().
-			Str("email", email).
-			Msg("send_verification_email called (not yet implemented)")
-		// TODO: Integrate with email adapter
+		if email == "" {
+			logger.Debug().Msg("send_verification_email: no email in event data")
+			return nil
+		}
+
+		name, _ := event.Data["name"].(string)
+		token, _ := event.Meta["verification_token"].(string)
+
+		if token == "" {
+			logger.Debug().Str("email", email).Msg("send_verification_email: no token provided, skipping")
+			return nil
+		}
+
+		if err := emailSender.SendVerification(ctx, email, name, token); err != nil {
+			logger.Error().Err(err).Str("email", email).Msg("failed to send verification email")
+			return err
+		}
+
+		logger.Info().Str("email", email).Msg("verification email sent")
 		return nil
 	})
 
 	// clear_other_defaults - clears is_default on other plans when setting default
 	rt.RegisterFunction("clear_other_defaults", func(ctx context.Context, event runtime.HookEvent) error {
-		logger.Debug().
-			Str("module", event.Module).
-			Msg("clear_other_defaults called (not yet implemented)")
-		// TODO: Query and update other plans
+		if planStore == nil {
+			logger.Warn().Msg("clear_other_defaults: plan store not set, skipping")
+			return nil
+		}
+
+		// Get the ID of the plan that's being set as default
+		planID, ok := event.Data["id"].(string)
+		if !ok || planID == "" {
+			logger.Debug().Msg("clear_other_defaults: no plan ID in event data")
+			return nil
+		}
+
+		// Clear is_default on all other plans
+		if err := planStore.ClearOtherDefaults(ctx, planID); err != nil {
+			logger.Error().Err(err).Str("except_id", planID).Msg("failed to clear other defaults")
+			return err
+		}
+
+		logger.Info().Str("except_id", planID).Msg("cleared is_default on other plans")
 		return nil
 	})
 

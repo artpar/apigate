@@ -1,0 +1,100 @@
+{{define "content"}}
+<div class="page">
+    <div class="page-header">
+        <h1 class="page-title">Entitlements</h1>
+        <a href="/entitlements/new" class="btn btn-primary">Create Entitlement</a>
+    </div>
+
+    <div class="card">
+        <div class="card-body flush" id="entitlements-table" hx-get="/partials/entitlements" hx-trigger="load" hx-swap="innerHTML">
+            <div class="table-empty">Loading entitlements...</div>
+        </div>
+    </div>
+
+    <div class="page-header" style="margin-top: 2rem;">
+        <h2 class="page-title">Plan Entitlements</h2>
+    </div>
+    <div class="card">
+        <div class="card-body flush" id="plan-entitlements-table" hx-get="/partials/plan-entitlements" hx-trigger="load" hx-swap="innerHTML">
+            <div class="table-empty">Loading plan entitlements...</div>
+        </div>
+    </div>
+</div>
+{{end}}
+
+{{define "panel-docs"}}
+<div class="panel-section">
+    <h3>Entitlements</h3>
+    <p>Entitlements are feature flags that control what capabilities users have access to based on their subscription plan.</p>
+</div>
+
+<div class="panel-section">
+    <h4>Entitlement Properties</h4>
+    <ul class="panel-list">
+        <li><strong>Name</strong> - Unique identifier (e.g., "api.streaming")</li>
+        <li><strong>Display Name</strong> - Human-readable name</li>
+        <li><strong>Category</strong> - Grouping: feature, api, support, integration</li>
+        <li><strong>Value Type</strong> - boolean, number, or string</li>
+        <li><strong>Header Name</strong> - HTTP header to send to upstream</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>How It Works</h4>
+    <ol class="panel-list">
+        <li>Define entitlements (e.g., "api.streaming", "support.priority")</li>
+        <li>Assign entitlements to plans with optional value overrides</li>
+        <li>When a request comes in, the user's plan entitlements are resolved</li>
+        <li>Entitlement headers are added to upstream requests</li>
+    </ol>
+</div>
+
+<div class="panel-section">
+    <h4>Example Entitlements</h4>
+    <ul class="panel-list">
+        <li><strong>api.streaming</strong> - SSE streaming responses</li>
+        <li><strong>api.batch</strong> - Batch API requests</li>
+        <li><strong>api.rate_limit</strong> - Custom rate limit value</li>
+        <li><strong>support.priority</strong> - Priority support access</li>
+    </ul>
+</div>
+{{end}}
+
+{{define "panel-reference"}}
+<div class="panel-section">
+    <h3>Entitlements API</h3>
+    <p>Manage entitlements programmatically.</p>
+</div>
+
+<div class="panel-section">
+    <h4>List Entitlements</h4>
+    <pre class="panel-code">GET /api/entitlements</pre>
+</div>
+
+<div class="panel-section">
+    <h4>Create Entitlement</h4>
+    <pre class="panel-code">POST /api/entitlements
+Content-Type: application/json
+
+{
+  "name": "api.streaming",
+  "display_name": "Streaming Responses",
+  "category": "api",
+  "value_type": "boolean",
+  "default_value": "true",
+  "header_name": "X-Has-Streaming"
+}</pre>
+</div>
+
+<div class="panel-section">
+    <h4>Assign to Plan</h4>
+    <pre class="panel-code">POST /api/plan-entitlements
+Content-Type: application/json
+
+{
+  "plan_id": "pro",
+  "entitlement_id": "ent-api-streaming",
+  "value": "true"
+}</pre>
+</div>
+{{end}}

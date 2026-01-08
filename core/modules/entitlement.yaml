@@ -1,0 +1,95 @@
+# Entitlement module - feature flags granted by plans
+# Entitlements define what features/capabilities users have access to based on their plan.
+# Plans can grant multiple entitlements, and entitlements can be shared across plans.
+module: entitlement
+
+schema:
+  # Identity
+  name:        { type: string, required: true, lookup: true, description: "Unique identifier for this entitlement (e.g., 'api.streaming', 'support.priority')" }
+  display_name: { type: string, description: "Human-readable name shown in UI" }
+  description: { type: string, default: "", description: "Detailed description of what this entitlement grants" }
+
+  # Categorization
+  category:    { type: string, default: "feature", description: "Category for grouping: feature, api, support, integration" }
+
+  # Value types - entitlements can be boolean (has/doesn't have) or have limits
+  value_type:  { type: string, default: "boolean", enum: ["boolean", "number", "string"], description: "Type of entitlement value" }
+  default_value: { type: string, default: "true", description: "Default value when entitlement is granted" }
+
+  # Metadata for upstream headers
+  header_name: { type: string, description: "Optional HTTP header name to send to upstream (e.g., 'X-Has-Streaming')" }
+
+  # State
+  enabled:     { type: bool, default: true, description: "Whether this entitlement is active" }
+
+actions:
+  enable:
+    set: { enabled: true }
+    description: Enable an entitlement
+
+  disable:
+    set: { enabled: false }
+    description: Disable an entitlement
+    confirm: true
+
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /api/entitlements
+      endpoints:
+        - { action: list, method: GET, path: "/" }
+        - { action: get, method: GET, path: "/{id}" }
+        - { action: create, method: POST, path: "/", auth: admin }
+        - { action: update, method: PATCH, path: "/{id}", auth: admin }
+        - { action: delete, method: DELETE, path: "/{id}", auth: admin }
+        - { action: enable, method: POST, path: "/{id}/enable", auth: admin }
+        - { action: disable, method: POST, path: "/{id}/disable", auth: admin }
+
+  cli:
+    serve:
+      enabled: true
+      command: entitlements
+      commands:
+        - action: list
+          columns: [id, name, display_name, category, value_type, enabled]
+        - action: get
+          args:
+            - { name: id, required: true, description: "Entitlement ID" }
+        - action: create
+          flags:
+            - { param: name, required: true, description: "Unique entitlement name (e.g., 'api.streaming')" }
+            - { param: display_name, description: "Human-readable name" }
+            - { param: description }
+            - { param: category, default: "feature" }
+            - { param: value_type, default: "boolean" }
+            - { param: default_value, default: "true" }
+            - { param: header_name, description: "HTTP header to send upstream" }
+        - action: delete
+          args:
+            - { name: id, required: true }
+          confirm: "Are you sure you want to delete this entitlement? Plans using it will lose this feature."
+        - action: enable
+          args:
+            - { name: id, required: true }
+        - action: disable
+          args:
+            - { name: id, required: true }
+
+hooks:
+  after_create:
+    - call: reload_entitlements
+
+  after_update:
+    - call: reload_entitlements
+
+  after_delete:
+    - call: reload_entitlements
+
+meta:
+  description: Feature flags and capabilities granted by subscription plans
+  icon: key
+  display_name: Entitlements
+  plural: Entitlements
+  depends:
+    - plan

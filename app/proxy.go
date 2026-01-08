@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/artpar/apigate/domain/entitlement"
 	"github.com/artpar/apigate/domain/key"
 	"github.com/artpar/apigate/domain/plan"
 	"github.com/artpar/apigate/domain/proxy"
@@ -21,14 +22,16 @@ import (
 
 // ProxyService handles incoming proxy requests.
 type ProxyService struct {
-	keys      ports.KeyStore
-	users     ports.UserStore
-	rateLimit ports.RateLimitStore
-	quota     ports.QuotaStore
-	usage     ports.UsageRecorder
-	upstream  ports.Upstream
-	clock     ports.Clock
-	idGen     ports.IDGenerator
+	keys             ports.KeyStore
+	users            ports.UserStore
+	rateLimit        ports.RateLimitStore
+	quota            ports.QuotaStore
+	usage            ports.UsageRecorder
+	upstream         ports.Upstream
+	clock            ports.Clock
+	idGen            ports.IDGenerator
+	entitlements     ports.EntitlementStore
+	planEntitlements ports.PlanEntitlementStore
 
 	// Route and transform services (optional - nil for simple proxy mode)
 	routeService     *RouteService
@@ -43,49 +46,57 @@ type ProxyService struct {
 
 // DynamicConfig contains hot-reloadable configuration.
 type DynamicConfig struct {
-	Plans       []plan.Plan
-	Endpoints   []plan.Endpoint
-	RateBurst   int
-	RateWindow  int // seconds
+	Plans            []plan.Plan
+	Endpoints        []plan.Endpoint
+	RateBurst        int
+	RateWindow       int // seconds
+	Entitlements     []entitlement.Entitlement
+	PlanEntitlements []entitlement.PlanEntitlement
 }
 
 // ProxyDeps contains dependencies for ProxyService.
 type ProxyDeps struct {
-	Keys      ports.KeyStore
-	Users     ports.UserStore
-	RateLimit ports.RateLimitStore
-	Quota     ports.QuotaStore
-	Usage     ports.UsageRecorder
-	Upstream  ports.Upstream
-	Clock     ports.Clock
-	IDGen     ports.IDGenerator
+	Keys             ports.KeyStore
+	Users            ports.UserStore
+	RateLimit        ports.RateLimitStore
+	Quota            ports.QuotaStore
+	Usage            ports.UsageRecorder
+	Upstream         ports.Upstream
+	Clock            ports.Clock
+	IDGen            ports.IDGenerator
+	Entitlements     ports.EntitlementStore
+	PlanEntitlements ports.PlanEntitlementStore
 }
 
 // ProxyConfig contains configuration for ProxyService.
 type ProxyConfig struct {
-	KeyPrefix   string
-	Plans       []plan.Plan
-	Endpoints   []plan.Endpoint
-	RateBurst   int
-	RateWindow  int // seconds
+	KeyPrefix        string
+	Plans            []plan.Plan
+	Endpoints        []plan.Endpoint
+	RateBurst        int
+	RateWindow       int // seconds
+	Entitlements     []entitlement.Entitlement
+	PlanEntitlements []entitlement.PlanEntitlement
 }
 
 // NewProxyService creates a new proxy service.
 func NewProxyService(deps ProxyDeps, cfg ProxyConfig) *ProxyService {
 	s := &ProxyService{
-		keys:      deps.Keys,
-		users:     deps.Users,
-		rateLimit: deps.RateLimit,
-		quota:     deps.Quota,
-		usage:     deps.Usage,
-		upstream:  deps.Upstream,
-		clock:     deps.Clock,
-		idGen:     deps.IDGen,
-		keyPrefix: cfg.KeyPrefix,
+		keys:             deps.Keys,
+		users:            deps.Users,
+		rateLimit:        deps.RateLimit,
+		quota:            deps.Quota,
+		usage:            deps.Usage,
+		upstream:         deps.Upstream,
+		clock:            deps.Clock,
+		idGen:            deps.IDGen,
+		entitlements:     deps.Entitlements,
+		planEntitlements: deps.PlanEntitlements,
+		keyPrefix:        cfg.KeyPrefix,
 	}
 
 	// Set initial dynamic config
-	s.UpdateConfig(cfg.Plans, cfg.Endpoints, cfg.RateBurst, cfg.RateWindow)
+	s.UpdateConfig(cfg.Plans, cfg.Endpoints, cfg.RateBurst, cfg.RateWindow, cfg.Entitlements, cfg.PlanEntitlements)
 
 	return s
 }
@@ -103,12 +114,14 @@ func (s *ProxyService) SetTransformService(transformService *TransformService) {
 
 // UpdateConfig updates the hot-reloadable configuration.
 // This is thread-safe and can be called while handling requests.
-func (s *ProxyService) UpdateConfig(plans []plan.Plan, endpoints []plan.Endpoint, rateBurst, rateWindow int) {
+func (s *ProxyService) UpdateConfig(plans []plan.Plan, endpoints []plan.Endpoint, rateBurst, rateWindow int, ents []entitlement.Entitlement, planEnts []entitlement.PlanEntitlement) {
 	cfg := &DynamicConfig{
-		Plans:      plans,
-		Endpoints:  endpoints,
-		RateBurst:  rateBurst,
-		RateWindow: rateWindow,
+		Plans:            plans,
+		Endpoints:        endpoints,
+		RateBurst:        rateBurst,
+		RateWindow:       rateWindow,
+		Entitlements:     ents,
+		PlanEntitlements: planEnts,
 	}
 	s.dynamicCfg.Store(cfg)
 }
@@ -209,13 +222,29 @@ func (s *ProxyService) Handle(ctx context.Context, req proxy.Request) HandleResu
 		if gracePct == 0 {
 			gracePct = 0.05 // Default 5% grace
 		}
+		// Map plan.MeterType to quota.MeterType
+		meterType := quota.MeterTypeRequests
+		if userPlan.MeterType == plan.MeterTypeComputeUnits {
+			meterType = quota.MeterTypeComputeUnits
+		}
+		estimatedCost := userPlan.EstimatedCostPerReq
+		if estimatedCost <= 0 {
+			estimatedCost = 1.0
+		}
 		quotaCfg := quota.Config{
 			RequestsPerMonth: userPlan.RequestsPerMonth,
 			EnforceMode:      enforceMode,
 			GracePct:         gracePct,
+			MeterType:        meterType,
+			EstimatedCost:    estimatedCost,
 		}
 		quotaState, _ := s.quota.Get(ctx, matchedKey.UserID, periodStart)
-		quotaResult = quota.Check(quotaState, quotaCfg, 1)
+		// For compute_units mode, use estimated cost; for requests, use 1
+		increment := int64(1)
+		if meterType == quota.MeterTypeComputeUnits {
+			increment = int64(estimatedCost)
+		}
+		quotaResult = quota.Check(quotaState, quotaCfg, increment)
 
 		if !quotaResult.Allowed {
 			return HandleResult{
@@ -257,6 +286,20 @@ func (s *ProxyService) Handle(ctx context.Context, req proxy.Request) HandleResu
 		PlanID:    user.PlanID,
 		RateLimit: rlConfig.Limit,
 		Scopes:    matchedKey.Scopes,
+	}
+
+	// 8.5. Resolve entitlements for user's plan and add headers (PURE)
+	userEntitlements := entitlement.ResolveForPlan(
+		user.PlanID,
+		dynCfg.Entitlements,
+		dynCfg.PlanEntitlements,
+	)
+	entitlementHeaders := entitlement.ToHeaders(userEntitlements)
+	if req.Headers == nil {
+		req.Headers = make(map[string]string)
+	}
+	for k, v := range entitlementHeaders {
+		req.Headers[k] = v
 	}
 
 	// 9. Route matching (PURE) - optional, falls back to default upstream

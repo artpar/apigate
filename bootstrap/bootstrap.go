@@ -27,9 +27,12 @@ import (
 	"github.com/artpar/apigate/core/capability"
 	capAdapters "github.com/artpar/apigate/core/capability/adapters"
 	"github.com/artpar/apigate/core/convention"
+	"github.com/artpar/apigate/core/events"
 	"github.com/artpar/apigate/core/openapi"
+	"github.com/artpar/apigate/domain/entitlement"
 	"github.com/artpar/apigate/domain/plan"
 	"github.com/artpar/apigate/domain/settings"
+	"github.com/artpar/apigate/domain/webhook"
 	"github.com/artpar/apigate/ports"
 	"github.com/artpar/apigate/web"
 	"github.com/rs/zerolog"
@@ -70,6 +73,7 @@ type App struct {
 	upstream        *apihttp.UpstreamClient
 	paymentProvider ports.PaymentProvider
 	emailSender     ports.EmailSender
+	webhookService  *app.WebhookService
 }
 
 // Config provides optional configuration for application initialization.
@@ -215,12 +219,15 @@ func (a *App) initHTTPServer() error {
 
 	// Build proxy config from settings and database plans
 	plans := a.loadPlans(ctx)
+	ents, planEnts := a.loadEntitlements(ctx)
 	proxyCfg := app.ProxyConfig{
-		KeyPrefix:  s.GetOrDefault(settings.KeyAuthKeyPrefix, "ak_"),
-		Plans:      plans,
-		Endpoints:  nil, // Load from database if needed
-		RateBurst:  s.GetInt(settings.KeyRateLimitBurstTokens, 5),
-		RateWindow: s.GetInt(settings.KeyRateLimitWindowSecs, 60),
+		KeyPrefix:        s.GetOrDefault(settings.KeyAuthKeyPrefix, "ak_"),
+		Plans:            plans,
+		Endpoints:        nil, // Load from database if needed
+		RateBurst:        s.GetInt(settings.KeyRateLimitBurstTokens, 5),
+		RateWindow:       s.GetInt(settings.KeyRateLimitWindowSecs, 60),
+		Entitlements:     ents,
+		PlanEntitlements: planEnts,
 	}
 
 	// Create proxy service
@@ -270,6 +277,7 @@ func (a *App) initHTTPServer() error {
 	// Create shared stores for admin and web handlers
 	usageStore := sqlite.NewUsageStore(a.DB)
 	planStore := sqlite.NewPlanStore(a.DB)
+	SetPlanStore(planStore) // Wire plan store for clear_other_defaults function
 	bcryptHasher := hasher.NewBcrypt(0)
 	sessionStore := sqlite.NewSessionStore(a.DB)
 	tokenStore := sqlite.NewTokenStore(a.DB)
@@ -281,6 +289,7 @@ func (a *App) initHTTPServer() error {
 		emailSender = email.NewNoopSender()
 	}
 	a.emailSender = emailSender
+	SetEmailSender(emailSender) // Wire email sender for hook functions
 
 	// Register email provider with capability container
 	if a.Capabilities != nil {
@@ -289,6 +298,15 @@ func (a *App) initHTTPServer() error {
 			a.Logger.Debug().Err(err).Msg("email already registered in capability container")
 		}
 	}
+
+	// Create webhook stores and service
+	webhookStore := sqlite.NewWebhookStore(a.DB.DB)
+	deliveryStore := sqlite.NewDeliveryStore(a.DB.DB)
+	a.webhookService = app.NewWebhookService(webhookStore, deliveryStore, a.Logger)
+
+	// Start webhook retry worker (checks for failed deliveries every minute)
+	a.webhookService.StartRetryWorker(ctx, time.Minute)
+	a.Logger.Info().Msg("webhook service initialized with retry worker")
 
 	// Create OpenAPI service for unified documentation (before admin handler for cache invalidation)
 	openAPIService := openapi.NewService(openapi.ServiceConfig{
@@ -322,15 +340,18 @@ func (a *App) initHTTPServer() error {
 
 	// Create web UI handler
 	webHandler, err := web.NewHandler(web.Deps{
-		Users:       deps.Users,
-		Keys:        deps.Keys,
-		Usage:       usageStore,
-		Routes:      routeStore,
-		Upstreams:   upstreamStore,
-		Plans:       planStore,
-		Settings:    a.Settings.Store(),
-		AuthTokens:  tokenStore,
-		EmailSender: emailSender,
+		Users:          deps.Users,
+		Keys:           deps.Keys,
+		Usage:          usageStore,
+		Routes:         routeStore,
+		Upstreams:      upstreamStore,
+		Plans:          planStore,
+		Settings:       a.Settings.Store(),
+		AuthTokens:     tokenStore,
+		EmailSender:    emailSender,
+		Webhooks:       webhookStore,
+		Deliveries:     deliveryStore,
+		WebhookService: a.webhookService,
 		AppSettings: web.AppSettings{
 			UpstreamURL:     s.Get(settings.KeyUpstreamURL),
 			UpstreamTimeout: s.GetOrDefault(settings.KeyUpstreamTimeout, "30s"),
@@ -373,21 +394,25 @@ func (a *App) initHTTPServer() error {
 	var portalRouter http.Handler
 	if s.GetBool(settings.KeyPortalEnabled) {
 		portalHandler, err := web.NewPortalHandler(web.PortalDeps{
-			Users:       deps.Users,
-			Keys:        deps.Keys,
-			Usage:       usageStore,
-			Plans:       planStore,
-			Sessions:    sessionStore,
-			AuthTokens:  tokenStore,
-			EmailSender: emailSender,
-			Settings:    a.Settings.Store(),
-			Logger:      a.Logger,
-			Hasher:      bcryptHasher,
-			IDGen:       deps.IDGen,
-			Payment:     paymentProvider,
-			JWTSecret:   s.Get(settings.KeyAuthJWTSecret),
-			BaseURL:     s.Get(settings.KeyPortalBaseURL),
-			AppName:     s.GetOrDefault(settings.KeyPortalAppName, "APIGate"),
+			Users:            deps.Users,
+			Keys:             deps.Keys,
+			Usage:            usageStore,
+			Plans:            planStore,
+			Sessions:         sessionStore,
+			AuthTokens:       tokenStore,
+			EmailSender:      emailSender,
+			Settings:         a.Settings.Store(),
+			Entitlements:     deps.Entitlements,
+			PlanEntitlements: deps.PlanEntitlements,
+			Webhooks:         webhookStore,
+			Deliveries:       deliveryStore,
+			Logger:           a.Logger,
+			Hasher:           bcryptHasher,
+			IDGen:            deps.IDGen,
+			Payment:          paymentProvider,
+			JWTSecret:        s.Get(settings.KeyAuthJWTSecret),
+			BaseURL:          s.Get(settings.KeyPortalBaseURL),
+			AppName:          s.GetOrDefault(settings.KeyPortalAppName, "APIGate"),
 		})
 		if err != nil {
 			return fmt.Errorf("create portal handler: %w", err)
@@ -441,6 +466,12 @@ func (a *App) initHTTPServer() error {
 		if metricsHandler := a.ModuleRuntime.MetricsHandler(); metricsHandler != nil {
 			routerCfg.MetricsHandler = metricsHandler
 			a.Logger.Info().Msg("prometheus metrics handler mounted at /metrics")
+		}
+
+		// Bridge event bus to webhook service
+		// Events emitted by YAML hooks (emit:) are forwarded to the webhook dispatcher
+		if a.webhookService != nil {
+			a.subscribeWebhooksToEvents()
 		}
 	}
 
@@ -520,6 +551,10 @@ func (a *App) buildDependencies(s settings.Settings) (app.ProxyDeps, error) {
 	deps.Upstream = upstream
 	a.upstream = upstream
 
+	// Entitlement stores
+	deps.Entitlements = sqlite.NewEntitlementStore(a.DB)
+	deps.PlanEntitlements = sqlite.NewPlanEntitlementStore(a.DB)
+
 	return deps, nil
 }
 
@@ -528,18 +563,22 @@ func (a *App) loadPlans(ctx context.Context) []plan.Plan {
 	rows, err := a.DB.DB.QueryContext(ctx, `
 		SELECT id, name, rate_limit_per_minute, requests_per_month, price_monthly, overage_price,
 		       COALESCE(quota_enforce_mode, 'hard') as quota_enforce_mode,
-		       COALESCE(quota_grace_pct, 0.05) as quota_grace_pct
+		       COALESCE(quota_grace_pct, 0.05) as quota_grace_pct,
+		       COALESCE(meter_type, 'requests') as meter_type,
+		       COALESCE(estimated_cost_per_req, 1.0) as estimated_cost_per_req
 		FROM plans WHERE enabled = 1
 	`)
 	if err != nil {
 		a.Logger.Warn().Err(err).Msg("failed to load plans, using default")
 		return []plan.Plan{{
-			ID:                 "free",
-			Name:               "Free",
-			RateLimitPerMinute: 60,
-			RequestsPerMonth:   1000,
-			QuotaEnforceMode:   plan.QuotaEnforceHard,
-			QuotaGracePct:      0.05,
+			ID:                  "free",
+			Name:                "Free",
+			RateLimitPerMinute:  60,
+			RequestsPerMonth:    1000,
+			QuotaEnforceMode:    plan.QuotaEnforceHard,
+			QuotaGracePct:       0.05,
+			MeterType:           plan.MeterTypeRequests,
+			EstimatedCostPerReq: 1.0,
 		}}
 	}
 	defer rows.Close()
@@ -547,8 +586,8 @@ func (a *App) loadPlans(ctx context.Context) []plan.Plan {
 	var plans []plan.Plan
 	for rows.Next() {
 		var p plan.Plan
-		var enforceMode string
-		if err := rows.Scan(&p.ID, &p.Name, &p.RateLimitPerMinute, &p.RequestsPerMonth, &p.PriceMonthly, &p.OveragePrice, &enforceMode, &p.QuotaGracePct); err != nil {
+		var enforceMode, meterType string
+		if err := rows.Scan(&p.ID, &p.Name, &p.RateLimitPerMinute, &p.RequestsPerMonth, &p.PriceMonthly, &p.OveragePrice, &enforceMode, &p.QuotaGracePct, &meterType, &p.EstimatedCostPerReq); err != nil {
 			continue
 		}
 		// Convert enforce mode string to type
@@ -560,20 +599,48 @@ func (a *App) loadPlans(ctx context.Context) []plan.Plan {
 		default:
 			p.QuotaEnforceMode = plan.QuotaEnforceHard
 		}
+		// Convert meter type string to type
+		switch meterType {
+		case "compute_units":
+			p.MeterType = plan.MeterTypeComputeUnits
+		default:
+			p.MeterType = plan.MeterTypeRequests
+		}
 		plans = append(plans, p)
 	}
 
 	if len(plans) == 0 {
 		return []plan.Plan{{
-			ID:                 "free",
-			Name:               "Free",
-			RateLimitPerMinute: 60,
-			RequestsPerMonth:   1000,
-			QuotaEnforceMode:   plan.QuotaEnforceHard,
-			QuotaGracePct:      0.05,
+			ID:                  "free",
+			Name:                "Free",
+			RateLimitPerMinute:  60,
+			RequestsPerMonth:    1000,
+			QuotaEnforceMode:    plan.QuotaEnforceHard,
+			QuotaGracePct:       0.05,
+			MeterType:           plan.MeterTypeRequests,
+			EstimatedCostPerReq: 1.0,
 		}}
 	}
 	return plans
+}
+
+func (a *App) loadEntitlements(ctx context.Context) ([]entitlement.Entitlement, []entitlement.PlanEntitlement) {
+	entStore := sqlite.NewEntitlementStore(a.DB)
+	peStore := sqlite.NewPlanEntitlementStore(a.DB)
+
+	ents, err := entStore.ListEnabled(ctx)
+	if err != nil {
+		a.Logger.Warn().Err(err).Msg("failed to load entitlements")
+		return nil, nil
+	}
+
+	planEnts, err := peStore.List(ctx)
+	if err != nil {
+		a.Logger.Warn().Err(err).Msg("failed to load plan entitlements")
+		return ents, nil
+	}
+
+	return ents, planEnts
 }
 
 // Run starts the HTTP server and blocks until shutdown.
@@ -629,6 +696,11 @@ func (a *App) Shutdown() error {
 		a.routeService.Stop()
 	}
 
+	// Stop webhook retry worker
+	if a.webhookService != nil {
+		a.webhookService.StopRetryWorker()
+	}
+
 	// Shutdown HTTP server
 	if a.HTTPServer != nil {
 		if err := a.HTTPServer.Shutdown(ctx); err != nil {
@@ -678,11 +750,14 @@ func (a *App) Reload() error {
 	// Update proxy service with new config
 	if a.proxyService != nil {
 		plans := a.loadPlans(ctx)
+		ents, planEnts := a.loadEntitlements(ctx)
 		a.proxyService.UpdateConfig(
 			plans,
 			nil, // endpoints
 			s.GetInt(settings.KeyRateLimitBurstTokens, 5),
 			s.GetInt(settings.KeyRateLimitWindowSecs, 60),
+			ents,
+			planEnts,
 		)
 	}
 
@@ -702,6 +777,7 @@ func (a *App) ReloadPlans(ctx context.Context) error {
 
 	s := a.Settings.Get()
 	plans := a.loadPlans(ctx)
+	ents, planEnts := a.loadEntitlements(ctx)
 
 	// Log loaded plans for debugging
 	for _, p := range plans {
@@ -717,9 +793,41 @@ func (a *App) ReloadPlans(ctx context.Context) error {
 		nil, // endpoints - keep existing
 		s.GetInt(settings.KeyRateLimitBurstTokens, 5),
 		s.GetInt(settings.KeyRateLimitWindowSecs, 60),
+		ents,
+		planEnts,
 	)
 
 	a.Logger.Info().Int("count", len(plans)).Msg("plans reloaded from database")
+	return nil
+}
+
+// ReloadEntitlements reloads entitlements from the database into the proxy service.
+// This is called by the reload_entitlements hook after entitlement create/update/delete.
+func (a *App) ReloadEntitlements(ctx context.Context) error {
+	a.Logger.Info().Msg("ReloadEntitlements called")
+
+	if a.proxyService == nil {
+		a.Logger.Warn().Msg("ReloadEntitlements: proxyService is nil")
+		return nil
+	}
+
+	s := a.Settings.Get()
+	plans := a.loadPlans(ctx)
+	ents, planEnts := a.loadEntitlements(ctx)
+
+	a.proxyService.UpdateConfig(
+		plans,
+		nil,
+		s.GetInt(settings.KeyRateLimitBurstTokens, 5),
+		s.GetInt(settings.KeyRateLimitWindowSecs, 60),
+		ents,
+		planEnts,
+	)
+
+	a.Logger.Info().
+		Int("entitlements", len(ents)).
+		Int("plan_entitlements", len(planEnts)).
+		Msg("entitlements reloaded from database")
 	return nil
 }
 
@@ -774,4 +882,101 @@ func (n *noopEmailSender) SendPasswordReset(ctx context.Context, to, name, token
 
 func (n *noopEmailSender) SendWelcome(ctx context.Context, to, name string) error {
 	return nil
+}
+
+// subscribeWebhooksToEvents bridges the event bus to the webhook service.
+// Events emitted by YAML hooks (emit:) are forwarded to the webhook dispatcher
+// so customers can receive webhook notifications for module events.
+func (a *App) subscribeWebhooksToEvents() {
+	if a.ModuleRuntime == nil || a.ModuleRuntime.Runtime == nil {
+		a.Logger.Debug().Msg("skipping webhook event subscription: no module runtime")
+		return
+	}
+
+	bus := a.ModuleRuntime.Runtime.Events()
+	if bus == nil {
+		a.Logger.Debug().Msg("skipping webhook event subscription: no event bus")
+		return
+	}
+
+	// Subscribe to all events and forward to webhook service
+	bus.Subscribe("*", func(ctx context.Context, event events.Event) error {
+		// Map event bus events to webhook event types
+		webhookEventType := mapEventToWebhookType(event)
+		if webhookEventType == "" {
+			a.Logger.Debug().
+				Str("event", event.Name).
+				Msg("no webhook mapping for event")
+			return nil
+		}
+
+		// Extract user ID from event data if available
+		userID := ""
+		if uid, ok := event.Data["user_id"].(string); ok {
+			userID = uid
+		}
+
+		// Dispatch to webhook service
+		if err := a.webhookService.DispatchEvent(ctx, webhook.EventType(webhookEventType), userID, event.Data); err != nil {
+			a.Logger.Error().
+				Err(err).
+				Str("event", event.Name).
+				Str("webhook_type", webhookEventType).
+				Msg("failed to dispatch webhook event")
+			return err
+		}
+
+		a.Logger.Debug().
+			Str("event", event.Name).
+			Str("webhook_type", webhookEventType).
+			Msg("forwarded event to webhook dispatcher")
+
+		return nil
+	})
+
+	a.Logger.Info().Msg("event bus to webhook bridge active")
+}
+
+// mapEventToWebhookType maps event bus event names to webhook event types.
+// Returns empty string if no mapping exists.
+func mapEventToWebhookType(event events.Event) string {
+	// Map based on event name pattern: "module.action"
+	switch event.Name {
+	// API Key events
+	case "api_key.created", "key.created":
+		return string(webhook.EventKeyCreated)
+	case "api_key.revoked", "key.revoked":
+		return string(webhook.EventKeyRevoked)
+
+	// User/Plan events
+	case "user.plan_changed", "plan.changed":
+		return string(webhook.EventPlanChanged)
+
+	// Subscription events
+	case "subscription.created", "subscription.started":
+		return string(webhook.EventSubscriptionStart)
+	case "subscription.cancelled", "subscription.ended":
+		return string(webhook.EventSubscriptionEnd)
+	case "subscription.renewed":
+		return string(webhook.EventSubscriptionRenew)
+
+	// Payment events
+	case "payment.succeeded", "payment.success":
+		return string(webhook.EventPaymentSuccess)
+	case "payment.failed":
+		return string(webhook.EventPaymentFailed)
+
+	// Invoice events
+	case "invoice.created":
+		return string(webhook.EventInvoiceCreated)
+
+	// Usage events (these come from the quota system)
+	case "usage.threshold":
+		return string(webhook.EventUsageThreshold)
+	case "usage.limit":
+		return string(webhook.EventUsageLimit)
+
+	default:
+		return ""
+	}
 }

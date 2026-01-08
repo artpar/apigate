@@ -1,0 +1,91 @@
+{{define "content"}}
+<div class="page">
+    <div class="page-header">
+        <h1 class="page-title">Webhooks</h1>
+        <a href="/webhooks/new" class="btn btn-primary">Create Webhook</a>
+    </div>
+
+    <div class="card">
+        <div class="card-body flush" id="webhooks-table" hx-get="/partials/webhooks" hx-trigger="load" hx-swap="innerHTML">
+            <div class="table-empty">Loading webhooks...</div>
+        </div>
+    </div>
+</div>
+{{end}}
+
+{{define "panel-docs"}}
+<div class="panel-section">
+    <h3>Webhooks</h3>
+    <p>Webhooks allow your systems to receive real-time notifications when events occur in APIGate.</p>
+</div>
+
+<div class="panel-section">
+    <h4>Event Types</h4>
+    <ul class="panel-list">
+        <li><strong>usage.threshold</strong> - User reached usage threshold</li>
+        <li><strong>usage.limit</strong> - User reached usage limit</li>
+        <li><strong>key.created</strong> - API key was created</li>
+        <li><strong>key.revoked</strong> - API key was revoked</li>
+        <li><strong>subscription.start</strong> - Subscription started</li>
+        <li><strong>subscription.end</strong> - Subscription ended</li>
+        <li><strong>plan.changed</strong> - User changed plans</li>
+        <li><strong>payment.success</strong> - Payment succeeded</li>
+        <li><strong>payment.failed</strong> - Payment failed</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>Security</h4>
+    <p>All webhook payloads are signed using HMAC-SHA256. Verify the <code>X-Webhook-Signature</code> header with your webhook secret.</p>
+</div>
+
+<div class="panel-section">
+    <h4>Retry Policy</h4>
+    <p>Failed deliveries are retried with exponential backoff: 1 minute, 5 minutes, 30 minutes.</p>
+</div>
+{{end}}
+
+{{define "panel-reference"}}
+<div class="panel-section">
+    <h3>Webhook Payload</h3>
+    <p>All webhooks receive a JSON payload with this structure:</p>
+</div>
+
+<div class="panel-section">
+    <pre class="panel-code">{
+  "id": "evt_abc123",
+  "type": "usage.threshold",
+  "timestamp": "2024-01-15T10:30:00Z",
+  "data": {
+    "user_id": "usr_xyz",
+    "usage_percent": 80,
+    "threshold": 80
+  }
+}</pre>
+</div>
+
+<div class="panel-section">
+    <h4>Headers</h4>
+    <pre class="panel-code">Content-Type: application/json
+X-Webhook-ID: wh_abc123
+X-Event-ID: evt_abc123
+X-Event-Type: usage.threshold
+X-Webhook-Signature: abc123...</pre>
+</div>
+
+<div class="panel-section">
+    <h4>Signature Verification (Go)</h4>
+    <pre class="panel-code">import (
+  "crypto/hmac"
+  "crypto/sha256"
+  "encoding/hex"
+)
+
+func verify(payload []byte, sig, secret string) bool {
+  mac := hmac.New(sha256.New, []byte(secret))
+  mac.Write(payload)
+  expected := hex.EncodeToString(mac.Sum(nil))
+  return hmac.Equal([]byte(sig), []byte(expected))
+}</pre>
+</div>
+{{end}}

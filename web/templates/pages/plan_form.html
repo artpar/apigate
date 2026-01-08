@@ -46,6 +46,18 @@
                 <div class="form-section">
                     <h3 class="form-section-title">Rate Limits & Quotas</h3>
 
+                    <div class="form-group">
+                        <label for="meter_type" class="form-label">
+                            Meter Type
+                            <span class="info-tooltip" data-tip="What metric to use for quota enforcement and billing. 'Request Count' counts each API call as 1 unit. 'Compute Units' uses weighted values (e.g., tokens) defined by metering expressions.">i</span>
+                        </label>
+                        <select id="meter_type" name="meter_type" class="form-input" onchange="toggleEstimatedCost()">
+                            <option value="requests" {{if eq .FormPlan.MeterType "requests"}}selected{{end}}>Request Count</option>
+                            <option value="compute_units" {{if eq .FormPlan.MeterType "compute_units"}}selected{{end}}>Compute Units (Tokens)</option>
+                        </select>
+                        <p class="form-hint">Choose how usage is measured for quotas and billing</p>
+                    </div>
+
                     <div class="form-row">
                         <div class="form-group">
                             <label for="rate_limit" class="form-label">
@@ -59,13 +71,23 @@
 
                         <div class="form-group">
                             <label for="monthly_quota" class="form-label">
-                                Monthly Quota
-                                <span class="info-tooltip" data-tip="Total requests allowed per calendar month. When exceeded, requests are blocked until the next month (or charged overage if configured). Set to 0 for unlimited.">i</span>
+                                <span id="quota_label">Monthly Quota</span>
+                                <span class="info-tooltip" data-tip="Total units allowed per calendar month. When exceeded, requests are blocked until the next month (or charged overage if configured). Set to 0 for unlimited.">i</span>
                             </label>
                             <input type="number" id="monthly_quota" name="monthly_quota" class="form-input"
                                    min="0" value="{{.FormPlan.MonthlyQuota}}" placeholder="1000">
-                            <p class="form-hint">Total requests per month (0 = unlimited)</p>
+                            <p class="form-hint" id="quota_hint">Total units per month (0 = unlimited)</p>
                         </div>
+                    </div>
+
+                    <div class="form-group" id="estimated_cost_group" style="{{if eq .FormPlan.MeterType "compute_units"}}display:block{{else}}display:none{{end}}">
+                        <label for="estimated_cost_per_req" class="form-label">
+                            Estimated Cost Per Request
+                            <span class="info-tooltip" data-tip="Used for pre-request quota checks when actual cost is unknown until response. A typical request's compute units. Slight over-quota is possible if estimate is low.">i</span>
+                        </label>
+                        <input type="number" id="estimated_cost_per_req" name="estimated_cost_per_req" class="form-input"
+                               min="0.1" step="0.1" value="{{printf "%.1f" .FormPlan.EstimatedCostPerReq}}" placeholder="1.0">
+                        <p class="form-hint">Expected compute units per request (for pre-check)</p>
                     </div>
                 </div>
 
@@ -192,6 +214,30 @@
     height: 18px;
 }
 </style>
+
+<script>
+function toggleEstimatedCost() {
+    var meterType = document.getElementById('meter_type').value;
+    var estimatedCostGroup = document.getElementById('estimated_cost_group');
+    var quotaLabel = document.getElementById('quota_label');
+    var quotaHint = document.getElementById('quota_hint');
+
+    if (meterType === 'compute_units') {
+        estimatedCostGroup.style.display = 'block';
+        quotaLabel.textContent = 'Monthly Compute Units';
+        quotaHint.textContent = 'Total compute units per month (0 = unlimited)';
+    } else {
+        estimatedCostGroup.style.display = 'none';
+        quotaLabel.textContent = 'Monthly Quota';
+        quotaHint.textContent = 'Total requests per month (0 = unlimited)';
+    }
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    toggleEstimatedCost();
+});
+</script>
 {{end}}
 
 {{define "panel-docs"}}

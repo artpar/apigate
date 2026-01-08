@@ -8,12 +8,22 @@ import (
 	"github.com/artpar/apigate/ports"
 )
 
+// MeterType determines which metric to use for quota enforcement.
+type MeterType string
+
+const (
+	MeterTypeRequests     MeterType = "requests"      // Count raw API requests (default)
+	MeterTypeComputeUnits MeterType = "compute_units" // Count weighted units (tokens, etc.)
+)
+
 // Config represents quota limits and enforcement settings (value type).
 type Config struct {
-	RequestsPerMonth int64            // -1 = unlimited
+	RequestsPerMonth int64            // -1 = unlimited (also used as UnitsPerMonth for compute_units)
 	BytesPerMonth    int64            // 0 = unlimited
 	EnforceMode      EnforceMode      // How to handle quota exceeded
 	GracePct         float64          // Grace percentage before hard block (e.g., 0.05 = 5%)
+	MeterType        MeterType        // Which metric to enforce: requests or compute_units
+	EstimatedCost    float64          // Estimated cost per request for pre-check (compute_units mode)
 }
 
 // EnforceMode determines how quota limits are enforced.
@@ -49,18 +59,30 @@ type CheckResult struct {
 
 // Check performs a quota check against current state.
 // This is a PURE function - no side effects.
+// The increment parameter is interpreted based on MeterType:
+//   - For requests: number of requests to add (typically 1)
+//   - For compute_units: estimated units to add (from EstimatedCost or actual cost)
 func Check(state ports.QuotaState, cfg Config, increment int64) CheckResult {
+	// Determine which metric to use based on MeterType
+	var currentUsage int64
+	switch cfg.MeterType {
+	case MeterTypeComputeUnits:
+		currentUsage = int64(state.ComputeUnits)
+	default: // MeterTypeRequests or empty (backward compatible)
+		currentUsage = state.RequestCount
+	}
+
 	// Handle unlimited quota
 	if cfg.RequestsPerMonth < 0 {
 		return CheckResult{
 			Allowed:      true,
-			CurrentUsage: state.RequestCount + increment,
+			CurrentUsage: currentUsage + increment,
 			Limit:        -1,
 			WarningLevel: WarningNone,
 		}
 	}
 
-	newCount := state.RequestCount + increment
+	newCount := currentUsage + increment
 	limit := cfg.RequestsPerMonth
 	gracedLimit := int64(float64(limit) * (1 + cfg.GracePct))
 
@@ -135,11 +157,25 @@ func ConfigFromPlan(p ports.Plan) Config {
 		gracePct = 0.05 // Default 5% grace
 	}
 
+	// Map ports.MeterType to quota.MeterType
+	meterType := MeterTypeRequests
+	switch p.MeterType {
+	case ports.MeterTypeComputeUnits:
+		meterType = MeterTypeComputeUnits
+	}
+
+	estimatedCost := p.EstimatedCostPerReq
+	if estimatedCost <= 0 {
+		estimatedCost = 1.0 // Default to 1 unit per request
+	}
+
 	return Config{
 		RequestsPerMonth: p.RequestsPerMonth,
 		BytesPerMonth:    0, // Not yet implemented in Plan
 		EnforceMode:      mode,
 		GracePct:         gracePct,
+		MeterType:        meterType,
+		EstimatedCost:    estimatedCost,
 	}
 }
 

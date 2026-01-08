@@ -1,0 +1,188 @@
+{{define "content"}}
+<div class="page">
+    <div class="page-header">
+        <h1 class="page-title">{{if .IsNew}}Create Webhook{{else}}Edit Webhook{{end}}</h1>
+    </div>
+
+    <div class="card">
+        <form method="POST" class="card-body">
+            {{if .Error}}
+            <div class="alert alert-error">{{.Error}}</div>
+            {{end}}
+
+            <div class="form-group">
+                <label for="name">Name</label>
+                <input type="text" id="name" name="name" value="{{.Webhook.Name}}" required
+                    placeholder="e.g., Usage Alerts" class="form-control">
+                <small class="form-hint">A descriptive name for this webhook</small>
+            </div>
+
+            <div class="form-group">
+                <label for="description">Description</label>
+                <textarea id="description" name="description" rows="2" class="form-control"
+                    placeholder="What this webhook is used for">{{.Webhook.Description}}</textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="url">Endpoint URL</label>
+                <input type="url" id="url" name="url" value="{{.Webhook.URL}}" required
+                    placeholder="https://example.com/webhooks/apigate" class="form-control">
+                <small class="form-hint">The URL to receive webhook POST requests</small>
+            </div>
+
+            <div class="form-group">
+                <label for="secret">Signing Secret</label>
+                <div class="input-group">
+                    <input type="text" id="secret" name="secret" value="{{.Webhook.Secret}}" readonly
+                        class="form-control" style="font-family: monospace;">
+                </div>
+                <small class="form-hint">Use this secret to verify webhook signatures</small>
+            </div>
+
+            <div class="form-group">
+                <label>Events</label>
+                <small class="form-hint" style="display: block; margin-bottom: 8px;">Select the events this webhook should receive</small>
+                <div class="checkbox-grid">
+                    {{range $eventType := .EventTypes}}
+                    <label class="form-checkbox">
+                        <input type="checkbox" name="events" value="{{$eventType}}"
+                            {{range $.Webhook.Events}}{{if eq . $eventType}}checked{{end}}{{end}}>
+                        <span>{{$eventType}}</span>
+                    </label>
+                    {{end}}
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="retry_count">Max Retries</label>
+                    <input type="number" id="retry_count" name="retry_count" value="{{.Webhook.RetryCount}}"
+                        min="0" max="10" class="form-control">
+                    <small class="form-hint">Number of retry attempts for failed deliveries</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="timeout_ms">Timeout (ms)</label>
+                    <input type="number" id="timeout_ms" name="timeout_ms" value="{{.Webhook.TimeoutMS}}"
+                        min="1000" max="60000" step="1000" class="form-control">
+                    <small class="form-hint">Request timeout in milliseconds</small>
+                </div>
+            </div>
+
+            {{if not .IsNew}}
+            <div class="form-group">
+                <label for="user_id">User ID</label>
+                <input type="text" id="user_id" name="user_id" value="{{.Webhook.UserID}}" readonly
+                    class="form-control" style="background: var(--bg-muted);">
+            </div>
+            {{else}}
+            <div class="form-group">
+                <label for="user_id">User ID (optional)</label>
+                <input type="text" id="user_id" name="user_id" value="{{.Webhook.UserID}}"
+                    placeholder="Leave empty for system-wide webhook" class="form-control">
+                <small class="form-hint">Associate webhook with a specific user, or leave empty for system events</small>
+            </div>
+            {{end}}
+
+            <div class="form-group">
+                <label class="form-checkbox">
+                    <input type="checkbox" name="enabled" value="true" {{if .Webhook.Enabled}}checked{{end}}>
+                    <span>Enabled</span>
+                </label>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">{{if .IsNew}}Create{{else}}Save Changes{{end}}</button>
+                <a href="/webhooks" class="btn btn-secondary">Cancel</a>
+                {{if not .IsNew}}
+                <button type="button" class="btn btn-outline"
+                    hx-post="/webhooks/{{.Webhook.ID}}/test"
+                    hx-swap="none">Send Test Event</button>
+                <button type="button" class="btn btn-danger"
+                    hx-delete="/webhooks/{{.Webhook.ID}}"
+                    hx-confirm="Are you sure you want to delete this webhook?"
+                    hx-target="body">Delete</button>
+                {{end}}
+            </div>
+        </form>
+    </div>
+
+    {{if not .IsNew}}
+    <div class="page-header" style="margin-top: 2rem;">
+        <h2 class="page-title">Recent Deliveries</h2>
+    </div>
+    <div class="card">
+        <div class="card-body flush" id="deliveries-table"
+            hx-get="/partials/webhooks/{{.Webhook.ID}}/deliveries"
+            hx-trigger="load, webhook-tested from:body"
+            hx-swap="innerHTML">
+            <div class="table-empty">Loading deliveries...</div>
+        </div>
+    </div>
+    {{end}}
+</div>
+{{end}}
+
+{{define "panel-docs"}}
+<div class="panel-section">
+    <h3>Webhook Configuration</h3>
+    <p>Configure your webhook endpoint to receive event notifications.</p>
+</div>
+
+<div class="panel-section">
+    <h4>Event Categories</h4>
+    <ul class="panel-list">
+        <li><strong>usage.*</strong> - Usage threshold and limit events</li>
+        <li><strong>key.*</strong> - API key lifecycle events</li>
+        <li><strong>subscription.*</strong> - Subscription lifecycle</li>
+        <li><strong>payment.*</strong> - Payment status events</li>
+        <li><strong>plan.*</strong> - Plan change events</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>Retry Behavior</h4>
+    <p>Failed deliveries (5xx errors) are retried with exponential backoff:</p>
+    <ul class="panel-list">
+        <li>1st retry: 1 minute</li>
+        <li>2nd retry: 5 minutes</li>
+        <li>3rd retry: 30 minutes</li>
+    </ul>
+</div>
+{{end}}
+
+{{define "panel-reference"}}
+<div class="panel-section">
+    <h3>Signature Verification</h3>
+    <p>Always verify webhook signatures to ensure authenticity.</p>
+</div>
+
+<div class="panel-section">
+    <h4>Node.js Example</h4>
+    <pre class="panel-code">const crypto = require('crypto');
+
+function verifySignature(payload, signature, secret) {
+  const hmac = crypto.createHmac('sha256', secret);
+  hmac.update(payload);
+  const expected = hmac.digest('hex');
+  return crypto.timingSafeEqual(
+    Buffer.from(signature),
+    Buffer.from(expected)
+  );
+}</pre>
+</div>
+
+<div class="panel-section">
+    <h4>Python Example</h4>
+    <pre class="panel-code">import hmac
+import hashlib
+
+def verify_signature(payload, signature, secret):
+    expected = hmac.new(
+        secret.encode(),
+        payload.encode(),
+        hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(signature, expected)</pre>
+</div>
+{{end}}

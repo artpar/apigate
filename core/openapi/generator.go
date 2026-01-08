@@ -429,9 +429,22 @@ func (g *Generator) fieldToSchema(field convention.DerivedField) *Schema {
 		s.Example = field.Default
 	}
 
-	// Add constraints
+	// Add constraints and collect descriptions
+	var constraintDescs []string
 	for _, c := range field.Constraints {
-		g.applyConstraint(s, c)
+		if desc := g.applyConstraint(s, c); desc != "" {
+			constraintDescs = append(constraintDescs, desc)
+		}
+	}
+
+	// Append constraint descriptions to field description
+	if len(constraintDescs) > 0 {
+		constraintInfo := strings.Join(constraintDescs, ". ")
+		if s.Description != "" {
+			s.Description = fmt.Sprintf("%s. Constraints: %s.", s.Description, constraintInfo)
+		} else {
+			s.Description = fmt.Sprintf("Constraints: %s.", constraintInfo)
+		}
 	}
 
 	return s
@@ -483,36 +496,56 @@ func (g *Generator) generateExample(field convention.DerivedField, defaultExampl
 	return defaultExample
 }
 
-// applyConstraint applies a constraint to a schema.
-func (g *Generator) applyConstraint(s *Schema, c schema.Constraint) {
+// applyConstraint applies a constraint to a schema and returns a human-readable description.
+func (g *Generator) applyConstraint(s *Schema, c schema.Constraint) string {
 	switch c.Type {
 	case schema.ConstraintMinLength:
 		if v, ok := c.Value.(int); ok {
 			s.MinLength = &v
+			return fmt.Sprintf("Minimum length: %d", v)
 		}
 	case schema.ConstraintMaxLength:
 		if v, ok := c.Value.(int); ok {
 			s.MaxLength = &v
+			return fmt.Sprintf("Maximum length: %d", v)
 		}
 	case schema.ConstraintMin:
 		if v, ok := c.Value.(float64); ok {
 			s.Minimum = &v
+			return fmt.Sprintf("Minimum value: %g", v)
 		} else if v, ok := c.Value.(int); ok {
 			f := float64(v)
 			s.Minimum = &f
+			return fmt.Sprintf("Minimum value: %d", v)
 		}
 	case schema.ConstraintMax:
 		if v, ok := c.Value.(float64); ok {
 			s.Maximum = &v
+			return fmt.Sprintf("Maximum value: %g", v)
 		} else if v, ok := c.Value.(int); ok {
 			f := float64(v)
 			s.Maximum = &f
+			return fmt.Sprintf("Maximum value: %d", v)
 		}
 	case schema.ConstraintPattern:
 		if v, ok := c.Value.(string); ok {
 			s.Pattern = v
+			// Use custom message if available, otherwise show pattern
+			if c.Message != "" {
+				return c.Message
+			}
+			return fmt.Sprintf("Must match pattern: %s", v)
 		}
+	case schema.ConstraintNotEmpty:
+		return "Must not be empty"
+	case schema.ConstraintOneOf:
+		if values, ok := c.Value.([]string); ok && len(values) > 0 {
+			return fmt.Sprintf("Must be one of: %s", strings.Join(values, ", "))
+		}
+	case schema.ConstraintRefExists:
+		return "Referenced record must exist"
 	}
+	return ""
 }
 
 // generateActionPath creates path items for an action.
@@ -545,28 +578,72 @@ func (g *Generator) generateActionPath(spec *Spec, mod convention.Derived, actio
 func (g *Generator) addListPath(spec *Spec, mod convention.Derived, basePath, title string) {
 	path := spec.Paths[basePath]
 
+	// Collect filterable and sortable field names
+	var filterableFields, sortableFields []string
+	for _, field := range mod.Fields {
+		if field.Internal {
+			continue
+		}
+		// Filterable: lookup, unique, or id fields
+		if field.Lookup || field.Unique || field.Name == "id" {
+			filterableFields = append(filterableFields, field.Name)
+		}
+		// Sortable: non-internal basic types
+		if isBasicType(field.Type) {
+			sortableFields = append(sortableFields, field.Name)
+		}
+	}
+
 	// Query parameters for list
 	params := []Parameter{
 		{Name: "limit", In: "query", Description: "Maximum number of records", Schema: &Schema{Type: "integer", Default: 100}},
 		{Name: "offset", In: "query", Description: "Number of records to skip", Schema: &Schema{Type: "integer", Default: 0}},
 	}
 
-	// Add filter parameters for lookup fields
+	// Add sort parameter with sortable field documentation
+	if len(sortableFields) > 0 {
+		params = append(params, Parameter{
+			Name:        "order_by",
+			In:          "query",
+			Description: fmt.Sprintf("Field to sort by. Sortable fields: %s", strings.Join(sortableFields, ", ")),
+			Schema:      &Schema{Type: "string", Enum: sortableFields},
+		})
+		params = append(params, Parameter{
+			Name:        "order_desc",
+			In:          "query",
+			Description: "Sort in descending order (default: false)",
+			Schema:      &Schema{Type: "boolean", Default: false},
+		})
+	}
+
+	// Add filter parameters for filterable fields
 	for _, field := range mod.Fields {
-		if field.Lookup && !field.Internal {
+		if field.Internal {
+			continue
+		}
+		if field.Lookup || field.Unique || field.Name == "id" {
 			params = append(params, Parameter{
 				Name:        field.Name,
 				In:          "query",
-				Description: fmt.Sprintf("Filter by %s", field.Name),
+				Description: fmt.Sprintf("Filter by %s (filterable)", field.Name),
 				Schema:      g.fieldToSchema(field),
 			})
 		}
 	}
 
+	// Build description with filterable/sortable info
+	description := fmt.Sprintf("Retrieve a list of %s records.", mod.Source.Name)
+	if len(filterableFields) > 0 {
+		description += fmt.Sprintf("\n\n**Filterable fields:** %s", strings.Join(filterableFields, ", "))
+	}
+	if len(sortableFields) > 0 {
+		description += fmt.Sprintf("\n\n**Sortable fields:** %s", strings.Join(sortableFields, ", "))
+	}
+
 	path.Get = &Operation{
 		Tags:        []string{mod.Source.Name},
 		Summary:     fmt.Sprintf("List %s", mod.Plural),
-		Description: fmt.Sprintf("Retrieve a list of %s records", mod.Source.Name),
+		Description: description,
 		OperationID: fmt.Sprintf("list%s", title),
 		Parameters:  params,
 		Responses: map[string]Response{
@@ -583,6 +660,18 @@ func (g *Generator) addListPath(spec *Spec, mod convention.Derived, basePath, ti
 	}
 
 	spec.Paths[basePath] = path
+}
+
+// isBasicType returns true if the field type is a basic sortable type.
+func isBasicType(t schema.FieldType) bool {
+	switch t {
+	case schema.FieldTypeString, schema.FieldTypeInt, schema.FieldTypeFloat,
+		schema.FieldTypeBool, schema.FieldTypeEmail, schema.FieldTypeTimestamp,
+		schema.FieldTypeEnum, schema.FieldTypeRef:
+		return true
+	default:
+		return false
+	}
 }
 
 // addGetPath adds get operation.

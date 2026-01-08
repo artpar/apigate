@@ -495,6 +495,11 @@ func (r *Runtime) executeCreate(ctx context.Context, mod convention.Derived, act
 		return ActionResult{}, err
 	}
 
+	// Validate ref_exists constraints
+	if err := r.validateRefExists(ctx, mod, data); err != nil {
+		return ActionResult{}, err
+	}
+
 	id, err := r.storage.Create(ctx, mod.Source.Name, data)
 	if err != nil {
 		return ActionResult{}, err
@@ -552,6 +557,65 @@ func (r *Runtime) resolveRefs(ctx context.Context, mod convention.Derived, data 
 	return nil
 }
 
+// validateRefExists validates ref_exists constraints on fields.
+// This checks that values exist in the referenced module without modifying the data.
+// Unlike resolveRefs (which resolves and replaces ref field values), this validates
+// any field that has a ref_exists constraint, including non-ref fields.
+func (r *Runtime) validateRefExists(ctx context.Context, mod convention.Derived, data map[string]any) error {
+	for _, field := range mod.Fields {
+		// Check if this field has a ref_exists constraint
+		var refModule string
+		for _, c := range field.Constraints {
+			if c.Type == schema.ConstraintRefExists {
+				// The constraint value should be the module name to check against
+				if ref, ok := c.Value.(string); ok {
+					refModule = ref
+				} else if field.Ref != "" {
+					// Fall back to field.Ref if available
+					refModule = field.Ref
+				}
+				break
+			}
+		}
+
+		if refModule == "" {
+			continue
+		}
+
+		val, ok := data[field.Name]
+		if !ok || val == nil {
+			continue
+		}
+
+		valStr, ok := val.(string)
+		if !ok || valStr == "" {
+			continue
+		}
+
+		// Get the referenced module
+		refMod, ok := r.registry.Get(refModule)
+		if !ok {
+			return fmt.Errorf("ref_exists: module %q not found", refModule)
+		}
+
+		// Try to find the referenced record by its lookup fields
+		var found bool
+		for _, lookup := range refMod.Lookups {
+			record, err := r.storage.Get(ctx, refModule, lookup, valStr)
+			if err == nil && record != nil {
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			return fmt.Errorf("ref_exists: %s %q not found in %s", field.Name, valStr, refModule)
+		}
+	}
+
+	return nil
+}
+
 // executeUpdate handles update actions.
 func (r *Runtime) executeUpdate(ctx context.Context, mod convention.Derived, act *convention.DerivedAction, input ActionInput) (ActionResult, error) {
 	// Validate input data
@@ -582,6 +646,11 @@ func (r *Runtime) executeUpdate(ctx context.Context, mod convention.Derived, act
 		updateData[k] = v
 	}
 	if err := r.resolveRefs(ctx, mod, updateData); err != nil {
+		return ActionResult{}, err
+	}
+
+	// Validate ref_exists constraints
+	if err := r.validateRefExists(ctx, mod, updateData); err != nil {
 		return ActionResult{}, err
 	}
 

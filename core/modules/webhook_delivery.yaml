@@ -1,0 +1,66 @@
+# Webhook Delivery module - tracks webhook delivery attempts
+# Each delivery attempt is logged for debugging and retry purposes.
+module: webhook_delivery
+
+schema:
+  # References
+  webhook_id:   { type: string, required: true, lookup: true, description: "Webhook that was called" }
+  event_id:     { type: string, required: true, description: "Unique event identifier" }
+
+  # Event details
+  event_type:   { type: string, required: true, description: "Type of event (e.g., 'usage.threshold')" }
+  payload:      { type: string, description: "JSON payload that was sent" }
+
+  # Delivery status
+  status:       { type: string, default: "pending", enum: ["pending", "success", "failed", "retrying"], description: "Delivery status" }
+  attempt:      { type: int, default: 1, description: "Current attempt number" }
+  max_attempts: { type: int, default: 3, description: "Maximum retry attempts" }
+
+  # Response details
+  status_code:  { type: int, description: "HTTP response status code" }
+  response_body: { type: string, description: "Response body (truncated)" }
+  error:        { type: string, description: "Error message if failed" }
+
+  # Timing
+  duration_ms:  { type: int, description: "Request duration in milliseconds" }
+  next_retry:   { type: timestamp, description: "When to retry (if retrying)" }
+
+actions:
+  retry:
+    description: Manually retry a failed delivery
+    guard: { status: failed }
+
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /api/webhook-deliveries
+      endpoints:
+        - { action: list, method: GET, path: "/" }
+        - { action: get, method: GET, path: "/{id}" }
+        - { action: retry, method: POST, path: "/{id}/retry", auth: user }
+
+  cli:
+    serve:
+      enabled: true
+      command: webhook-deliveries
+      commands:
+        - action: list
+          columns: [id, webhook_id, event_type, status, attempt, status_code, created_at]
+          flags:
+            - { param: webhook_id, description: "Filter by webhook ID" }
+            - { param: status, description: "Filter by status" }
+        - action: get
+          args:
+            - { name: id, required: true }
+        - action: retry
+          args:
+            - { name: id, required: true }
+
+meta:
+  description: Webhook delivery attempt logs
+  icon: send
+  display_name: Webhook Deliveries
+  plural: Webhook Deliveries
+  depends:
+    - webhook

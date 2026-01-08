@@ -25,6 +25,7 @@
                         <label class="form-label" for="active_provider">Select Payment Provider</label>
                         <select id="active_provider" name="active_provider" class="form-input">
                             <option value="none" {{if eq .ActiveProvider "none"}}selected{{end}}>None (Free plans only)</option>
+                            <option value="dummy" {{if eq .ActiveProvider "dummy"}}selected{{end}}>Demo Mode (Testing - no real payments)</option>
                             <option value="stripe" {{if eq .ActiveProvider "stripe"}}selected{{end}}>Stripe</option>
                             <option value="paddle" {{if eq .ActiveProvider "paddle"}}selected{{end}}>Paddle</option>
                             <option value="lemonsqueezy" {{if eq .ActiveProvider "lemonsqueezy"}}selected{{end}}>LemonSqueezy</option>

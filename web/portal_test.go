@@ -274,6 +274,15 @@ func (m *mockPlanStore) Delete(ctx context.Context, id string) error {
 	return errNotFound
 }
 
+func (m *mockPlanStore) ClearOtherDefaults(ctx context.Context, exceptID string) error {
+	for i, p := range m.plans {
+		if p.ID != exceptID && p.IsDefault {
+			m.plans[i].IsDefault = false
+		}
+	}
+	return nil
+}
+
 var errNotFound = errors.New("not found")
 
 // Helper to create test portal handler

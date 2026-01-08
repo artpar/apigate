@@ -100,8 +100,16 @@ type Plan struct {
 	UpdatedAt          time.Time
 }
 
+// MeterType determines which metric is used for billing.
+type MeterType string
+
+const (
+	MeterTypeRequests     MeterType = "requests"
+	MeterTypeComputeUnits MeterType = "compute_units"
+)
+
 // CalculateInvoice creates an invoice from usage and plan.
-// This is a PURE function.
+// This is a PURE function. Backward compatible - uses request count.
 func CalculateInvoice(
 	userID string,
 	periodStart, periodEnd time.Time,
@@ -109,6 +117,26 @@ func CalculateInvoice(
 	planPrice int64,
 	requestsUsed, requestsIncluded int64,
 	overagePrice int64,
+) Invoice {
+	return CalculateInvoiceWithMeterType(
+		userID, periodStart, periodEnd,
+		planName, planPrice,
+		requestsUsed, requestsIncluded,
+		overagePrice, MeterTypeRequests,
+	)
+}
+
+// CalculateInvoiceWithMeterType creates an invoice from usage and plan.
+// Uses meterType to determine labels: "requests" or "compute units".
+// This is a PURE function.
+func CalculateInvoiceWithMeterType(
+	userID string,
+	periodStart, periodEnd time.Time,
+	planName string,
+	planPrice int64,
+	unitsUsed, unitsIncluded int64,
+	overagePrice int64,
+	meterType MeterType,
 ) Invoice {
 	items := []InvoiceItem{
 		{
@@ -121,13 +149,19 @@ func CalculateInvoice(
 
 	subtotal := planPrice
 
+	// Determine unit label based on meter type
+	unitLabel := "requests"
+	if meterType == MeterTypeComputeUnits {
+		unitLabel = "compute units"
+	}
+
 	// Add overage if applicable
-	if requestsIncluded >= 0 && requestsUsed > requestsIncluded {
-		overage := requestsUsed - requestsIncluded
+	if unitsIncluded >= 0 && unitsUsed > unitsIncluded {
+		overage := unitsUsed - unitsIncluded
 		overageAmount := overage * overagePrice
 
 		items = append(items, InvoiceItem{
-			Description: "API overage (" + formatNumber(overage) + " requests)",
+			Description: "API overage (" + formatNumber(overage) + " " + unitLabel + ")",
 			Quantity:    overage,
 			UnitPrice:   overagePrice,
 			Amount:      overageAmount,

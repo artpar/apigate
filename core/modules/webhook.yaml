@@ -1,0 +1,93 @@
+# Webhook module - HTTP callbacks for events
+# Webhooks allow customers to receive real-time notifications when events occur.
+# Each webhook is owned by a user and can subscribe to multiple event types.
+module: webhook
+
+schema:
+  # Identity
+  user_id:     { type: string, required: true, lookup: true, description: "User who owns this webhook" }
+  name:        { type: string, required: true, description: "Friendly name for this webhook" }
+  description: { type: string, default: "", description: "Description of what this webhook is for" }
+
+  # Endpoint configuration
+  url:         { type: string, required: true, description: "HTTPS URL to send events to" }
+  secret:      { type: string, description: "Secret for signing payloads (HMAC-SHA256)" }
+
+  # Event subscriptions
+  events:      { type: strings, description: "Event types to subscribe to (e.g., 'usage.threshold', 'key.created')" }
+
+  # Delivery settings
+  retry_count: { type: int, default: 3, description: "Number of retry attempts on failure" }
+  timeout_ms:  { type: int, default: 30000, description: "Request timeout in milliseconds" }
+
+  # State
+  enabled:     { type: bool, default: true, description: "Whether this webhook is active" }
+
+actions:
+  enable:
+    set: { enabled: true }
+    description: Enable a webhook
+
+  disable:
+    set: { enabled: false }
+    description: Disable a webhook
+
+  test:
+    description: Send a test event to verify webhook configuration
+    returns: { success: bool, status_code: int, error: string }
+
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /api/webhooks
+      endpoints:
+        - { action: list, method: GET, path: "/" }
+        - { action: get, method: GET, path: "/{id}" }
+        - { action: create, method: POST, path: "/", auth: user }
+        - { action: update, method: PATCH, path: "/{id}", auth: user }
+        - { action: delete, method: DELETE, path: "/{id}", auth: user }
+        - { action: enable, method: POST, path: "/{id}/enable", auth: user }
+        - { action: disable, method: POST, path: "/{id}/disable", auth: user }
+        - { action: test, method: POST, path: "/{id}/test", auth: user }
+
+  cli:
+    serve:
+      enabled: true
+      command: webhooks
+      commands:
+        - action: list
+          columns: [id, user_id, name, url, events, enabled]
+        - action: get
+          args:
+            - { name: id, required: true, description: "Webhook ID" }
+        - action: create
+          flags:
+            - { param: user_id, required: true, description: "User ID who owns this webhook" }
+            - { param: name, required: true, description: "Webhook name" }
+            - { param: url, required: true, description: "HTTPS URL to receive events" }
+            - { param: events, required: true, description: "Comma-separated event types" }
+            - { param: secret, description: "Signing secret (auto-generated if not provided)" }
+            - { param: retry_count, default: 3 }
+            - { param: timeout_ms, default: 30000 }
+        - action: delete
+          args:
+            - { name: id, required: true }
+          confirm: "Are you sure you want to delete this webhook?"
+        - action: enable
+          args:
+            - { name: id, required: true }
+        - action: disable
+          args:
+            - { name: id, required: true }
+        - action: test
+          args:
+            - { name: id, required: true }
+
+meta:
+  description: HTTP callbacks for real-time event notifications
+  icon: bell
+  display_name: Webhooks
+  plural: Webhooks
+  depends:
+    - user

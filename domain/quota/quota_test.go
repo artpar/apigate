@@ -899,3 +899,290 @@ func TestCheck_FullLifecycle(t *testing.T) {
 		t.Errorf("at 106%%: expected Allowed=false (exceeds grace)")
 	}
 }
+
+// -----------------------------------------------------------------------------
+// MeterType tests - compute_units mode
+// -----------------------------------------------------------------------------
+
+func TestCheck_MeterTypeComputeUnits_Basic(t *testing.T) {
+	// Test that compute_units mode uses ComputeUnits field instead of RequestCount
+	state := ports.QuotaState{
+		UserID:       "user-1",
+		RequestCount: 1000, // High request count should be ignored
+		ComputeUnits: 50,   // This should be used
+	}
+	cfg := Config{
+		RequestsPerMonth: 100,
+		EnforceMode:      EnforceHard,
+		GracePct:         0.05,
+		MeterType:        MeterTypeComputeUnits,
+	}
+
+	result := Check(state, cfg, 10)
+
+	if !result.Allowed {
+		t.Errorf("expected Allowed=true, got false")
+	}
+	if result.CurrentUsage != 60 {
+		t.Errorf("expected CurrentUsage=60 (ComputeUnits), got %d", result.CurrentUsage)
+	}
+	if result.PercentUsed != 60.0 {
+		t.Errorf("expected PercentUsed=60.0, got %f", result.PercentUsed)
+	}
+}
+
+func TestCheck_MeterTypeComputeUnits_Exceeded(t *testing.T) {
+	// Test compute_units mode when quota exceeded
+	state := ports.QuotaState{
+		UserID:       "user-1",
+		RequestCount: 5,   // Low request count (ignored)
+		ComputeUnits: 100, // At limit
+	}
+	cfg := Config{
+		RequestsPerMonth: 100,
+		EnforceMode:      EnforceHard,
+		GracePct:         0.05,
+		MeterType:        MeterTypeComputeUnits,
+	}
+
+	result := Check(state, cfg, 10)
+
+	// 110 units exceeds grace limit of 105
+	if result.Allowed {
+		t.Errorf("expected Allowed=false when exceeding grace, got true")
+	}
+	if result.CurrentUsage != 110 {
+		t.Errorf("expected CurrentUsage=110, got %d", result.CurrentUsage)
+	}
+	if result.Reason != "quota_exceeded" {
+		t.Errorf("expected Reason='quota_exceeded', got %q", result.Reason)
+	}
+}
+
+func TestCheck_MeterTypeComputeUnits_Unlimited(t *testing.T) {
+	// Test unlimited quota with compute_units mode
+	state := ports.QuotaState{
+		UserID:       "user-1",
+		RequestCount: 100,
+		ComputeUnits: 999999,
+	}
+	cfg := Config{
+		RequestsPerMonth: -1, // Unlimited
+		EnforceMode:      EnforceHard,
+		GracePct:         0.05,
+		MeterType:        MeterTypeComputeUnits,
+	}
+
+	result := Check(state, cfg, 1000)
+
+	if !result.Allowed {
+		t.Errorf("expected Allowed=true for unlimited quota, got false")
+	}
+	if result.CurrentUsage != 1000999 {
+		t.Errorf("expected CurrentUsage=1000999, got %d", result.CurrentUsage)
+	}
+	if result.Limit != -1 {
+		t.Errorf("expected Limit=-1, got %d", result.Limit)
+	}
+}
+
+func TestCheck_MeterTypeRequests_Default(t *testing.T) {
+	// Test that empty/default MeterType uses RequestCount (backward compatible)
+	state := ports.QuotaState{
+		UserID:       "user-1",
+		RequestCount: 50,
+		ComputeUnits: 9999, // High compute units should be ignored
+	}
+	cfg := Config{
+		RequestsPerMonth: 100,
+		EnforceMode:      EnforceHard,
+		GracePct:         0.05,
+		// MeterType not set (defaults to empty string)
+	}
+
+	result := Check(state, cfg, 10)
+
+	if !result.Allowed {
+		t.Errorf("expected Allowed=true, got false")
+	}
+	if result.CurrentUsage != 60 {
+		t.Errorf("expected CurrentUsage=60 (RequestCount), got %d", result.CurrentUsage)
+	}
+}
+
+func TestCheck_MeterType_TableDriven(t *testing.T) {
+	tests := []struct {
+		name         string
+		meterType    MeterType
+		requestCount int64
+		computeUnits float64
+		limit        int64
+		increment    int64
+		wantAllowed  bool
+		wantUsage    int64
+	}{
+		{
+			name:         "requests_under_quota",
+			meterType:    MeterTypeRequests,
+			requestCount: 50,
+			computeUnits: 500,
+			limit:        100,
+			increment:    10,
+			wantAllowed:  true,
+			wantUsage:    60,
+		},
+		{
+			name:         "requests_over_quota",
+			meterType:    MeterTypeRequests,
+			requestCount: 100,
+			computeUnits: 50,
+			limit:        100,
+			increment:    10,
+			wantAllowed:  false, // 110 > 105 grace
+			wantUsage:    110,
+		},
+		{
+			name:         "units_under_quota",
+			meterType:    MeterTypeComputeUnits,
+			requestCount: 1000,
+			computeUnits: 50,
+			limit:        100,
+			increment:    10,
+			wantAllowed:  true,
+			wantUsage:    60,
+		},
+		{
+			name:         "units_over_quota",
+			meterType:    MeterTypeComputeUnits,
+			requestCount: 10,
+			computeUnits: 100,
+			limit:        100,
+			increment:    10,
+			wantAllowed:  false, // 110 > 105 grace
+			wantUsage:    110,
+		},
+		{
+			name:         "units_within_grace",
+			meterType:    MeterTypeComputeUnits,
+			requestCount: 10,
+			computeUnits: 100,
+			limit:        100,
+			increment:    5,
+			wantAllowed:  true, // 105 == 105 grace
+			wantUsage:    105,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := ports.QuotaState{
+				RequestCount: tt.requestCount,
+				ComputeUnits: tt.computeUnits,
+			}
+			cfg := Config{
+				RequestsPerMonth: tt.limit,
+				EnforceMode:      EnforceHard,
+				GracePct:         0.05,
+				MeterType:        tt.meterType,
+			}
+
+			result := Check(state, cfg, tt.increment)
+
+			if result.Allowed != tt.wantAllowed {
+				t.Errorf("Allowed = %v, want %v", result.Allowed, tt.wantAllowed)
+			}
+			if result.CurrentUsage != tt.wantUsage {
+				t.Errorf("CurrentUsage = %d, want %d", result.CurrentUsage, tt.wantUsage)
+			}
+		})
+	}
+}
+
+func TestCheck_MeterTypeComputeUnits_SoftEnforce(t *testing.T) {
+	// Test soft enforcement with compute_units - should allow and track overage
+	state := ports.QuotaState{
+		UserID:       "user-1",
+		ComputeUnits: 200, // Already over quota
+	}
+	cfg := Config{
+		RequestsPerMonth: 100,
+		EnforceMode:      EnforceSoft,
+		GracePct:         0.05,
+		MeterType:        MeterTypeComputeUnits,
+	}
+
+	result := Check(state, cfg, 50)
+
+	if !result.Allowed {
+		t.Errorf("expected Allowed=true for soft enforcement, got false")
+	}
+	if !result.IsOverQuota {
+		t.Errorf("expected IsOverQuota=true, got false")
+	}
+	if result.OverageAmount != 150 {
+		t.Errorf("expected OverageAmount=150, got %d", result.OverageAmount)
+	}
+}
+
+func TestConfigFromPlan_MeterType(t *testing.T) {
+	tests := []struct {
+		name          string
+		planMeterType ports.MeterType
+		wantMeterType MeterType
+	}{
+		{"requests", ports.MeterTypeRequests, MeterTypeRequests},
+		{"compute_units", ports.MeterTypeComputeUnits, MeterTypeComputeUnits},
+		{"empty_defaults_to_requests", "", MeterTypeRequests},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plan := ports.Plan{
+				RequestsPerMonth: 1000,
+				MeterType:        tt.planMeterType,
+			}
+
+			cfg := ConfigFromPlan(plan)
+
+			if cfg.MeterType != tt.wantMeterType {
+				t.Errorf("MeterType = %v, want %v", cfg.MeterType, tt.wantMeterType)
+			}
+		})
+	}
+}
+
+func TestConfigFromPlan_EstimatedCost(t *testing.T) {
+	tests := []struct {
+		name          string
+		estimatedCost float64
+		wantCost      float64
+	}{
+		{"zero_defaults_to_1", 0, 1.0},
+		{"negative_defaults_to_1", -5, 1.0},
+		{"positive_value", 10.5, 10.5},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plan := ports.Plan{
+				RequestsPerMonth:    1000,
+				EstimatedCostPerReq: tt.estimatedCost,
+			}
+
+			cfg := ConfigFromPlan(plan)
+
+			if cfg.EstimatedCost != tt.wantCost {
+				t.Errorf("EstimatedCost = %v, want %v", cfg.EstimatedCost, tt.wantCost)
+			}
+		})
+	}
+}
+
+func TestMeterTypeConstants(t *testing.T) {
+	if MeterTypeRequests != "requests" {
+		t.Errorf("expected MeterTypeRequests='requests', got %q", MeterTypeRequests)
+	}
+	if MeterTypeComputeUnits != "compute_units" {
+		t.Errorf("expected MeterTypeComputeUnits='compute_units', got %q", MeterTypeComputeUnits)
+	}
+}

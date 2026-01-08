@@ -10,17 +10,27 @@ const (
 	QuotaEnforceSoft QuotaEnforceMode = "soft" // Allow and bill overage
 )
 
+// MeterType determines which metric to use for quota enforcement and billing.
+type MeterType string
+
+const (
+	MeterTypeRequests     MeterType = "requests"      // Count raw API requests (default)
+	MeterTypeComputeUnits MeterType = "compute_units" // Count weighted units (tokens, etc.)
+)
+
 // Plan represents a pricing tier (immutable value type).
 type Plan struct {
-	ID                 string
-	Name               string
-	RequestsPerMonth   int64 // -1 = unlimited
-	RateLimitPerMinute int
-	PriceMonthly       int64 // cents
-	OveragePrice       int64 // hundredths of cents per request (10000 = $1)
-	StripePriceID      string
-	QuotaEnforceMode   QuotaEnforceMode // "hard", "warn", "soft" - defaults to "hard"
-	QuotaGracePct      float64          // Grace percentage before hard block (e.g., 0.05 = 5%)
+	ID                  string
+	Name                string
+	RequestsPerMonth    int64 // -1 = unlimited
+	RateLimitPerMinute  int
+	PriceMonthly        int64 // cents
+	OveragePrice        int64 // hundredths of cents per request (10000 = $1)
+	StripePriceID       string
+	QuotaEnforceMode    QuotaEnforceMode // "hard", "warn", "soft" - defaults to "hard"
+	QuotaGracePct       float64          // Grace percentage before hard block (e.g., 0.05 = 5%)
+	MeterType           MeterType        // Which metric to enforce: "requests" or "compute_units"
+	EstimatedCostPerReq float64          // Estimated cost per request for pre-check (default 1.0)
 }
 
 // Endpoint represents endpoint-specific pricing (value type).

@@ -10,12 +10,14 @@ import (
 
 	"github.com/artpar/apigate/domain/auth"
 	"github.com/artpar/apigate/domain/billing"
+	"github.com/artpar/apigate/domain/entitlement"
 	"github.com/artpar/apigate/domain/key"
 	"github.com/artpar/apigate/domain/proxy"
 	"github.com/artpar/apigate/domain/ratelimit"
 	"github.com/artpar/apigate/domain/route"
 	"github.com/artpar/apigate/domain/settings"
 	"github.com/artpar/apigate/domain/usage"
+	"github.com/artpar/apigate/domain/webhook"
 )
 
 // -----------------------------------------------------------------------------
@@ -117,6 +119,106 @@ type PlanStore interface {
 
 	// Delete removes a plan.
 	Delete(ctx context.Context, id string) error
+
+	// ClearOtherDefaults clears is_default on all plans except the specified one.
+	// This ensures only one plan can be marked as default at a time.
+	ClearOtherDefaults(ctx context.Context, exceptID string) error
+}
+
+// EntitlementStore persists entitlement definitions.
+type EntitlementStore interface {
+	// List returns all entitlements.
+	List(ctx context.Context) ([]entitlement.Entitlement, error)
+
+	// ListEnabled returns only enabled entitlements.
+	ListEnabled(ctx context.Context) ([]entitlement.Entitlement, error)
+
+	// Get retrieves an entitlement by ID.
+	Get(ctx context.Context, id string) (entitlement.Entitlement, error)
+
+	// GetByName retrieves an entitlement by name.
+	GetByName(ctx context.Context, name string) (entitlement.Entitlement, error)
+
+	// Create stores a new entitlement.
+	Create(ctx context.Context, e entitlement.Entitlement) error
+
+	// Update modifies an entitlement.
+	Update(ctx context.Context, e entitlement.Entitlement) error
+
+	// Delete removes an entitlement.
+	Delete(ctx context.Context, id string) error
+}
+
+// PlanEntitlementStore persists plan-entitlement mappings.
+type PlanEntitlementStore interface {
+	// List returns all plan-entitlement mappings.
+	List(ctx context.Context) ([]entitlement.PlanEntitlement, error)
+
+	// ListByPlan returns all entitlements for a specific plan.
+	ListByPlan(ctx context.Context, planID string) ([]entitlement.PlanEntitlement, error)
+
+	// ListByEntitlement returns all plans that have a specific entitlement.
+	ListByEntitlement(ctx context.Context, entitlementID string) ([]entitlement.PlanEntitlement, error)
+
+	// Get retrieves a plan-entitlement mapping by ID.
+	Get(ctx context.Context, id string) (entitlement.PlanEntitlement, error)
+
+	// GetByPlanAndEntitlement retrieves a specific mapping.
+	GetByPlanAndEntitlement(ctx context.Context, planID, entitlementID string) (entitlement.PlanEntitlement, error)
+
+	// Create stores a new plan-entitlement mapping.
+	Create(ctx context.Context, pe entitlement.PlanEntitlement) error
+
+	// Update modifies a plan-entitlement mapping.
+	Update(ctx context.Context, pe entitlement.PlanEntitlement) error
+
+	// Delete removes a plan-entitlement mapping.
+	Delete(ctx context.Context, id string) error
+}
+
+// WebhookStore persists webhook configurations.
+type WebhookStore interface {
+	// List returns all webhooks.
+	List(ctx context.Context) ([]webhook.Webhook, error)
+
+	// ListByUser returns all webhooks for a specific user.
+	ListByUser(ctx context.Context, userID string) ([]webhook.Webhook, error)
+
+	// ListEnabled returns all enabled webhooks.
+	ListEnabled(ctx context.Context) ([]webhook.Webhook, error)
+
+	// ListForEvent returns all enabled webhooks that subscribe to an event type.
+	ListForEvent(ctx context.Context, eventType webhook.EventType) ([]webhook.Webhook, error)
+
+	// Get retrieves a webhook by ID.
+	Get(ctx context.Context, id string) (webhook.Webhook, error)
+
+	// Create stores a new webhook.
+	Create(ctx context.Context, w webhook.Webhook) error
+
+	// Update modifies an existing webhook.
+	Update(ctx context.Context, w webhook.Webhook) error
+
+	// Delete removes a webhook.
+	Delete(ctx context.Context, id string) error
+}
+
+// DeliveryStore persists webhook delivery attempts.
+type DeliveryStore interface {
+	// List returns deliveries with optional filters.
+	List(ctx context.Context, webhookID string, limit int) ([]webhook.Delivery, error)
+
+	// ListPending returns deliveries ready for retry.
+	ListPending(ctx context.Context, before time.Time, limit int) ([]webhook.Delivery, error)
+
+	// Get retrieves a delivery by ID.
+	Get(ctx context.Context, id string) (webhook.Delivery, error)
+
+	// Create stores a new delivery.
+	Create(ctx context.Context, d webhook.Delivery) error
+
+	// Update modifies an existing delivery.
+	Update(ctx context.Context, d webhook.Delivery) error
 }
 
 // QuotaEnforceMode determines how quota limits are enforced.
@@ -126,6 +228,14 @@ const (
 	QuotaEnforceHard QuotaEnforceMode = "hard" // Reject requests when quota exceeded
 	QuotaEnforceWarn QuotaEnforceMode = "warn" // Allow but add warning headers
 	QuotaEnforceSoft QuotaEnforceMode = "soft" // Allow and bill overage
+)
+
+// MeterType determines which metric to use for quota enforcement and billing.
+type MeterType string
+
+const (
+	MeterTypeRequests     MeterType = "requests"      // Count raw API requests (default)
+	MeterTypeComputeUnits MeterType = "compute_units" // Count weighted units (tokens, etc.)
 )
 
 // Plan represents a pricing tier.
@@ -142,6 +252,8 @@ type Plan struct {
 	QuotaEnforceMode   QuotaEnforceMode // "hard", "warn", "soft" - defaults to "hard"
 	QuotaGracePct      float64          // Grace percentage before hard block (e.g., 0.05 = 5%)
 	TrialDays          int              // Number of trial days (0 = no trial)
+	MeterType          MeterType        // Which metric to enforce: "requests" or "compute_units"
+	EstimatedCostPerReq float64         // Estimated cost per request for pre-check (default 1.0)
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 

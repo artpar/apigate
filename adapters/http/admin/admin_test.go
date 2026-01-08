@@ -85,6 +85,18 @@ func (s *mockPlanStore) GetDefault(ctx context.Context) (ports.Plan, error) {
 	return ports.Plan{}, errors.New("no default plan")
 }
 
+func (s *mockPlanStore) ClearOtherDefaults(ctx context.Context, exceptID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, p := range s.plans {
+		if id != exceptID && p.IsDefault {
+			p.IsDefault = false
+			s.plans[id] = p
+		}
+	}
+	return nil
+}
+
 func TestLogin_WithAPIKey(t *testing.T) {
 	h, rawKey := setupHandler(t)
 

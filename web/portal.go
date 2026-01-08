@@ -12,6 +12,7 @@ import (
 	"github.com/artpar/apigate/core/terminology"
 	domainAuth "github.com/artpar/apigate/domain/auth"
 	"github.com/artpar/apigate/domain/billing"
+	"github.com/artpar/apigate/domain/entitlement"
 	"github.com/artpar/apigate/domain/key"
 	"github.com/artpar/apigate/domain/settings"
 	"github.com/artpar/apigate/ports"
@@ -21,21 +22,25 @@ import (
 
 // PortalHandler provides the user portal endpoints.
 type PortalHandler struct {
-	tokens        *auth.TokenService
-	users         ports.UserStore
-	keys          ports.KeyStore
-	usage         ports.UsageStore
-	plans         ports.PlanStore
-	sessions      ports.SessionStore
-	authTokens    ports.TokenStore
-	emailSender   ports.EmailSender
-	settings      ports.SettingsStore
-	subscriptions ports.SubscriptionStore
-	invoices      ports.InvoiceStore
-	logger        zerolog.Logger
-	hasher        ports.Hasher
-	idGen         ports.IDGenerator
-	payment       ports.PaymentProvider
+	tokens           *auth.TokenService
+	users            ports.UserStore
+	keys             ports.KeyStore
+	usage            ports.UsageStore
+	plans            ports.PlanStore
+	sessions         ports.SessionStore
+	authTokens       ports.TokenStore
+	emailSender      ports.EmailSender
+	settings         ports.SettingsStore
+	subscriptions    ports.SubscriptionStore
+	invoices         ports.InvoiceStore
+	entitlements     ports.EntitlementStore
+	planEntitlements ports.PlanEntitlementStore
+	webhooks         ports.WebhookStore
+	deliveries       ports.DeliveryStore
+	logger           zerolog.Logger
+	hasher           ports.Hasher
+	idGen            ports.IDGenerator
+	payment          ports.PaymentProvider
 
 	// Portal-specific settings
 	baseURL string
@@ -44,23 +49,27 @@ type PortalHandler struct {
 
 // PortalDeps contains dependencies for the portal handler.
 type PortalDeps struct {
-	Users         ports.UserStore
-	Keys          ports.KeyStore
-	Usage         ports.UsageStore
-	Plans         ports.PlanStore
-	Sessions      ports.SessionStore
-	AuthTokens    ports.TokenStore
-	EmailSender   ports.EmailSender
-	Settings      ports.SettingsStore
-	Subscriptions ports.SubscriptionStore
-	Invoices      ports.InvoiceStore
-	Logger        zerolog.Logger
-	Hasher        ports.Hasher
-	IDGen         ports.IDGenerator
-	Payment       ports.PaymentProvider
-	JWTSecret     string
-	BaseURL       string
-	AppName       string
+	Users            ports.UserStore
+	Keys             ports.KeyStore
+	Usage            ports.UsageStore
+	Plans            ports.PlanStore
+	Sessions         ports.SessionStore
+	AuthTokens       ports.TokenStore
+	EmailSender      ports.EmailSender
+	Settings         ports.SettingsStore
+	Subscriptions    ports.SubscriptionStore
+	Invoices         ports.InvoiceStore
+	Entitlements     ports.EntitlementStore
+	PlanEntitlements ports.PlanEntitlementStore
+	Webhooks         ports.WebhookStore
+	Deliveries       ports.DeliveryStore
+	Logger           zerolog.Logger
+	Hasher           ports.Hasher
+	IDGen            ports.IDGenerator
+	Payment          ports.PaymentProvider
+	JWTSecret        string
+	BaseURL          string
+	AppName          string
 }
 
 // NewPortalHandler creates a new user portal handler.
@@ -71,23 +80,27 @@ func NewPortalHandler(deps PortalDeps) (*PortalHandler, error) {
 	}
 
 	return &PortalHandler{
-		tokens:        auth.NewTokenService(deps.JWTSecret, 7*24*time.Hour), // 7 day sessions
-		users:         deps.Users,
-		keys:          deps.Keys,
-		usage:         deps.Usage,
-		plans:         deps.Plans,
-		sessions:      deps.Sessions,
-		authTokens:    deps.AuthTokens,
-		emailSender:   deps.EmailSender,
-		settings:      deps.Settings,
-		subscriptions: deps.Subscriptions,
-		invoices:      deps.Invoices,
-		logger:        deps.Logger,
-		hasher:        deps.Hasher,
-		idGen:         deps.IDGen,
-		payment:       deps.Payment,
-		baseURL:       deps.BaseURL,
-		appName:       appName,
+		tokens:           auth.NewTokenService(deps.JWTSecret, 7*24*time.Hour), // 7 day sessions
+		users:            deps.Users,
+		keys:             deps.Keys,
+		usage:            deps.Usage,
+		plans:            deps.Plans,
+		sessions:         deps.Sessions,
+		authTokens:       deps.AuthTokens,
+		emailSender:      deps.EmailSender,
+		settings:         deps.Settings,
+		subscriptions:    deps.Subscriptions,
+		invoices:         deps.Invoices,
+		entitlements:     deps.Entitlements,
+		planEntitlements: deps.PlanEntitlements,
+		webhooks:         deps.Webhooks,
+		deliveries:       deps.Deliveries,
+		logger:           deps.Logger,
+		hasher:           deps.Hasher,
+		idGen:            deps.IDGen,
+		payment:          deps.Payment,
+		baseURL:          deps.BaseURL,
+		appName:          appName,
 	}, nil
 }
 
@@ -156,6 +169,14 @@ func (h *PortalHandler) Router() chi.Router {
 		r.Post("/settings", h.UpdateAccountSettings)
 		r.Post("/settings/password", h.ChangePassword)
 		r.Post("/settings/close-account", h.CloseAccount)
+
+		// Webhooks
+		r.Get("/webhooks", h.PortalWebhooksPage)
+		r.Get("/webhooks/new", h.PortalWebhookNewPage)
+		r.Post("/webhooks", h.PortalWebhookCreate)
+		r.Get("/webhooks/{id}", h.PortalWebhookEditPage)
+		r.Post("/webhooks/{id}", h.PortalWebhookUpdate)
+		r.Delete("/webhooks/{id}", h.PortalWebhookDelete)
 
 		// Logout
 		r.Post("/logout", h.PortalLogout)
@@ -825,11 +846,13 @@ func (h *PortalHandler) PortalDashboard(w http.ResponseWriter, r *http.Request) 
 
 	// Get user's plan info
 	var planName string
+	var planID string
 	var requestsPerMonth int64
 	var rateLimitPerMinute int
 	if h.plans != nil {
 		dbUser, err := h.users.Get(ctx, user.ID)
 		if err == nil && dbUser.PlanID != "" {
+			planID = dbUser.PlanID
 			plan, err := h.plans.Get(ctx, dbUser.PlanID)
 			if err == nil {
 				planName = plan.Name
@@ -839,8 +862,24 @@ func (h *PortalHandler) PortalDashboard(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	// Get user's entitlements based on their plan
+	var userEntitlements []entitlement.UserEntitlement
+	if h.entitlements != nil && h.planEntitlements != nil && planID != "" {
+		ents, err := h.entitlements.ListEnabled(ctx)
+		if err != nil {
+			h.logger.Error().Err(err).Msg("failed to get entitlements")
+		} else {
+			planEnts, err := h.planEntitlements.ListByPlan(ctx, planID)
+			if err != nil {
+				h.logger.Error().Err(err).Msg("failed to get plan entitlements")
+			} else {
+				userEntitlements = entitlement.ResolveForPlan(planID, ents, planEnts)
+			}
+		}
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(h.renderDashboardPage(user, len(keys), summary.RequestCount, planName, requestsPerMonth, rateLimitPerMinute, h.getLabels(ctx))))
+	w.Write([]byte(h.renderDashboardPage(user, len(keys), summary.RequestCount, planName, requestsPerMonth, rateLimitPerMinute, userEntitlements, h.getLabels(ctx))))
 }
 
 // -----------------------------------------------------------------------------

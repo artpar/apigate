@@ -1,0 +1,81 @@
+# Plan-Entitlement mapping - assigns entitlements to plans
+# This is a join module that creates the many-to-many relationship between plans and entitlements.
+# Entitlements can have plan-specific values (e.g., rate limits that differ per plan).
+module: plan_entitlement
+
+schema:
+  # References
+  plan_id:       { type: string, required: true, ref: plan, description: "The plan granting this entitlement" }
+  entitlement_id: { type: string, required: true, ref: entitlement, description: "The entitlement being granted" }
+
+  # Override value - if not set, uses entitlement's default_value
+  value:         { type: string, description: "Plan-specific value override (e.g., '100' for api.requests_per_second)" }
+
+  # Metadata
+  notes:         { type: string, description: "Internal notes about this assignment" }
+
+  # State
+  enabled:       { type: bool, default: true, description: "Whether this assignment is active" }
+
+actions:
+  enable:
+    set: { enabled: true }
+    description: Enable this entitlement for the plan
+
+  disable:
+    set: { enabled: false }
+    description: Disable this entitlement for the plan
+
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /api/plan-entitlements
+      endpoints:
+        - { action: list, method: GET, path: "/" }
+        - { action: get, method: GET, path: "/{id}" }
+        - { action: create, method: POST, path: "/", auth: admin }
+        - { action: update, method: PATCH, path: "/{id}", auth: admin }
+        - { action: delete, method: DELETE, path: "/{id}", auth: admin }
+        # Convenience endpoints
+        - { action: list_by_plan, method: GET, path: "/by-plan/{plan_id}", description: "List all entitlements for a plan" }
+        - { action: list_by_entitlement, method: GET, path: "/by-entitlement/{entitlement_id}", description: "List all plans with this entitlement" }
+
+  cli:
+    serve:
+      enabled: true
+      command: plan-entitlements
+      commands:
+        - action: list
+          columns: [id, plan_id, entitlement_id, value, enabled]
+        - action: create
+          flags:
+            - { param: plan_id, required: true, description: "Plan ID to grant entitlement to" }
+            - { param: entitlement_id, required: true, description: "Entitlement ID to grant" }
+            - { param: value, description: "Override value for this plan" }
+        - action: delete
+          args:
+            - { name: id, required: true }
+          confirm: "Are you sure you want to remove this entitlement from the plan?"
+        - action: list_by_plan
+          args:
+            - { name: plan_id, required: true, description: "Plan ID to list entitlements for" }
+
+hooks:
+  after_create:
+    - call: reload_entitlements
+
+  after_update:
+    - call: reload_entitlements
+
+  after_delete:
+    - call: reload_entitlements
+
+meta:
+  description: Maps entitlements to plans with optional value overrides
+  icon: link
+  display_name: Plan Entitlements
+  plural: Plan Entitlements
+  depends:
+    - plan
+    - entitlement

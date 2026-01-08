@@ -628,7 +628,27 @@ func NewRouterWithConfig(proxyHandler *ProxyHandler, healthHandler *HealthHandle
 	if cfg.WebHandler != nil {
 		// Use a group that routes to the web handler
 		webHandler := cfg.WebHandler
-		r.Get("/", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+
+		// Root URL: redirect to portal for unauthenticated users (self-onboarding)
+		// If portal is enabled, new users should land there to sign up
+		r.Get("/", func(w http.ResponseWriter, req *http.Request) {
+			// Check if user has admin session cookie
+			if _, err := req.Cookie("admin_session"); err != nil && cfg.PortalHandler != nil {
+				// No admin session and portal is enabled - redirect to portal
+				http.Redirect(w, req, "/portal", http.StatusFound)
+				return
+			}
+			// Has session or no portal - go to admin UI
+			webHandler.ServeHTTP(w, req)
+		})
+
+		// Signup/register redirects to portal (UX: common URLs users might try)
+		r.Get("/signup", func(w http.ResponseWriter, req *http.Request) {
+			http.Redirect(w, req, "/portal/signup", http.StatusFound)
+		})
+		r.Get("/register", func(w http.ResponseWriter, req *http.Request) {
+			http.Redirect(w, req, "/portal/signup", http.StatusFound)
+		})
 		r.Get("/login", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
 		r.Post("/login", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
 		r.Post("/logout", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })

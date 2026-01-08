@@ -46,6 +46,14 @@ func NewProvider(s settings.Settings) (ports.PaymentProvider, error) {
 		}
 		return NewLemonSqueezyProvider(config), nil
 
+	case "dummy", "test":
+		// Dummy provider for development/testing - simulates successful payments
+		baseURL := s.Get(settings.KeyPortalBaseURL)
+		if baseURL == "" {
+			baseURL = "http://localhost:8080"
+		}
+		return NewDummyProvider(baseURL), nil
+
 	case "none", "":
 		return NewNoopProvider(), nil
 

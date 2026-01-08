@@ -320,7 +320,7 @@ func TestProxyService_UpdateConfig(t *testing.T) {
 		{Method: "POST", Path: "/expensive/*", CostMultiplier: 10.0},
 	}
 
-	svc.UpdateConfig(newPlans, newEndpoints, 10, 120)
+	svc.UpdateConfig(newPlans, newEndpoints, 10, 120, nil, nil)
 
 	// Service should still function
 	ctx := context.Background()

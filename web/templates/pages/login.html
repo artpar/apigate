@@ -25,7 +25,23 @@
             <div class="text-center mt-4">
                 <a href="/forgot-password" class="link text-sm">Forgot password?</a>
             </div>
+            <div class="text-center mt-4" style="padding-top: 16px; border-top: 1px solid var(--border-color);">
+                <span class="text-sm text-secondary">Looking to use our API?</span>
+                <a href="/portal" class="link text-sm" style="margin-left: 4px;">Sign up here</a>
+            </div>
         </div>
     </div>
 </div>
+<script>
+(function() {
+    var alert = document.querySelector('.alert-error');
+    if (alert) {
+        document.querySelectorAll('input').forEach(function(input) {
+            input.addEventListener('input', function() {
+                alert.style.display = 'none';
+            });
+        });
+    }
+})();
+</script>
 {{end}}

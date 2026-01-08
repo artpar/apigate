@@ -196,6 +196,16 @@ func (m *mockPlans) GetDefault(ctx context.Context) (ports.Plan, error) {
 	return ports.Plan{}, errors.New("not found")
 }
 
+func (m *mockPlans) ClearOtherDefaults(ctx context.Context, exceptID string) error {
+	for id, p := range m.plans {
+		if id != exceptID && p.IsDefault {
+			p.IsDefault = false
+			m.plans[id] = p
+		}
+	}
+	return nil
+}
+
 type mockRoutes struct {
 	routes map[string]route.Route
 }

@@ -42,50 +42,72 @@ type AppSettings struct {
 	DatabaseDSN     string
 }
 
+// EntitlementReloader can reload entitlements into the proxy.
+type EntitlementReloader interface {
+	ReloadEntitlements(ctx context.Context) error
+}
+
+// WebhookDispatcher can dispatch and test webhooks.
+type WebhookDispatcher interface {
+	TestWebhook(ctx context.Context, webhookID string) error
+}
+
 // Handler provides the web UI endpoints.
 type Handler struct {
-	templates     map[string]*template.Template // One template per page
-	tokens        *auth.TokenService
-	users         ports.UserStore
-	keys          ports.KeyStore
-	usage         ports.UsageStore
-	routes        ports.RouteStore
-	upstreams     ports.UpstreamStore
-	plans         ports.PlanStore
-	settings      ports.SettingsStore
-	authTokens    ports.TokenStore
-	emailSender   ports.EmailSender
-	appSettings   AppSettings
-	logger        zerolog.Logger
-	hasher        ports.Hasher
-	isSetup       func() bool                        // Returns true if initial setup is complete
-	onPlanChange  func(ctx context.Context) error    // Callback for plan changes (reloads proxy)
-	onRouteChange func(ctx context.Context) error    // Callback for route changes (reloads routes)
-	exprValidator ExprValidator
-	routeTester   RouteTester
-	startTime     time.Time                          // Server start time for uptime tracking
+	templates           map[string]*template.Template // One template per page
+	tokens              *auth.TokenService
+	users               ports.UserStore
+	keys                ports.KeyStore
+	usage               ports.UsageStore
+	routes              ports.RouteStore
+	upstreams           ports.UpstreamStore
+	plans               ports.PlanStore
+	settings            ports.SettingsStore
+	authTokens          ports.TokenStore
+	emailSender         ports.EmailSender
+	entitlements        ports.EntitlementStore
+	planEntitlements    ports.PlanEntitlementStore
+	entitlementReloader EntitlementReloader
+	webhooks            ports.WebhookStore
+	deliveries          ports.DeliveryStore
+	webhookService      WebhookDispatcher
+	appSettings         AppSettings
+	logger              zerolog.Logger
+	hasher              ports.Hasher
+	isSetup             func() bool                        // Returns true if initial setup is complete
+	onPlanChange        func(ctx context.Context) error    // Callback for plan changes (reloads proxy)
+	onRouteChange       func(ctx context.Context) error    // Callback for route changes (reloads routes)
+	exprValidator       ExprValidator
+	routeTester         RouteTester
+	startTime           time.Time                          // Server start time for uptime tracking
 }
 
 // Deps contains dependencies for the web handler.
 type Deps struct {
-	Users         ports.UserStore
-	Keys          ports.KeyStore
-	Usage         ports.UsageStore
-	Routes        ports.RouteStore
-	Upstreams     ports.UpstreamStore
-	Plans         ports.PlanStore
-	Settings      ports.SettingsStore
-	AuthTokens    ports.TokenStore
-	EmailSender   ports.EmailSender
-	AppSettings   AppSettings
-	Logger        zerolog.Logger
-	Hasher        ports.Hasher
-	JWTSecret     string
-	IsSetup       func() bool
-	OnPlanChange  func(ctx context.Context) error // Callback when plans are created/updated
-	OnRouteChange func(ctx context.Context) error // Callback when routes are created/updated
-	ExprValidator ExprValidator
-	RouteTester   RouteTester
+	Users               ports.UserStore
+	Keys                ports.KeyStore
+	Usage               ports.UsageStore
+	Routes              ports.RouteStore
+	Upstreams           ports.UpstreamStore
+	Plans               ports.PlanStore
+	Settings            ports.SettingsStore
+	AuthTokens          ports.TokenStore
+	EmailSender         ports.EmailSender
+	Entitlements        ports.EntitlementStore
+	PlanEntitlements    ports.PlanEntitlementStore
+	EntitlementReloader EntitlementReloader
+	Webhooks            ports.WebhookStore
+	Deliveries          ports.DeliveryStore
+	WebhookService      WebhookDispatcher
+	AppSettings         AppSettings
+	Logger              zerolog.Logger
+	Hasher              ports.Hasher
+	JWTSecret           string
+	IsSetup             func() bool
+	OnPlanChange        func(ctx context.Context) error // Callback when plans are created/updated
+	OnRouteChange       func(ctx context.Context) error // Callback when routes are created/updated
+	ExprValidator       ExprValidator
+	RouteTester         RouteTester
 }
 
 // NewHandler creates a new web UI handler.
@@ -97,26 +119,32 @@ func NewHandler(deps Deps) (*Handler, error) {
 	}
 
 	return &Handler{
-		templates:     tmpl,
-		tokens:        auth.NewTokenService(deps.JWTSecret, 24*time.Hour),
-		users:         deps.Users,
-		keys:          deps.Keys,
-		usage:         deps.Usage,
-		routes:        deps.Routes,
-		upstreams:     deps.Upstreams,
-		plans:         deps.Plans,
-		settings:      deps.Settings,
-		authTokens:    deps.AuthTokens,
-		emailSender:   deps.EmailSender,
-		appSettings:   deps.AppSettings,
-		logger:        deps.Logger,
-		hasher:        deps.Hasher,
-		isSetup:       deps.IsSetup,
-		onPlanChange:  deps.OnPlanChange,
-		onRouteChange: deps.OnRouteChange,
-		exprValidator: deps.ExprValidator,
-		routeTester:   deps.RouteTester,
-		startTime:     time.Now(),
+		templates:           tmpl,
+		tokens:              auth.NewTokenService(deps.JWTSecret, 24*time.Hour),
+		users:               deps.Users,
+		keys:                deps.Keys,
+		usage:               deps.Usage,
+		routes:              deps.Routes,
+		upstreams:           deps.Upstreams,
+		plans:               deps.Plans,
+		settings:            deps.Settings,
+		authTokens:          deps.AuthTokens,
+		emailSender:         deps.EmailSender,
+		entitlements:        deps.Entitlements,
+		planEntitlements:    deps.PlanEntitlements,
+		entitlementReloader: deps.EntitlementReloader,
+		webhooks:            deps.Webhooks,
+		deliveries:          deps.Deliveries,
+		webhookService:      deps.WebhookService,
+		appSettings:         deps.AppSettings,
+		logger:              deps.Logger,
+		hasher:              deps.Hasher,
+		isSetup:             deps.IsSetup,
+		onPlanChange:        deps.OnPlanChange,
+		onRouteChange:       deps.OnRouteChange,
+		exprValidator:       deps.ExprValidator,
+		routeTester:         deps.RouteTester,
+		startTime:           time.Now(),
 	}, nil
 }
 
@@ -194,6 +222,23 @@ func (h *Handler) Router() chi.Router {
 		r.Post("/upstreams/{id}", h.UpstreamUpdate)
 		r.Delete("/upstreams/{id}", h.UpstreamDelete)
 
+		// Entitlements
+		r.Get("/entitlements", h.EntitlementsPage)
+		r.Get("/entitlements/new", h.EntitlementNewPage)
+		r.Post("/entitlements", h.EntitlementCreate)
+		r.Get("/entitlements/{id}", h.EntitlementEditPage)
+		r.Post("/entitlements/{id}", h.EntitlementUpdate)
+		r.Delete("/entitlements/{id}", h.EntitlementDelete)
+
+		// Webhooks
+		r.Get("/webhooks", h.WebhooksPage)
+		r.Get("/webhooks/new", h.WebhookNewPage)
+		r.Post("/webhooks", h.WebhookCreate)
+		r.Get("/webhooks/{id}", h.WebhookEditPage)
+		r.Post("/webhooks/{id}", h.WebhookUpdate)
+		r.Delete("/webhooks/{id}", h.WebhookDelete)
+		r.Post("/webhooks/{id}/test", h.WebhookTest)
+
 		// Usage
 		r.Get("/usage", h.UsagePage)
 
@@ -220,6 +265,10 @@ func (h *Handler) Router() chi.Router {
 		r.Get("/partials/routes", h.PartialRoutes)
 		r.Get("/partials/upstreams", h.PartialUpstreams)
 		r.Get("/partials/plans", h.PartialPlans)
+		r.Get("/partials/entitlements", h.PartialEntitlements)
+		r.Get("/partials/plan-entitlements", h.PartialPlanEntitlements)
+		r.Get("/partials/webhooks", h.PartialWebhooks)
+		r.Get("/partials/webhooks/{id}/deliveries", h.PartialWebhookDeliveries)
 
 		// API endpoints for dynamic UI features
 		r.Post("/api/expr/validate", h.ValidateExpr)

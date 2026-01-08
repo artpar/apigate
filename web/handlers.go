@@ -677,18 +677,20 @@ func (h *Handler) UserNewPage(w http.ResponseWriter, r *http.Request) {
 
 // PlanInfo represents a plan for templates.
 type PlanInfo struct {
-	ID             string
-	Name           string
-	Description    string
-	RateLimit      int
-	MonthlyQuota   int64
-	PriceMonthly   float64
-	OveragePrice   float64
-	StripePriceID  string
-	PaddlePriceID  string
-	LemonVariantID string
-	IsDefault      bool
-	Enabled        bool
+	ID                  string
+	Name                string
+	Description         string
+	RateLimit           int
+	MonthlyQuota        int64
+	PriceMonthly        float64
+	OveragePrice        float64
+	StripePriceID       string
+	PaddlePriceID       string
+	LemonVariantID      string
+	IsDefault           bool
+	Enabled             bool
+	MeterType           string
+	EstimatedCostPerReq float64
 }
 
 // getPlans returns plans from database.
@@ -711,19 +713,29 @@ func (h *Handler) getPlans() []PlanInfo {
 
 // planToInfo converts a ports.Plan to PlanInfo.
 func planToInfo(p ports.Plan) PlanInfo {
+	meterType := string(p.MeterType)
+	if meterType == "" {
+		meterType = "requests"
+	}
+	estimatedCost := p.EstimatedCostPerReq
+	if estimatedCost <= 0 {
+		estimatedCost = 1.0
+	}
 	return PlanInfo{
-		ID:             p.ID,
-		Name:           p.Name,
-		Description:    p.Description,
-		RateLimit:      p.RateLimitPerMinute,
-		MonthlyQuota:   p.RequestsPerMonth,
-		PriceMonthly:   float64(p.PriceMonthly) / 100,
-		OveragePrice:   float64(p.OveragePrice) / 10000,
-		StripePriceID:  p.StripePriceID,
-		PaddlePriceID:  p.PaddlePriceID,
-		LemonVariantID: p.LemonVariantID,
-		IsDefault:      p.IsDefault,
-		Enabled:        p.Enabled,
+		ID:                  p.ID,
+		Name:                p.Name,
+		Description:         p.Description,
+		RateLimit:           p.RateLimitPerMinute,
+		MonthlyQuota:        p.RequestsPerMonth,
+		PriceMonthly:        float64(p.PriceMonthly) / 100,
+		OveragePrice:        float64(p.OveragePrice) / 10000,
+		StripePriceID:       p.StripePriceID,
+		PaddlePriceID:       p.PaddlePriceID,
+		LemonVariantID:      p.LemonVariantID,
+		IsDefault:           p.IsDefault,
+		Enabled:             p.Enabled,
+		MeterType:           meterType,
+		EstimatedCostPerReq: estimatedCost,
 	}
 }
 
@@ -995,6 +1007,8 @@ func (h *Handler) PlanNewPage(w http.ResponseWriter, r *http.Request) {
 	data.FormPlan.Enabled = true
 	data.FormPlan.RateLimit = 60
 	data.FormPlan.MonthlyQuota = 1000
+	data.FormPlan.MeterType = "requests"
+	data.FormPlan.EstimatedCostPerReq = 1.0
 
 	h.render(w, "plan_form", data)
 }
@@ -1018,20 +1032,31 @@ func (h *Handler) PlanCreate(w http.ResponseWriter, r *http.Request) {
 	monthlyQuota, _ := strconv.ParseInt(r.FormValue("monthly_quota"), 10, 64)
 	priceMonthly, _ := strconv.ParseFloat(r.FormValue("price_monthly"), 64)
 	overagePrice, _ := strconv.ParseFloat(r.FormValue("overage_price"), 64)
+	estimatedCost, _ := strconv.ParseFloat(r.FormValue("estimated_cost_per_req"), 64)
+	if estimatedCost <= 0 {
+		estimatedCost = 1.0
+	}
+
+	meterType := ports.MeterType(r.FormValue("meter_type"))
+	if meterType == "" {
+		meterType = ports.MeterTypeRequests
+	}
 
 	plan := ports.Plan{
-		ID:                 id,
-		Name:               name,
-		Description:        r.FormValue("description"),
-		RateLimitPerMinute: rateLimit,
-		RequestsPerMonth:   monthlyQuota,
-		PriceMonthly:       int64(priceMonthly * 100), // Convert to cents
-		OveragePrice:       int64(overagePrice * 10000), // Convert to hundredths of cents
-		StripePriceID:      r.FormValue("stripe_price_id"),
-		PaddlePriceID:      r.FormValue("paddle_price_id"),
-		LemonVariantID:     r.FormValue("lemon_variant_id"),
-		IsDefault:          r.FormValue("is_default") == "on",
-		Enabled:            r.FormValue("enabled") == "on",
+		ID:                  id,
+		Name:                name,
+		Description:         r.FormValue("description"),
+		RateLimitPerMinute:  rateLimit,
+		RequestsPerMonth:    monthlyQuota,
+		PriceMonthly:        int64(priceMonthly * 100), // Convert to cents
+		OveragePrice:        int64(overagePrice * 10000), // Convert to hundredths of cents
+		StripePriceID:       r.FormValue("stripe_price_id"),
+		PaddlePriceID:       r.FormValue("paddle_price_id"),
+		LemonVariantID:      r.FormValue("lemon_variant_id"),
+		IsDefault:           r.FormValue("is_default") == "on",
+		Enabled:             r.FormValue("enabled") == "on",
+		MeterType:           meterType,
+		EstimatedCostPerReq: estimatedCost,
 	}
 
 	// Clear default flag on existing plans if creating a new default plan
@@ -1094,6 +1119,15 @@ func (h *Handler) PlanUpdate(w http.ResponseWriter, r *http.Request) {
 	monthlyQuota, _ := strconv.ParseInt(r.FormValue("monthly_quota"), 10, 64)
 	priceMonthly, _ := strconv.ParseFloat(r.FormValue("price_monthly"), 64)
 	overagePrice, _ := strconv.ParseFloat(r.FormValue("overage_price"), 64)
+	estimatedCost, _ := strconv.ParseFloat(r.FormValue("estimated_cost_per_req"), 64)
+	if estimatedCost <= 0 {
+		estimatedCost = 1.0
+	}
+
+	meterType := ports.MeterType(r.FormValue("meter_type"))
+	if meterType == "" {
+		meterType = ports.MeterTypeRequests
+	}
 
 	plan.Name = r.FormValue("name")
 	plan.Description = r.FormValue("description")
@@ -1106,6 +1140,8 @@ func (h *Handler) PlanUpdate(w http.ResponseWriter, r *http.Request) {
 	plan.LemonVariantID = r.FormValue("lemon_variant_id")
 	newIsDefault := r.FormValue("is_default") == "on"
 	plan.Enabled = r.FormValue("enabled") == "on"
+	plan.MeterType = meterType
+	plan.EstimatedCostPerReq = estimatedCost
 
 	// Clear default flag on other plans if setting this plan as default
 	if newIsDefault && !plan.IsDefault {

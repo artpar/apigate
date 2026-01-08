@@ -244,3 +244,157 @@
     </tbody>
 </table>
 {{end}}
+
+{{define "entitlements-table"}}
+<table class="table">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Display Name</th>
+            <th>Category</th>
+            <th>Value Type</th>
+            <th>Header</th>
+            <th>Status</th>
+            <th class="cell-actions">Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .Entitlements}}
+        <tr>
+            <td class="cell-primary cell-mono">{{.Name}}</td>
+            <td class="text-muted">{{if .DisplayName}}{{.DisplayName}}{{else}}-{{end}}</td>
+            <td><span class="badge">{{.Category}}</span></td>
+            <td class="text-muted">{{.ValueType}}</td>
+            <td class="text-muted cell-mono">{{if .HeaderName}}{{.HeaderName}}{{else}}-{{end}}</td>
+            <td>
+                <span class="badge {{if .Enabled}}badge-success{{else}}badge-error{{end}}">{{if .Enabled}}enabled{{else}}disabled{{end}}</span>
+            </td>
+            <td class="cell-actions">
+                <a href="/entitlements/{{.ID}}" class="link">Edit</a>
+                <button hx-delete="/entitlements/{{.ID}}" hx-confirm="Delete this entitlement?" hx-target="#entitlements-table" class="link link-danger" style="margin-left: 12px;">Delete</button>
+            </td>
+        </tr>
+        {{else}}
+        <tr><td colspan="7" class="table-empty">
+            <div class="empty-state-inline">
+                <strong>No entitlements configured</strong>
+                <p>Entitlements are feature flags granted by plans. <a href="/entitlements/new" class="link">Create an entitlement</a></p>
+            </div>
+        </td></tr>
+        {{end}}
+    </tbody>
+</table>
+{{end}}
+
+{{define "plan-entitlements-table"}}
+<table class="table">
+    <thead>
+        <tr>
+            <th>Plan</th>
+            <th>Entitlement</th>
+            <th>Value</th>
+            <th>Status</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .PlanEntitlements}}
+        <tr>
+            <td class="cell-primary">{{.PlanName}}</td>
+            <td class="cell-mono">{{.EntitlementName}}</td>
+            <td class="text-muted">{{if .Value}}{{.Value}}{{else}}(default){{end}}</td>
+            <td>
+                <span class="badge {{if .Enabled}}badge-success{{else}}badge-error{{end}}">{{if .Enabled}}enabled{{else}}disabled{{end}}</span>
+            </td>
+        </tr>
+        {{else}}
+        <tr><td colspan="4" class="table-empty">
+            <div class="empty-state-inline">
+                <strong>No plan entitlements configured</strong>
+                <p>Use the API to assign entitlements to plans.</p>
+            </div>
+        </td></tr>
+        {{end}}
+    </tbody>
+</table>
+{{end}}
+
+{{define "webhooks-table"}}
+<table class="table">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>URL</th>
+            <th>Events</th>
+            <th>Status</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .Webhooks}}
+        <tr>
+            <td class="cell-primary">{{.Name}}</td>
+            <td class="cell-mono text-muted" style="max-width: 250px; overflow: hidden; text-overflow: ellipsis;">{{.URL}}</td>
+            <td class="text-muted">{{len .Events}} events</td>
+            <td>
+                <span class="badge {{if .Enabled}}badge-success{{else}}badge-error{{end}}">{{if .Enabled}}enabled{{else}}disabled{{end}}</span>
+            </td>
+            <td class="cell-actions">
+                <a href="/webhooks/{{.ID}}" class="link">Edit</a>
+                <button hx-delete="/webhooks/{{.ID}}" hx-confirm="Delete this webhook?" hx-target="#webhooks-table" class="link link-danger" style="margin-left: 12px;">Delete</button>
+            </td>
+        </tr>
+        {{else}}
+        <tr><td colspan="5" class="table-empty">
+            <div class="empty-state-inline">
+                <strong>No webhooks configured</strong>
+                <p>Webhooks receive real-time event notifications. <a href="/webhooks/new" class="link">Create a webhook</a></p>
+            </div>
+        </td></tr>
+        {{end}}
+    </tbody>
+</table>
+{{end}}
+
+{{define "webhook-deliveries-table"}}
+<table class="table">
+    <thead>
+        <tr>
+            <th>Event</th>
+            <th>Status</th>
+            <th>Attempt</th>
+            <th>Response</th>
+            <th>Duration</th>
+            <th>Time</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .Deliveries}}
+        <tr>
+            <td class="cell-mono">{{.EventType}}</td>
+            <td>
+                {{if eq .Status "success"}}
+                <span class="badge badge-success">success</span>
+                {{else if eq .Status "failed"}}
+                <span class="badge badge-error">failed</span>
+                {{else if eq .Status "retrying"}}
+                <span class="badge badge-warning">retrying</span>
+                {{else}}
+                <span class="badge">pending</span>
+                {{end}}
+            </td>
+            <td class="text-muted">{{.Attempt}}/{{.MaxAttempts}}</td>
+            <td class="text-muted">{{if .StatusCode}}{{.StatusCode}}{{else}}-{{end}}</td>
+            <td class="text-muted">{{if .DurationMS}}{{.DurationMS}}ms{{else}}-{{end}}</td>
+            <td class="text-muted">{{.CreatedAt.Format "Jan 02 15:04"}}</td>
+        </tr>
+        {{else}}
+        <tr><td colspan="6" class="table-empty">
+            <div class="empty-state-inline">
+                <strong>No deliveries yet</strong>
+                <p>Send a test event to see delivery history.</p>
+            </div>
+        </td></tr>
+        {{end}}
+    </tbody>
+</table>
+{{end}}

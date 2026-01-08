@@ -1,0 +1,124 @@
+{{define "content"}}
+<div class="page">
+    <div class="page-header">
+        <h1 class="page-title">{{if .IsNew}}Create Entitlement{{else}}Edit Entitlement{{end}}</h1>
+    </div>
+
+    <div class="card">
+        <form method="POST" class="card-body">
+            {{if .Error}}
+            <div class="alert alert-error">{{.Error}}</div>
+            {{end}}
+
+            <div class="form-group">
+                <label for="name">Name</label>
+                <input type="text" id="name" name="name" value="{{.Entitlement.Name}}" required
+                    placeholder="e.g., api.streaming" class="form-control">
+                <small class="form-hint">Unique identifier using dot notation (e.g., api.streaming, support.priority)</small>
+            </div>
+
+            <div class="form-group">
+                <label for="display_name">Display Name</label>
+                <input type="text" id="display_name" name="display_name" value="{{.Entitlement.DisplayName}}"
+                    placeholder="e.g., Streaming Responses" class="form-control">
+                <small class="form-hint">Human-readable name shown in UI</small>
+            </div>
+
+            <div class="form-group">
+                <label for="description">Description</label>
+                <textarea id="description" name="description" rows="2" class="form-control"
+                    placeholder="What this entitlement grants">{{.Entitlement.Description}}</textarea>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="category">Category</label>
+                    <select id="category" name="category" class="form-control">
+                        <option value="feature" {{if eq .Entitlement.Category "feature"}}selected{{end}}>Feature</option>
+                        <option value="api" {{if eq .Entitlement.Category "api"}}selected{{end}}>API</option>
+                        <option value="support" {{if eq .Entitlement.Category "support"}}selected{{end}}>Support</option>
+                        <option value="integration" {{if eq .Entitlement.Category "integration"}}selected{{end}}>Integration</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="value_type">Value Type</label>
+                    <select id="value_type" name="value_type" class="form-control">
+                        <option value="boolean" {{if eq .Entitlement.ValueType "boolean"}}selected{{end}}>Boolean (true/false)</option>
+                        <option value="number" {{if eq .Entitlement.ValueType "number"}}selected{{end}}>Number (limit)</option>
+                        <option value="string" {{if eq .Entitlement.ValueType "string"}}selected{{end}}>String (custom)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="default_value">Default Value</label>
+                <input type="text" id="default_value" name="default_value" value="{{.Entitlement.DefaultValue}}"
+                    placeholder="true" class="form-control">
+                <small class="form-hint">Value when entitlement is granted without override</small>
+            </div>
+
+            <div class="form-group">
+                <label for="header_name">HTTP Header Name (optional)</label>
+                <input type="text" id="header_name" name="header_name" value="{{.Entitlement.HeaderName}}"
+                    placeholder="e.g., X-Has-Streaming" class="form-control">
+                <small class="form-hint">Header to send to upstream with the entitlement value</small>
+            </div>
+
+            <div class="form-group">
+                <label class="form-checkbox">
+                    <input type="checkbox" name="enabled" value="true" {{if .Entitlement.Enabled}}checked{{end}}>
+                    <span>Enabled</span>
+                </label>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">{{if .IsNew}}Create{{else}}Save Changes{{end}}</button>
+                <a href="/entitlements" class="btn btn-secondary">Cancel</a>
+                {{if not .IsNew}}
+                <button type="button" class="btn btn-danger"
+                    hx-delete="/entitlements/{{.Entitlement.ID}}"
+                    hx-confirm="Are you sure you want to delete this entitlement?"
+                    hx-target="body">Delete</button>
+                {{end}}
+            </div>
+        </form>
+    </div>
+</div>
+{{end}}
+
+{{define "panel-docs"}}
+<div class="panel-section">
+    <h3>Entitlement Settings</h3>
+    <p>Configure the entitlement properties.</p>
+</div>
+
+<div class="panel-section">
+    <h4>Name Format</h4>
+    <p>Use dot notation to organize entitlements:</p>
+    <ul class="panel-list">
+        <li><code>api.streaming</code></li>
+        <li><code>api.batch</code></li>
+        <li><code>api.rate_limit</code></li>
+        <li><code>support.priority</code></li>
+        <li><code>integration.webhooks</code></li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>Value Types</h4>
+    <ul class="panel-list">
+        <li><strong>Boolean</strong> - For on/off features (default: "true")</li>
+        <li><strong>Number</strong> - For limits (e.g., "100" for rate limit)</li>
+        <li><strong>String</strong> - For custom values</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>HTTP Headers</h4>
+    <p>If set, the entitlement value is sent to upstream as an HTTP header. This allows your backend to enforce feature access.</p>
+</div>
+{{end}}
+
+{{define "panel-reference"}}
+{{end}}
