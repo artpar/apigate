@@ -7,10 +7,13 @@ import (
 	"time"
 
 	"github.com/artpar/apigate/adapters/sqlite"
+	"github.com/artpar/apigate/domain/billing"
+	"github.com/artpar/apigate/domain/entitlement"
 	"github.com/artpar/apigate/domain/key"
 	"github.com/artpar/apigate/domain/ratelimit"
 	"github.com/artpar/apigate/domain/route"
 	"github.com/artpar/apigate/domain/usage"
+	"github.com/artpar/apigate/domain/webhook"
 	"github.com/artpar/apigate/ports"
 )
 
@@ -2375,6 +2378,572 @@ func TestRouteStore_CreateDuplicate(t *testing.T) {
 	err := store.Create(ctx, r)
 	if err == nil {
 		t.Fatal("expected error for duplicate route")
+	}
+}
+
+// -----------------------------------------------------------------------------
+// EntitlementStore Tests
+// -----------------------------------------------------------------------------
+
+func TestEntitlementStore_CRUD(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewEntitlementStore(db)
+	ctx := context.Background()
+
+	// Create - use unique name to avoid conflict with seed data
+	e := entitlement.Entitlement{
+		ID:           "ent-test-1",
+		Name:         "test.custom.feature",
+		DisplayName:  "Custom Test Feature",
+		Description:  "A test entitlement for unit testing",
+		Category:     entitlement.CategoryAPI,
+		ValueType:    entitlement.ValueTypeBoolean,
+		DefaultValue: "true",
+		HeaderName:   "X-Test-Feature",
+		Enabled:      true,
+		CreatedAt:    time.Now().UTC(),
+		UpdatedAt:    time.Now().UTC(),
+	}
+
+	if err := store.Create(ctx, e); err != nil {
+		t.Fatalf("create entitlement: %v", err)
+	}
+
+	// Get
+	got, err := store.Get(ctx, e.ID)
+	if err != nil {
+		t.Fatalf("get entitlement: %v", err)
+	}
+	if got.Name != e.Name {
+		t.Errorf("Name = %s, want %s", got.Name, e.Name)
+	}
+	if got.DisplayName != e.DisplayName {
+		t.Errorf("DisplayName = %s, want %s", got.DisplayName, e.DisplayName)
+	}
+
+	// GetByName
+	gotByName, err := store.GetByName(ctx, e.Name)
+	if err != nil {
+		t.Fatalf("get by name: %v", err)
+	}
+	if gotByName.ID != e.ID {
+		t.Errorf("GetByName ID = %s, want %s", gotByName.ID, e.ID)
+	}
+
+	// List
+	list, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("list entitlements: %v", err)
+	}
+	if len(list) == 0 {
+		t.Error("expected at least one entitlement")
+	}
+
+	// ListEnabled
+	enabled, err := store.ListEnabled(ctx)
+	if err != nil {
+		t.Fatalf("list enabled: %v", err)
+	}
+	if len(enabled) == 0 {
+		t.Error("expected at least one enabled entitlement")
+	}
+
+	// Update
+	e.DisplayName = "Updated Display Name"
+	if err := store.Update(ctx, e); err != nil {
+		t.Fatalf("update entitlement: %v", err)
+	}
+	updated, _ := store.Get(ctx, e.ID)
+	if updated.DisplayName != "Updated Display Name" {
+		t.Errorf("DisplayName = %s, want Updated Display Name", updated.DisplayName)
+	}
+
+	// Delete
+	if err := store.Delete(ctx, e.ID); err != nil {
+		t.Fatalf("delete entitlement: %v", err)
+	}
+	_, err = store.Get(ctx, e.ID)
+	if err == nil {
+		t.Error("expected error after delete")
+	}
+}
+
+// -----------------------------------------------------------------------------
+// PlanEntitlementStore Tests
+// -----------------------------------------------------------------------------
+
+func TestPlanEntitlementStore_CRUD(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	// First create an entitlement
+	entStore := sqlite.NewEntitlementStore(db)
+	ctx := context.Background()
+
+	e := entitlement.Entitlement{
+		ID:           "ent-pe-1",
+		Name:         "api.ratelimit",
+		DisplayName:  "Rate Limit",
+		Category:     entitlement.CategoryAPI,
+		ValueType:    entitlement.ValueTypeNumber,
+		DefaultValue: "1000",
+		Enabled:      true,
+		CreatedAt:    time.Now().UTC(),
+		UpdatedAt:    time.Now().UTC(),
+	}
+	entStore.Create(ctx, e)
+
+	store := sqlite.NewPlanEntitlementStore(db)
+
+	// Create
+	pe := entitlement.PlanEntitlement{
+		ID:            "pe-1",
+		PlanID:        "plan-1",
+		EntitlementID: "ent-pe-1",
+		Value:         "5000",
+		Notes:         "Premium plan rate limit",
+		Enabled:       true,
+		CreatedAt:     time.Now().UTC(),
+		UpdatedAt:     time.Now().UTC(),
+	}
+
+	if err := store.Create(ctx, pe); err != nil {
+		t.Fatalf("create plan entitlement: %v", err)
+	}
+
+	// Get
+	got, err := store.Get(ctx, pe.ID)
+	if err != nil {
+		t.Fatalf("get plan entitlement: %v", err)
+	}
+	if got.Value != pe.Value {
+		t.Errorf("Value = %s, want %s", got.Value, pe.Value)
+	}
+
+	// GetByPlanAndEntitlement
+	gotByPE, err := store.GetByPlanAndEntitlement(ctx, pe.PlanID, pe.EntitlementID)
+	if err != nil {
+		t.Fatalf("get by plan and entitlement: %v", err)
+	}
+	if gotByPE.ID != pe.ID {
+		t.Errorf("ID = %s, want %s", gotByPE.ID, pe.ID)
+	}
+
+	// List
+	list, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) == 0 {
+		t.Error("expected at least one plan entitlement")
+	}
+
+	// ListByPlan
+	byPlan, err := store.ListByPlan(ctx, pe.PlanID)
+	if err != nil {
+		t.Fatalf("list by plan: %v", err)
+	}
+	if len(byPlan) == 0 {
+		t.Error("expected at least one plan entitlement for plan")
+	}
+
+	// ListByEntitlement
+	byEnt, err := store.ListByEntitlement(ctx, pe.EntitlementID)
+	if err != nil {
+		t.Fatalf("list by entitlement: %v", err)
+	}
+	if len(byEnt) == 0 {
+		t.Error("expected at least one plan entitlement for entitlement")
+	}
+
+	// Update
+	pe.Value = "10000"
+	if err := store.Update(ctx, pe); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	updated, _ := store.Get(ctx, pe.ID)
+	if updated.Value != "10000" {
+		t.Errorf("Value = %s, want 10000", updated.Value)
+	}
+
+	// Delete
+	if err := store.Delete(ctx, pe.ID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	_, err = store.Get(ctx, pe.ID)
+	if err == nil {
+		t.Error("expected error after delete")
+	}
+}
+
+// -----------------------------------------------------------------------------
+// WebhookStore Tests
+// -----------------------------------------------------------------------------
+
+func TestWebhookStore_CRUD(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewWebhookStore(db.DB)
+	ctx := context.Background()
+
+	// Create
+	wh := webhook.Webhook{
+		ID:          "wh-1",
+		UserID:      "user-1",
+		Name:        "Test Webhook",
+		Description: "Test webhook description",
+		URL:         "https://example.com/webhook",
+		Secret:      "secret123",
+		Events:      []webhook.EventType{webhook.EventUsageThreshold, webhook.EventKeyCreated},
+		RetryCount:  3,
+		TimeoutMS:   5000,
+		Enabled:     true,
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+
+	if err := store.Create(ctx, wh); err != nil {
+		t.Fatalf("create webhook: %v", err)
+	}
+
+	// Get
+	got, err := store.Get(ctx, wh.ID)
+	if err != nil {
+		t.Fatalf("get webhook: %v", err)
+	}
+	if got.Name != wh.Name {
+		t.Errorf("Name = %s, want %s", got.Name, wh.Name)
+	}
+	if len(got.Events) != 2 {
+		t.Errorf("Events len = %d, want 2", len(got.Events))
+	}
+
+	// List
+	list, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("list webhooks: %v", err)
+	}
+	if len(list) == 0 {
+		t.Error("expected at least one webhook")
+	}
+
+	// ListByUser
+	byUser, err := store.ListByUser(ctx, wh.UserID)
+	if err != nil {
+		t.Fatalf("list by user: %v", err)
+	}
+	if len(byUser) == 0 {
+		t.Error("expected at least one webhook for user")
+	}
+
+	// ListEnabled
+	enabled, err := store.ListEnabled(ctx)
+	if err != nil {
+		t.Fatalf("list enabled: %v", err)
+	}
+	if len(enabled) == 0 {
+		t.Error("expected at least one enabled webhook")
+	}
+
+	// ListForEvent
+	forEvent, err := store.ListForEvent(ctx, webhook.EventUsageThreshold)
+	if err != nil {
+		t.Fatalf("list for event: %v", err)
+	}
+	if len(forEvent) == 0 {
+		t.Error("expected at least one webhook for event")
+	}
+
+	// Update
+	wh.Name = "Updated Webhook"
+	if err := store.Update(ctx, wh); err != nil {
+		t.Fatalf("update webhook: %v", err)
+	}
+	updated, _ := store.Get(ctx, wh.ID)
+	if updated.Name != "Updated Webhook" {
+		t.Errorf("Name = %s, want Updated Webhook", updated.Name)
+	}
+
+	// Delete
+	if err := store.Delete(ctx, wh.ID); err != nil {
+		t.Fatalf("delete webhook: %v", err)
+	}
+	got, err = store.Get(ctx, wh.ID)
+	if got.ID != "" {
+		t.Error("expected empty webhook after delete")
+	}
+}
+
+// -----------------------------------------------------------------------------
+// DeliveryStore Tests
+// -----------------------------------------------------------------------------
+
+func TestDeliveryStore_CRUD(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	// First create a webhook
+	whStore := sqlite.NewWebhookStore(db.DB)
+	ctx := context.Background()
+
+	wh := webhook.Webhook{
+		ID:      "wh-del-1",
+		UserID:  "user-1",
+		Name:    "Delivery Test",
+		URL:     "https://example.com/webhook",
+		Events:  []webhook.EventType{webhook.EventTest},
+		Enabled: true,
+	}
+	whStore.Create(ctx, wh)
+
+	store := sqlite.NewDeliveryStore(db.DB)
+
+	// Create
+	now := time.Now().UTC()
+	nextRetry := now.Add(time.Hour)
+	del := webhook.Delivery{
+		ID:         "del-1",
+		WebhookID:  "wh-del-1",
+		EventID:    "evt-1",
+		Payload:    `{"test": true}`,
+		Status:     webhook.DeliveryPending,
+		Attempt:    0,
+		NextRetry:  &nextRetry,
+		CreatedAt:  now,
+	}
+
+	if err := store.Create(ctx, del); err != nil {
+		t.Fatalf("create delivery: %v", err)
+	}
+
+	// Get
+	got, err := store.Get(ctx, del.ID)
+	if err != nil {
+		t.Fatalf("get delivery: %v", err)
+	}
+	if got.WebhookID != del.WebhookID {
+		t.Errorf("WebhookID = %s, want %s", got.WebhookID, del.WebhookID)
+	}
+	if got.Status != webhook.DeliveryPending {
+		t.Errorf("Status = %s, want %s", got.Status, webhook.DeliveryPending)
+	}
+
+	// List
+	list, err := store.List(ctx, del.WebhookID, 10)
+	if err != nil {
+		t.Fatalf("list deliveries: %v", err)
+	}
+	if len(list) == 0 {
+		t.Error("expected at least one delivery")
+	}
+
+	// ListPending
+	pending, err := store.ListPending(ctx, now.Add(2*time.Hour), 10)
+	if err != nil {
+		t.Fatalf("list pending: %v", err)
+	}
+	if len(pending) == 0 {
+		t.Error("expected at least one pending delivery")
+	}
+
+	// Update
+	del.Status = webhook.DeliverySuccess
+	del.StatusCode = 200
+	del.ResponseBody = `{"ok": true}`
+	if err := store.Update(ctx, del); err != nil {
+		t.Fatalf("update delivery: %v", err)
+	}
+	updated, _ := store.Get(ctx, del.ID)
+	if updated.Status != webhook.DeliverySuccess {
+		t.Errorf("Status = %s, want %s", updated.Status, webhook.DeliverySuccess)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// InvoiceStore Tests
+// -----------------------------------------------------------------------------
+
+func TestInvoiceStore_CRUD(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewInvoiceStore(db)
+	ctx := context.Background()
+
+	// Create
+	now := time.Now().UTC()
+	periodEnd := now.Add(30 * 24 * time.Hour)
+	inv := billing.Invoice{
+		ID:          "inv-1",
+		UserID:      "user-1",
+		ProviderID:  "pi_123",
+		Provider:    "stripe",
+		PeriodStart: now,
+		PeriodEnd:   periodEnd,
+		Total:       9900,
+		Currency:    "USD",
+		Status:      billing.InvoiceStatusOpen,
+		CreatedAt:   now,
+	}
+
+	if err := store.Create(ctx, inv); err != nil {
+		t.Fatalf("create invoice: %v", err)
+	}
+
+	// ListByUser
+	list, err := store.ListByUser(ctx, inv.UserID, 10)
+	if err != nil {
+		t.Fatalf("list by user: %v", err)
+	}
+	if len(list) == 0 {
+		t.Error("expected at least one invoice")
+	}
+	if list[0].Total != inv.Total {
+		t.Errorf("Total = %d, want %d", list[0].Total, inv.Total)
+	}
+
+	// UpdateStatus
+	paidAt := time.Now()
+	if err := store.UpdateStatus(ctx, inv.ID, billing.InvoiceStatusPaid, &paidAt); err != nil {
+		t.Fatalf("update status: %v", err)
+	}
+	updated, _ := store.ListByUser(ctx, inv.UserID, 10)
+	if len(updated) == 0 || updated[0].Status != billing.InvoiceStatusPaid {
+		t.Error("expected status to be paid")
+	}
+}
+
+// -----------------------------------------------------------------------------
+// SubscriptionStore Tests
+// -----------------------------------------------------------------------------
+
+func TestSubscriptionStore_CRUD(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewSubscriptionStore(db)
+	ctx := context.Background()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	periodEnd := now.Add(30 * 24 * time.Hour)
+
+	// Create
+	sub := billing.Subscription{
+		ID:                 "sub-test-1",
+		UserID:             "user-1",
+		PlanID:             "plan-1",
+		Provider:           "stripe",
+		ProviderID:         "sub_stripe123",
+		ProviderItemID:     "si_item123",
+		Status:             billing.SubscriptionStatusActive,
+		CurrentPeriodStart: now,
+		CurrentPeriodEnd:   periodEnd,
+		CancelAtPeriodEnd:  false,
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}
+
+	if err := store.Create(ctx, sub); err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+
+	// Get
+	got, err := store.Get(ctx, sub.ID)
+	if err != nil {
+		t.Fatalf("get subscription: %v", err)
+	}
+	if got.UserID != sub.UserID {
+		t.Errorf("UserID = %s, want %s", got.UserID, sub.UserID)
+	}
+	if got.PlanID != sub.PlanID {
+		t.Errorf("PlanID = %s, want %s", got.PlanID, sub.PlanID)
+	}
+	if got.Status != billing.SubscriptionStatusActive {
+		t.Errorf("Status = %s, want %s", got.Status, billing.SubscriptionStatusActive)
+	}
+	if got.Provider != "stripe" {
+		t.Errorf("Provider = %s, want stripe", got.Provider)
+	}
+	if got.ProviderID != "sub_stripe123" {
+		t.Errorf("ProviderID = %s, want sub_stripe123", got.ProviderID)
+	}
+
+	// GetByUser
+	gotByUser, err := store.GetByUser(ctx, sub.UserID)
+	if err != nil {
+		t.Fatalf("get by user: %v", err)
+	}
+	if gotByUser.ID != sub.ID {
+		t.Errorf("GetByUser ID = %s, want %s", gotByUser.ID, sub.ID)
+	}
+
+	// Update
+	sub.Status = billing.SubscriptionStatusCancelled
+	cancelledAt := time.Now().UTC()
+	sub.CancelledAt = &cancelledAt
+	sub.CancelAtPeriodEnd = true
+	if err := store.Update(ctx, sub); err != nil {
+		t.Fatalf("update subscription: %v", err)
+	}
+
+	updatedSub, _ := store.Get(ctx, sub.ID)
+	if updatedSub.Status != billing.SubscriptionStatusCancelled {
+		t.Errorf("Status = %s, want %s", updatedSub.Status, billing.SubscriptionStatusCancelled)
+	}
+	if !updatedSub.CancelAtPeriodEnd {
+		t.Error("expected CancelAtPeriodEnd to be true")
+	}
+	if updatedSub.CancelledAt == nil {
+		t.Error("expected CancelledAt to be set")
+	}
+}
+
+func TestSubscriptionStore_GetNotFound(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewSubscriptionStore(db)
+	ctx := context.Background()
+
+	_, err := store.Get(ctx, "nonexistent")
+	if err == nil {
+		t.Error("expected error for nonexistent subscription")
+	}
+}
+
+func TestSubscriptionStore_GetByUserNotFound(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewSubscriptionStore(db)
+	ctx := context.Background()
+
+	_, err := store.GetByUser(ctx, "nonexistent-user")
+	if err == nil {
+		t.Error("expected error for nonexistent user subscription")
+	}
+}
+
+func TestSubscriptionStore_UpdateNotFound(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewSubscriptionStore(db)
+	ctx := context.Background()
+
+	sub := billing.Subscription{
+		ID:     "nonexistent",
+		UserID: "user-1",
+		PlanID: "plan-1",
+		Status: billing.SubscriptionStatusActive,
+	}
+
+	err := store.Update(ctx, sub)
+	if err == nil {
+		t.Error("expected error updating nonexistent subscription")
 	}
 }
 

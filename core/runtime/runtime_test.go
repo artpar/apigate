@@ -1656,3 +1656,324 @@ func (e *mockExporter) Stop(ctx context.Context) error {
 	e.stopped = true
 	return nil
 }
+
+// =============================================================================
+// Additional Coverage Tests
+// =============================================================================
+
+func TestRuntime_ResolveSingleDependency_WithDefault(t *testing.T) {
+	storage := &mockStorage{}
+	r := newTestRuntimeWithStorage(storage)
+
+	// Register a module with a capability
+	mod := schema.Module{
+		Name: "email_smtp",
+		Schema: map[string]schema.Field{
+			"id":   {Type: schema.FieldTypeString},
+			"name": {Type: schema.FieldTypeString},
+		},
+		Meta: schema.ModuleMeta{
+			Implements: []string{"email_sender"},
+		},
+	}
+	if err := r.LoadModule(mod); err != nil {
+		t.Fatalf("LoadModule failed: %v", err)
+	}
+
+	// Resolve with default
+	ctx := context.Background()
+	req := schema.ModuleRequirement{
+		Capability: "email_sender",
+		Default:    "email_smtp",
+		Required:   true,
+	}
+
+	dep, err := r.resolveSingleDependency(ctx, "email", req)
+	if err != nil {
+		t.Fatalf("resolveSingleDependency() error = %v", err)
+	}
+	if dep.ModuleName != "email_smtp" {
+		t.Errorf("ModuleName = %s, want email_smtp", dep.ModuleName)
+	}
+	if dep.Capability != "email_sender" {
+		t.Errorf("Capability = %s, want email_sender", dep.Capability)
+	}
+}
+
+func TestRuntime_ResolveSingleDependency_NoProviders(t *testing.T) {
+	r := newTestRuntime()
+
+	ctx := context.Background()
+	req := schema.ModuleRequirement{
+		Capability: "nonexistent_capability",
+		Required:   true,
+	}
+
+	_, err := r.resolveSingleDependency(ctx, "dep", req)
+	if err == nil {
+		t.Error("resolveSingleDependency() should error when no providers exist")
+	}
+}
+
+func TestRuntime_ResolveSingleDependency_FallbackToDefault(t *testing.T) {
+	storage := &mockStorage{}
+	r := newTestRuntimeWithStorage(storage)
+
+	// Register a module with a capability
+	mod := schema.Module{
+		Name: "email_smtp",
+		Schema: map[string]schema.Field{
+			"id": {Type: schema.FieldTypeString},
+		},
+		Meta: schema.ModuleMeta{
+			Implements: []string{"email_sender"},
+		},
+	}
+	if err := r.LoadModule(mod); err != nil {
+		t.Fatalf("LoadModule failed: %v", err)
+	}
+
+	ctx := context.Background()
+	req := schema.ModuleRequirement{
+		Capability: "email_sender",
+		Default:    "email_smtp",
+		Required:   false,
+	}
+
+	dep, err := r.resolveSingleDependency(ctx, "email", req)
+	if err != nil {
+		t.Fatalf("resolveSingleDependency() error = %v", err)
+	}
+	if dep.ModuleName != "email_smtp" {
+		t.Errorf("ModuleName = %s, want email_smtp", dep.ModuleName)
+	}
+}
+
+func TestRuntime_ResolveDependencies_Success(t *testing.T) {
+	storage := &mockStorage{}
+	r := newTestRuntimeWithStorage(storage)
+
+	// Register a provider module
+	providerMod := schema.Module{
+		Name: "auth_provider",
+		Schema: map[string]schema.Field{
+			"id": {Type: schema.FieldTypeString},
+		},
+		Meta: schema.ModuleMeta{
+			Implements: []string{"auth"},
+		},
+	}
+	if err := r.LoadModule(providerMod); err != nil {
+		t.Fatalf("LoadModule failed for provider: %v", err)
+	}
+
+	// Register a module that requires the capability
+	consumerMod := schema.Module{
+		Name: "user_module",
+		Schema: map[string]schema.Field{
+			"id": {Type: schema.FieldTypeString},
+		},
+		Meta: schema.ModuleMeta{
+			Requires: map[string]schema.ModuleRequirement{
+				"auth_module": {
+					Capability: "auth",
+					Required:   true,
+				},
+			},
+		},
+	}
+	if err := r.LoadModule(consumerMod); err != nil {
+		t.Fatalf("LoadModule failed for consumer: %v", err)
+	}
+
+	ctx := context.Background()
+	deps, err := r.ResolveDependencies(ctx, "user_module")
+	if err != nil {
+		t.Fatalf("ResolveDependencies() error = %v", err)
+	}
+	if len(deps.Dependencies) == 0 {
+		t.Error("ResolveDependencies() should return dependencies")
+	}
+}
+
+func TestRuntime_ResolveDependencies_ModuleNotFound(t *testing.T) {
+	r := newTestRuntime()
+
+	ctx := context.Background()
+	_, err := r.ResolveDependencies(ctx, "nonexistent_module")
+	if err == nil {
+		t.Error("ResolveDependencies() should error for non-existent module")
+	}
+}
+
+func TestRuntime_Execute_ModuleNotFound(t *testing.T) {
+	r := newTestRuntime()
+
+	ctx := context.Background()
+	_, err := r.Execute(ctx, "nonexistent_module", "list", ActionInput{})
+	if err == nil {
+		t.Error("Execute() should error for non-existent module")
+	}
+}
+
+func TestRuntime_Execute_InvalidAction(t *testing.T) {
+	storage := &mockStorage{
+		listData:  []map[string]any{},
+		listCount: 0,
+	}
+	r := newTestRuntimeWithStorage(storage)
+
+	mod := schema.Module{
+		Name: "testmod",
+		Schema: map[string]schema.Field{
+			"id":   {Type: schema.FieldTypeString},
+			"name": {Type: schema.FieldTypeString},
+		},
+	}
+	if err := r.LoadModule(mod); err != nil {
+		t.Fatalf("LoadModule failed: %v", err)
+	}
+
+	ctx := context.Background()
+	_, err := r.Execute(ctx, "testmod", "invalid_action", ActionInput{})
+	if err == nil {
+		t.Error("Execute() should error for invalid action")
+	}
+}
+
+func TestRuntime_ResolveRefs_NoRefs(t *testing.T) {
+	mod := schema.Module{
+		Name: "testmod",
+		Schema: map[string]schema.Field{
+			"id":   {Type: schema.FieldTypeString},
+			"name": {Type: schema.FieldTypeString},
+		},
+	}
+
+	derived := convention.Derive(mod)
+	data := map[string]any{
+		"name": "test",
+	}
+
+	// resolveRefs is private, so we test it indirectly through executeCreate
+	storage := &mockStorage{
+		createdData: nil,
+		lastID:      "generated-id",
+	}
+	r := newTestRuntimeWithStorage(storage)
+
+	if err := r.LoadModule(mod); err != nil {
+		t.Fatalf("LoadModule failed: %v", err)
+	}
+
+	ctx := context.Background()
+	_, err := r.Execute(ctx, "testmod", "create", ActionInput{Data: data})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	// The data should have been stored
+	if storage.createdModule != "testmod" {
+		t.Errorf("createdModule = %s, want testmod", storage.createdModule)
+	}
+
+	_ = derived
+}
+
+func TestRuntime_ValidateRefExists_Success(t *testing.T) {
+	storage := &mockStorage{
+		getData: map[string]any{"id": "ref-id", "name": "Referenced Entity"},
+	}
+	r := newTestRuntimeWithStorage(storage)
+
+	// Register referenced module
+	refMod := schema.Module{
+		Name: "category",
+		Schema: map[string]schema.Field{
+			"id":   {Type: schema.FieldTypeString, Lookup: true},
+			"name": {Type: schema.FieldTypeString},
+		},
+	}
+	if err := r.LoadModule(refMod); err != nil {
+		t.Fatalf("LoadModule failed for referenced module: %v", err)
+	}
+
+	// Register main module with ref_exists constraint
+	mod := schema.Module{
+		Name: "product",
+		Schema: map[string]schema.Field{
+			"id":   {Type: schema.FieldTypeString},
+			"name": {Type: schema.FieldTypeString},
+			"category_id": {
+				Type: schema.FieldTypeString,
+				Constraints: []schema.Constraint{
+					{Type: schema.ConstraintRefExists, Value: "category"},
+				},
+			},
+		},
+	}
+	if err := r.LoadModule(mod); err != nil {
+		t.Fatalf("LoadModule failed: %v", err)
+	}
+
+	ctx := context.Background()
+	data := map[string]any{
+		"name":        "Test Product",
+		"category_id": "ref-id",
+	}
+
+	// Execute create which will trigger validateRefExists
+	_, err := r.Execute(ctx, "product", "create", ActionInput{Data: data})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+}
+
+func TestRuntime_ValidateRefExists_RefNotFound(t *testing.T) {
+	storage := &mockStorage{
+		getErr: errors.New("not found"),
+	}
+	r := newTestRuntimeWithStorage(storage)
+
+	// Register referenced module
+	refMod := schema.Module{
+		Name: "category",
+		Schema: map[string]schema.Field{
+			"id":   {Type: schema.FieldTypeString, Lookup: true},
+			"name": {Type: schema.FieldTypeString},
+		},
+	}
+	if err := r.LoadModule(refMod); err != nil {
+		t.Fatalf("LoadModule failed for referenced module: %v", err)
+	}
+
+	// Register main module with ref_exists constraint
+	mod := schema.Module{
+		Name: "product",
+		Schema: map[string]schema.Field{
+			"id":   {Type: schema.FieldTypeString},
+			"name": {Type: schema.FieldTypeString},
+			"category_id": {
+				Type: schema.FieldTypeString,
+				Constraints: []schema.Constraint{
+					{Type: schema.ConstraintRefExists, Value: "category"},
+				},
+			},
+		},
+	}
+	if err := r.LoadModule(mod); err != nil {
+		t.Fatalf("LoadModule failed: %v", err)
+	}
+
+	ctx := context.Background()
+	data := map[string]any{
+		"name":        "Test Product",
+		"category_id": "nonexistent-id",
+	}
+
+	// Execute create which will trigger validateRefExists
+	_, err := r.Execute(ctx, "product", "create", ActionInput{Data: data})
+	if err == nil {
+		t.Error("Execute() should error when ref doesn't exist")
+	}
+}

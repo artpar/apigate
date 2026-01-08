@@ -402,3 +402,150 @@ func TestWebhookService_NoRetryOnClientError(t *testing.T) {
 		t.Error("Expected NextRetry to be nil for client error")
 	}
 }
+
+func TestWebhookService_StartStopRetryWorker(t *testing.T) {
+	webhookStore := newMockWebhookStore()
+	deliveryStore := newMockDeliveryStore()
+	logger := zerolog.Nop()
+
+	svc := NewWebhookService(webhookStore, deliveryStore, logger)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start retry worker
+	svc.StartRetryWorker(ctx, 100*time.Millisecond)
+
+	// Wait briefly
+	time.Sleep(50 * time.Millisecond)
+
+	// Try to start again (should be no-op since already running)
+	svc.StartRetryWorker(ctx, 100*time.Millisecond)
+
+	// Stop retry worker
+	svc.StopRetryWorker()
+
+	// Try to stop again (should be no-op since already stopped)
+	svc.StopRetryWorker()
+}
+
+func TestWebhookService_ProcessRetries(t *testing.T) {
+	// Create a test server that succeeds
+	received := make(chan bool, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"ok": true}`))
+		received <- true
+	}))
+	defer server.Close()
+
+	webhookStore := newMockWebhookStore()
+	deliveryStore := newMockDeliveryStore()
+	logger := zerolog.Nop()
+
+	// Create a webhook
+	wh := webhook.Webhook{
+		ID:         "wh_retry_test",
+		UserID:     "usr_123",
+		URL:        server.URL,
+		Secret:     "whsec_test",
+		Events:     []webhook.EventType{webhook.EventUsageThreshold},
+		RetryCount: 3,
+		TimeoutMS:  5000,
+		Enabled:    true,
+	}
+	webhookStore.Create(context.Background(), wh)
+
+	// Create a pending delivery
+	now := time.Now()
+	nextRetry := now.Add(-time.Second) // Already due
+	d := webhook.Delivery{
+		ID:         "del_retry_test",
+		WebhookID:  "wh_retry_test",
+		EventID:    "evt_123",
+		Payload:    `{"id":"evt_123","type":"usage.threshold","timestamp":"2024-01-01T00:00:00Z","data":{}}`,
+		Status:     webhook.DeliveryRetrying,
+		Attempt:    1,
+		NextRetry:  &nextRetry,
+		CreatedAt:  now.Add(-time.Minute),
+	}
+	deliveryStore.Create(context.Background(), d)
+
+	svc := NewWebhookService(webhookStore, deliveryStore, logger)
+
+	// Process retries manually
+	ctx := context.Background()
+	svc.processRetries(ctx)
+
+	// Wait for delivery to be processed
+	select {
+	case <-received:
+		// Success
+	case <-time.After(2 * time.Second):
+		t.Fatal("Retry webhook not received within timeout")
+	}
+}
+
+func TestWebhookService_ProcessRetries_DisabledWebhook(t *testing.T) {
+	webhookStore := newMockWebhookStore()
+	deliveryStore := newMockDeliveryStore()
+	logger := zerolog.Nop()
+
+	// Create a disabled webhook
+	wh := webhook.Webhook{
+		ID:      "wh_disabled",
+		UserID:  "usr_123",
+		URL:     "http://example.com",
+		Enabled: false,
+	}
+	webhookStore.Create(context.Background(), wh)
+
+	// Create a pending delivery for the disabled webhook
+	now := time.Now()
+	nextRetry := now.Add(-time.Second)
+	d := webhook.Delivery{
+		ID:        "del_disabled",
+		WebhookID: "wh_disabled",
+		EventID:   "evt_123",
+		Status:    webhook.DeliveryRetrying,
+		Attempt:   1,
+		NextRetry: &nextRetry,
+		CreatedAt: now.Add(-time.Minute),
+	}
+	deliveryStore.Create(context.Background(), d)
+
+	svc := NewWebhookService(webhookStore, deliveryStore, logger)
+
+	// Process retries - should skip disabled webhook
+	ctx := context.Background()
+	svc.processRetries(ctx)
+
+	// Give time for processing
+	time.Sleep(100 * time.Millisecond)
+
+	// Delivery should still be in retrying state (skipped)
+	deliveries := deliveryStore.getDeliveries()
+	if len(deliveries) != 1 {
+		t.Fatalf("Expected 1 delivery, got %d", len(deliveries))
+	}
+}
+
+func TestWebhookService_RetryWorkerContextCancel(t *testing.T) {
+	webhookStore := newMockWebhookStore()
+	deliveryStore := newMockDeliveryStore()
+	logger := zerolog.Nop()
+
+	svc := NewWebhookService(webhookStore, deliveryStore, logger)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Start retry worker
+	svc.StartRetryWorker(ctx, 100*time.Millisecond)
+
+	// Wait briefly then cancel context
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	// Give time for worker to stop
+	time.Sleep(100 * time.Millisecond)
+}

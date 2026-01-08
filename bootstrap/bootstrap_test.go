@@ -544,3 +544,91 @@ func TestBootstrap_DefaultDatabase(t *testing.T) {
 		t.Error("default database file should be created at apigate.db")
 	}
 }
+
+func TestBootstrap_ReloadEntitlements(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "reload-entitlements-test.db")
+
+	os.Setenv(bootstrap.EnvDatabaseDSN, dbPath)
+	defer os.Unsetenv(bootstrap.EnvDatabaseDSN)
+
+	app, err := bootstrap.New()
+	if err != nil {
+		t.Fatalf("create app: %v", err)
+	}
+	defer app.Shutdown()
+
+	ctx := context.Background()
+
+	// ReloadEntitlements should work even without proxy service
+	err = app.ReloadEntitlements(ctx)
+	if err != nil {
+		t.Errorf("ReloadEntitlements should not error: %v", err)
+	}
+}
+
+func TestBootstrap_LoadEntitlements_WithData(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "entitlements-data-test.db")
+
+	os.Setenv(bootstrap.EnvDatabaseDSN, dbPath)
+	defer os.Unsetenv(bootstrap.EnvDatabaseDSN)
+
+	app, err := bootstrap.New()
+	if err != nil {
+		t.Fatalf("create app: %v", err)
+	}
+	defer app.Shutdown()
+
+	ctx := context.Background()
+
+	// Insert custom plan entitlement
+	_, err = app.DB.DB.ExecContext(ctx, `
+		INSERT INTO plan_entitlements (id, plan_id, entitlement_id, enabled, value)
+		VALUES ('pe-1', 'free', 'ent-api-streaming', 1, 'false')
+	`)
+	if err != nil {
+		t.Fatalf("insert plan entitlement: %v", err)
+	}
+
+	// Reload entitlements
+	err = app.ReloadEntitlements(ctx)
+	if err != nil {
+		t.Errorf("ReloadEntitlements with data should not error: %v", err)
+	}
+}
+
+func TestBootstrap_LoadPlans_WithMeterType(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "meter-type-test.db")
+
+	os.Setenv(bootstrap.EnvDatabaseDSN, dbPath)
+	defer os.Unsetenv(bootstrap.EnvDatabaseDSN)
+
+	app, err := bootstrap.New()
+	if err != nil {
+		t.Fatalf("create app: %v", err)
+	}
+	defer app.Shutdown()
+
+	ctx := context.Background()
+
+	// Insert plan with different meter types
+	meterTypes := []string{"requests", "tokens", "bytes"}
+
+	for i, mt := range meterTypes {
+		_, err = app.DB.DB.ExecContext(ctx, `
+			INSERT INTO plans (id, name, rate_limit_per_minute, requests_per_month, price_monthly, overage_price, enabled, meter_type)
+			VALUES (?, ?, 100, 10000, 999, 1, 1, ?)
+		`, "plan_"+mt, "Plan "+mt, mt)
+		if err != nil {
+			t.Fatalf("insert plan %d: %v", i, err)
+		}
+	}
+
+	// Reload plans
+	err = app.ReloadPlans(ctx)
+	if err != nil {
+		t.Errorf("ReloadPlans with meter types should not error: %v", err)
+	}
+}

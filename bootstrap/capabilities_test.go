@@ -3,9 +3,12 @@ package bootstrap
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/artpar/apigate/core/capability"
+	"github.com/artpar/apigate/domain/billing"
 	"github.com/artpar/apigate/domain/settings"
+	"github.com/artpar/apigate/ports"
 	"github.com/rs/zerolog"
 )
 
@@ -219,10 +222,10 @@ func (m *mockPaymentProvider) CreatePortalSession(ctx context.Context, customerI
 func (m *mockPaymentProvider) CancelSubscription(ctx context.Context, subscriptionID string, immediately bool) error {
 	return nil
 }
-func (m *mockPaymentProvider) GetSubscription(ctx context.Context, subscriptionID string) (interface{}, error) {
-	return nil, nil
+func (m *mockPaymentProvider) GetSubscription(ctx context.Context, subscriptionID string) (billing.Subscription, error) {
+	return billing.Subscription{}, nil
 }
-func (m *mockPaymentProvider) ReportUsage(ctx context.Context, subscriptionItemID string, quantity int64, timestamp interface{}) error {
+func (m *mockPaymentProvider) ReportUsage(ctx context.Context, subscriptionItemID string, quantity int64, timestamp time.Time) error {
 	return nil
 }
 func (m *mockPaymentProvider) ParseWebhook(payload []byte, signature string) (string, map[string]any, error) {
@@ -232,7 +235,7 @@ func (m *mockPaymentProvider) ParseWebhook(payload []byte, signature string) (st
 // mockEmailSender implements ports.EmailSender for testing.
 type mockEmailSender struct{}
 
-func (m *mockEmailSender) Send(ctx context.Context, msg interface{}) error { return nil }
+func (m *mockEmailSender) Send(ctx context.Context, msg ports.EmailMessage) error { return nil }
 func (m *mockEmailSender) SendVerification(ctx context.Context, to, name, token string) error {
 	return nil
 }
@@ -560,5 +563,115 @@ func TestCapabilityContainer_QueueEnqueueDequeue(t *testing.T) {
 	}
 	if length != 0 {
 		t.Errorf("QueueLength() after dequeue = %d, want 0", length)
+	}
+}
+
+// Test capability container with various providers
+
+func TestNewCapabilityContainer_WithEmailProvider(t *testing.T) {
+	mockEmail := &mockEmailSender{}
+	cfg := CapabilityConfig{
+		Logger: zerolog.Nop(),
+		Email:  mockEmail,
+	}
+
+	container, err := NewCapabilityContainer(cfg)
+	if err != nil {
+		t.Fatalf("NewCapabilityContainer() error = %v", err)
+	}
+	defer container.Close()
+
+	caps := container.ListCapabilities()
+	if len(caps) == 0 {
+		t.Error("Container should have capabilities")
+	}
+
+	// Verify email capability is registered
+	ctx := context.Background()
+	email, err := container.Email(ctx)
+	if err != nil {
+		t.Fatalf("Email() error = %v", err)
+	}
+	if email == nil {
+		t.Error("Email provider should not be nil")
+	}
+}
+
+func TestNewCapabilityContainer_WithPaymentProvider(t *testing.T) {
+	mockPayment := &mockPaymentProvider{}
+	cfg := CapabilityConfig{
+		Logger:  zerolog.Nop(),
+		Payment: mockPayment,
+	}
+
+	container, err := NewCapabilityContainer(cfg)
+	if err != nil {
+		t.Fatalf("NewCapabilityContainer() error = %v", err)
+	}
+	defer container.Close()
+
+	caps := container.ListCapabilities()
+	if len(caps) == 0 {
+		t.Error("Container should have capabilities")
+	}
+
+	// Verify payment capability is registered
+	ctx := context.Background()
+	payment, err := container.Payment(ctx)
+	if err != nil {
+		t.Fatalf("Payment() error = %v", err)
+	}
+	if payment == nil {
+		t.Error("Payment provider should not be nil")
+	}
+}
+
+func TestNewCapabilityContainer_WithHasher(t *testing.T) {
+	mockHash := &mockHasher{}
+	cfg := CapabilityConfig{
+		Logger: zerolog.Nop(),
+		Hasher: mockHash,
+	}
+
+	container, err := NewCapabilityContainer(cfg)
+	if err != nil {
+		t.Fatalf("NewCapabilityContainer() error = %v", err)
+	}
+	defer container.Close()
+
+	caps := container.ListCapabilities()
+	if len(caps) == 0 {
+		t.Error("Container should have capabilities")
+	}
+
+	// Verify hasher capability is registered
+	ctx := context.Background()
+	hasher, err := container.Hasher(ctx)
+	if err != nil {
+		t.Fatalf("Hasher() error = %v", err)
+	}
+	if hasher == nil {
+		t.Error("Hasher provider should not be nil")
+	}
+}
+
+func TestNewCapabilityContainer_WithAllProviders(t *testing.T) {
+	cfg := CapabilityConfig{
+		Logger:  zerolog.Nop(),
+		Email:   &mockEmailSender{},
+		Payment: &mockPaymentProvider{},
+		Hasher:  &mockHasher{},
+	}
+
+	container, err := NewCapabilityContainer(cfg)
+	if err != nil {
+		t.Fatalf("NewCapabilityContainer() error = %v", err)
+	}
+	defer container.Close()
+
+	caps := container.ListCapabilities()
+	// Should have: cache, hasher, email, payment, storage, queue, notification
+	if len(caps) < 5 {
+		t.Errorf("Container should have at least 5 capabilities, got %d", len(caps))
 	}
 }
