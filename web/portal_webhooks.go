@@ -434,7 +434,7 @@ func (h *PortalHandler) renderWebhookFormPage(user *PortalUser, wh webhook.Webho
         </div>
         %s
         <div class="card">
-            <form method="POST">
+            <form method="POST" action="/portal/webhooks">
                 <div class="form-group">
                     <label for="name">Name</label>
                     <input type="text" id="name" name="name" value="%s" required placeholder="e.g., Usage Alerts">

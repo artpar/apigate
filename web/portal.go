@@ -1326,8 +1326,8 @@ func (h *PortalHandler) ChangePlan(w http.ResponseWriter, r *http.Request) {
 
 	// If the new plan has a price > 0, redirect to payment checkout
 	if newPlan.PriceMonthly > 0 {
-		// Check if payment provider is configured
-		if h.payment == nil {
+		// Check if payment provider is configured (NoopProvider returns "none")
+		if h.payment == nil || h.payment.Name() == "none" {
 			h.logger.Error().Msg("no payment provider configured for paid plan change")
 			http.Redirect(w, r, "/portal/plans?error=payment", http.StatusFound)
 			return
@@ -1352,10 +1352,10 @@ func (h *PortalHandler) ChangePlan(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Get the Stripe price ID for this plan
+		// Get the price ID for this plan (not required for dummy/demo mode)
 		priceID := newPlan.StripePriceID
-		if priceID == "" {
-			h.logger.Error().Str("plan_id", newPlanID).Msg("plan has no Stripe price ID configured")
+		if priceID == "" && h.payment.Name() != "dummy" {
+			h.logger.Error().Str("plan_id", newPlanID).Msg("plan has no price ID configured")
 			http.Redirect(w, r, "/portal/plans?error=payment", http.StatusFound)
 			return
 		}
