@@ -335,3 +335,49 @@ func TestNewProvider_ExtraFieldsIgnored(t *testing.T) {
 		t.Errorf("Name() = %s, want stripe", p.Name())
 	}
 }
+
+func TestNewProvider_DummyProvider(t *testing.T) {
+	s := settings.Settings{
+		settings.KeyPaymentProvider: "dummy",
+	}
+
+	p, err := NewProvider(s)
+	if err != nil {
+		t.Fatalf("NewProvider failed: %v", err)
+	}
+
+	if p.Name() != "dummy" {
+		t.Errorf("Name() = %s, want dummy", p.Name())
+	}
+}
+
+func TestNewProvider_TestProvider(t *testing.T) {
+	s := settings.Settings{
+		settings.KeyPaymentProvider: "test",
+	}
+
+	p, err := NewProvider(s)
+	if err != nil {
+		t.Fatalf("NewProvider failed: %v", err)
+	}
+
+	if p.Name() != "dummy" {
+		t.Errorf("Name() = %s, want dummy", p.Name())
+	}
+}
+
+func TestNewProvider_DummyWithBaseURL(t *testing.T) {
+	s := settings.Settings{
+		settings.KeyPaymentProvider: "dummy",
+		settings.KeyPortalBaseURL:   "https://example.com",
+	}
+
+	p, err := NewProvider(s)
+	if err != nil {
+		t.Fatalf("NewProvider failed: %v", err)
+	}
+
+	if p.Name() != "dummy" {
+		t.Errorf("Name() = %s, want dummy", p.Name())
+	}
+}

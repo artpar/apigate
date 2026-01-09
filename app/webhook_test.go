@@ -549,3 +549,64 @@ func TestWebhookService_RetryWorkerContextCancel(t *testing.T) {
 	// Give time for worker to stop
 	time.Sleep(100 * time.Millisecond)
 }
+
+func TestWebhookService_TestWebhook(t *testing.T) {
+	// Create a test server that accepts webhooks
+	received := make(chan bool, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify it's a test event
+		if r.Header.Get("X-Event-Type") != "test" {
+			t.Errorf("Expected X-Event-Type: test, got %s", r.Header.Get("X-Event-Type"))
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"ok": true}`))
+		received <- true
+	}))
+	defer server.Close()
+
+	webhookStore := newMockWebhookStore()
+	deliveryStore := newMockDeliveryStore()
+	logger := zerolog.Nop()
+
+	// Create a webhook
+	wh := webhook.Webhook{
+		ID:         "wh_test_webhook",
+		UserID:     "usr_123",
+		Name:       "Test Webhook",
+		URL:        server.URL,
+		Secret:     "whsec_testsecret",
+		Events:     []webhook.EventType{webhook.EventTest},
+		RetryCount: 3,
+		TimeoutMS:  5000,
+		Enabled:    true,
+	}
+	webhookStore.Create(context.Background(), wh)
+
+	svc := NewWebhookService(webhookStore, deliveryStore, logger)
+
+	// Send a test webhook
+	err := svc.TestWebhook(context.Background(), "wh_test_webhook")
+	if err != nil {
+		t.Fatalf("TestWebhook failed: %v", err)
+	}
+
+	// Wait for webhook to be received
+	select {
+	case <-received:
+		// Success
+	case <-time.After(2 * time.Second):
+		t.Fatal("Test webhook not received within timeout")
+	}
+
+	// Verify delivery was created
+	time.Sleep(100 * time.Millisecond)
+	deliveries := deliveryStore.getDeliveries()
+	if len(deliveries) != 1 {
+		t.Fatalf("Expected 1 delivery, got %d", len(deliveries))
+	}
+
+	d := deliveries[0]
+	if d.WebhookID != "wh_test_webhook" {
+		t.Errorf("Expected webhook_id wh_test_webhook, got %s", d.WebhookID)
+	}
+}

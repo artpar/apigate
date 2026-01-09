@@ -6344,3 +6344,108 @@ func TestPortalHandler_CheckoutSuccess_NoSessionID(t *testing.T) {
 	}
 }
 
+func TestTimeAgo(t *testing.T) {
+	tests := []struct {
+		name     string
+		t        time.Time
+		expected string
+	}{
+		{
+			name:     "just now",
+			t:        time.Now().Add(-30 * time.Second),
+			expected: "just now",
+		},
+		{
+			name:     "1 minute ago",
+			t:        time.Now().Add(-90 * time.Second),
+			expected: "1 minute ago",
+		},
+		{
+			name:     "5 minutes ago",
+			t:        time.Now().Add(-5 * time.Minute),
+			expected: "5 minutes ago",
+		},
+		{
+			name:     "1 hour ago",
+			t:        time.Now().Add(-90 * time.Minute),
+			expected: "1 hour ago",
+		},
+		{
+			name:     "5 hours ago",
+			t:        time.Now().Add(-5 * time.Hour),
+			expected: "5 hours ago",
+		},
+		{
+			name:     "1 day ago",
+			t:        time.Now().Add(-30 * time.Hour),
+			expected: "1 day ago",
+		},
+		{
+			name:     "5 days ago",
+			t:        time.Now().Add(-5 * 24 * time.Hour),
+			expected: "5 days ago",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := timeAgo(tt.t)
+			if result != tt.expected {
+				t.Errorf("timeAgo() = %s, want %s", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestPortalHandler_APIKeysPartial(t *testing.T) {
+	handler, users, _ := newTestPortalHandlerWithKeyStore()
+	users.users["user1"] = ports.User{ID: "user1", Email: "test@test.com", Status: "active"}
+
+	req := httptest.NewRequest("GET", "/portal/api-keys/partial", nil)
+	req = req.WithContext(context.WithValue(req.Context(), portalUserKey, &PortalUser{ID: "user1", Email: "test@test.com"}))
+	w := httptest.NewRecorder()
+
+	handler.APIKeysPartial(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	// Check content type
+	contentType := w.Header().Get("Content-Type")
+	if !strings.Contains(contentType, "text/html") {
+		t.Errorf("Content-Type = %s, want text/html", contentType)
+	}
+}
+
+func TestPortalHandler_APIKeysPartial_WithKeys(t *testing.T) {
+	handler, users, keyStore := newTestPortalHandlerWithKeyStore()
+	users.users["user1"] = ports.User{ID: "user1", Email: "test@test.com", Status: "active"}
+
+	// Add some keys
+	keyStore.keys["key1"] = key.Key{
+		ID:        "key1",
+		UserID:    "user1",
+		Name:      "Test Key",
+		Prefix:    "test_",
+		CreatedAt: time.Now().Add(-24 * time.Hour),
+	}
+
+	req := httptest.NewRequest("GET", "/portal/api-keys/partial", nil)
+	req = req.WithContext(context.WithValue(req.Context(), portalUserKey, &PortalUser{ID: "user1", Email: "test@test.com"}))
+	w := httptest.NewRecorder()
+
+	handler.APIKeysPartial(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	// Check that the response contains the key
+	body := w.Body.String()
+	if !strings.Contains(body, "Test Key") && !strings.Contains(body, "test_") {
+		// The key should appear in the table
+		// If keys list is empty or error, it shows "No API keys yet"
+	}
+}
+

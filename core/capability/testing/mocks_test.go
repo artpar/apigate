@@ -2,6 +2,7 @@ package testing_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/artpar/apigate/core/capability"
@@ -349,6 +350,243 @@ func TestTestResolver(t *testing.T) {
 	}
 	if tr.MockEmail == nil {
 		t.Error("MockEmail should not be nil")
+	}
+}
+
+func TestMockPayment_PortalAndSubscription(t *testing.T) {
+	ctx := context.Background()
+	payment := captest.NewMockPayment("test_payment")
+
+	// Test Name
+	if payment.Name() != "test_payment" {
+		t.Errorf("Name() = %s, want test_payment", payment.Name())
+	}
+
+	// Test CreatePortalSession
+	url, err := payment.CreatePortalSession(ctx, "cus_123", "https://return.url")
+	if err != nil {
+		t.Fatalf("CreatePortalSession() error = %v", err)
+	}
+	if url == "" {
+		t.Error("CreatePortalSession() returned empty URL")
+	}
+
+	// Test AddSubscription and GetSubscription
+	sub := capability.Subscription{
+		ID:         "sub_123",
+		CustomerID: "cus_123",
+		PriceID:    "price_pro",
+		Status:     "active",
+	}
+	payment.AddSubscription(sub)
+
+	got, err := payment.GetSubscription(ctx, "sub_123")
+	if err != nil {
+		t.Fatalf("GetSubscription() error = %v", err)
+	}
+	if got.ID != "sub_123" {
+		t.Errorf("GetSubscription().ID = %s, want sub_123", got.ID)
+	}
+
+	// Test GetSubscription not found
+	_, err = payment.GetSubscription(ctx, "nonexistent")
+	if err == nil {
+		t.Error("GetSubscription() should error for nonexistent subscription")
+	}
+
+	// Test CancelSubscription
+	err = payment.CancelSubscription(ctx, "sub_123", false)
+	if err != nil {
+		t.Fatalf("CancelSubscription() error = %v", err)
+	}
+
+	got, _ = payment.GetSubscription(ctx, "sub_123")
+	if got.Status != "cancelled" {
+		t.Errorf("Status = %s, want cancelled", got.Status)
+	}
+
+	// Test ReportUsage
+	err = payment.ReportUsage(ctx, "si_123", 100, 1234567890)
+	if err != nil {
+		t.Fatalf("ReportUsage() error = %v", err)
+	}
+
+	// Test ParseWebhook
+	eventType, data, err := payment.ParseWebhook([]byte("payload"), "signature")
+	if err != nil {
+		t.Fatalf("ParseWebhook() error = %v", err)
+	}
+	if eventType != "test.event" {
+		t.Errorf("ParseWebhook() eventType = %s, want test.event", eventType)
+	}
+	if data["test"] != true {
+		t.Error("ParseWebhook() should return test data")
+	}
+
+	// Test Customers
+	payment.CreateCustomer(ctx, "test@example.com", "Test", "user_1")
+	customers := payment.Customers()
+	if len(customers) != 1 {
+		t.Errorf("Customers() len = %d, want 1", len(customers))
+	}
+
+	// Test SetCreateCustomerError
+	payment.SetCreateCustomerError(errors.New("not configured"))
+	_, err = payment.CreateCustomer(ctx, "fail@example.com", "Fail", "user_2")
+	if err == nil {
+		t.Error("CreateCustomer() should fail after SetCreateCustomerError")
+	}
+}
+
+func TestMockEmail_Advanced(t *testing.T) {
+	ctx := context.Background()
+	email := captest.NewMockEmail("test_email")
+
+	// Test Name
+	if email.Name() != "test_email" {
+		t.Errorf("Name() = %s, want test_email", email.Name())
+	}
+
+	// Test SendTemplate
+	err := email.SendTemplate(ctx, "user@example.com", "welcome_template", map[string]string{"name": "Test"})
+	if err != nil {
+		t.Fatalf("SendTemplate() error = %v", err)
+	}
+
+	// Verify template was sent as email
+	sent := email.SentMessages()
+	if len(sent) != 1 {
+		t.Errorf("SentMessages() len = %d, want 1", len(sent))
+	}
+	if sent[0].To != "user@example.com" {
+		t.Errorf("To = %s, want user@example.com", sent[0].To)
+	}
+
+	// Test TestConnection
+	if err := email.TestConnection(ctx); err != nil {
+		t.Fatalf("TestConnection() error = %v", err)
+	}
+
+	// Test SetSendError
+	email.SetSendError(errors.New("not configured"))
+	err = email.Send(ctx, capability.EmailMessage{To: "fail@example.com"})
+	if err == nil {
+		t.Error("Send() should fail after SetSendError")
+	}
+}
+
+func TestMockCache_Advanced(t *testing.T) {
+	ctx := context.Background()
+	cache := captest.NewMockCache("test_cache")
+
+	// Test Name
+	if cache.Name() != "test_cache" {
+		t.Errorf("Name() = %s, want test_cache", cache.Name())
+	}
+
+	// Test Close
+	if err := cache.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	// Test FlushCount
+	cache.Flush(ctx)
+	cache.Flush(ctx)
+	if cache.FlushCount() != 2 {
+		t.Errorf("FlushCount() = %d, want 2", cache.FlushCount())
+	}
+}
+
+func TestMockStorage_Advanced(t *testing.T) {
+	ctx := context.Background()
+	storage := captest.NewMockStorage("test_storage")
+
+	// Test Name
+	if storage.Name() != "test_storage" {
+		t.Errorf("Name() = %s, want test_storage", storage.Name())
+	}
+
+	// Test ObjectCount
+	storage.Put(ctx, "file1.txt", []byte("data1"), "text/plain")
+	storage.Put(ctx, "file2.txt", []byte("data2"), "text/plain")
+	if count := storage.ObjectCount(); count != 2 {
+		t.Errorf("ObjectCount() = %d, want 2", count)
+	}
+
+	// Test PutStream (if it exists)
+	// The PutStream function might just wrap Put, so test it exists
+}
+
+func TestMockQueue_Advanced(t *testing.T) {
+	ctx := context.Background()
+	queue := captest.NewMockQueue("test_queue")
+
+	// Test Name
+	if queue.Name() != "test_queue" {
+		t.Errorf("Name() = %s, want test_queue", queue.Name())
+	}
+
+	// Test EnqueueDelayed (if it exists)
+	job := capability.Job{Type: "delayed.job", Payload: map[string]any{}}
+	err := queue.EnqueueDelayed(ctx, "delayed_queue", job, 60)
+	if err != nil {
+		t.Fatalf("EnqueueDelayed() error = %v", err)
+	}
+
+	// Test Nack
+	queue.Enqueue(ctx, "test_queue", capability.Job{Type: "nack.test", Payload: map[string]any{}})
+	dequeued, _ := queue.Dequeue(ctx, "test_queue", 5)
+	if dequeued != nil {
+		err = queue.Nack(ctx, "test_queue", dequeued.ID)
+		if err != nil {
+			t.Fatalf("Nack() error = %v", err)
+		}
+		nackedJobs := queue.NackedJobs()
+		if nackedJobs[dequeued.ID] == 0 {
+			t.Error("Job should be marked as nacked")
+		}
+	}
+
+	// Test Close
+	if err := queue.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+}
+
+func TestMockNotification_Advanced(t *testing.T) {
+	ctx := context.Background()
+	notif := captest.NewMockNotification("test_notification")
+
+	// Test Name
+	if notif.Name() != "test_notification" {
+		t.Errorf("Name() = %s, want test_notification", notif.Name())
+	}
+
+	// Test SendBatch
+	msgs := []capability.NotificationMessage{
+		{Channel: "#channel1", Message: "msg1"},
+		{Channel: "#channel2", Message: "msg2"},
+	}
+	if err := notif.SendBatch(ctx, msgs); err != nil {
+		t.Fatalf("SendBatch() error = %v", err)
+	}
+
+	// Verify batch was sent
+	sent := notif.SentNotifications()
+	if len(sent) != 2 {
+		t.Errorf("SentNotifications() len = %d, want 2", len(sent))
+	}
+
+	// Test TestConnection
+	if err := notif.TestConnection(ctx); err != nil {
+		t.Fatalf("TestConnection() error = %v", err)
+	}
+
+	// Test SetSendError
+	notif.SetSendError(errors.New("not configured"))
+	err := notif.Send(ctx, capability.NotificationMessage{Channel: "#fail"})
+	if err == nil {
+		t.Error("Send() should fail after SetSendError")
 	}
 }
 

@@ -2092,6 +2092,70 @@ func TestPlanStore_GetNotFound(t *testing.T) {
 	}
 }
 
+func TestPlanStore_ClearOtherDefaults(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewPlanStore(db)
+	ctx := context.Background()
+
+	// Create multiple plans with IsDefault = true
+	plan1 := ports.Plan{
+		ID:        "plan-default-1",
+		Name:      "Default Plan 1",
+		Enabled:   true,
+		IsDefault: true,
+	}
+	plan2 := ports.Plan{
+		ID:        "plan-default-2",
+		Name:      "Default Plan 2",
+		Enabled:   true,
+		IsDefault: true,
+	}
+	plan3 := ports.Plan{
+		ID:        "plan-not-default",
+		Name:      "Non-default Plan",
+		Enabled:   true,
+		IsDefault: false,
+	}
+
+	store.Create(ctx, plan1)
+	store.Create(ctx, plan2)
+	store.Create(ctx, plan3)
+
+	// Clear defaults except for plan1
+	if err := store.ClearOtherDefaults(ctx, plan1.ID); err != nil {
+		t.Fatalf("ClearOtherDefaults: %v", err)
+	}
+
+	// Verify plan1 is still default
+	got1, err := store.Get(ctx, plan1.ID)
+	if err != nil {
+		t.Fatalf("get plan1: %v", err)
+	}
+	if !got1.IsDefault {
+		t.Error("plan1 should still be default")
+	}
+
+	// Verify plan2 is no longer default
+	got2, err := store.Get(ctx, plan2.ID)
+	if err != nil {
+		t.Fatalf("get plan2: %v", err)
+	}
+	if got2.IsDefault {
+		t.Error("plan2 should no longer be default")
+	}
+
+	// Verify plan3 remains not default
+	got3, err := store.Get(ctx, plan3.ID)
+	if err != nil {
+		t.Fatalf("get plan3: %v", err)
+	}
+	if got3.IsDefault {
+		t.Error("plan3 should still not be default")
+	}
+}
+
 // -----------------------------------------------------------------------------
 // SettingsStore Tests
 // -----------------------------------------------------------------------------
@@ -2944,6 +3008,58 @@ func TestSubscriptionStore_UpdateNotFound(t *testing.T) {
 	err := store.Update(ctx, sub)
 	if err == nil {
 		t.Error("expected error updating nonexistent subscription")
+	}
+}
+
+func TestSubscriptionStore_GetByProviderID(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewSubscriptionStore(db)
+	ctx := context.Background()
+
+	now := time.Now().UTC().Truncate(time.Second)
+
+	// Create subscription with provider ID
+	sub := billing.Subscription{
+		ID:                 "sub-provider-test",
+		UserID:             "user-1",
+		PlanID:             "plan-1",
+		Provider:           "stripe",
+		ProviderID:         "sub_provider123",
+		Status:             billing.SubscriptionStatusActive,
+		CurrentPeriodStart: now,
+		CurrentPeriodEnd:   now.Add(30 * 24 * time.Hour),
+	}
+
+	if err := store.Create(ctx, sub); err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+
+	// GetByProviderID
+	got, err := store.GetByProviderID(ctx, "sub_provider123")
+	if err != nil {
+		t.Fatalf("GetByProviderID: %v", err)
+	}
+
+	if got.ID != sub.ID {
+		t.Errorf("ID = %s, want %s", got.ID, sub.ID)
+	}
+	if got.ProviderID != sub.ProviderID {
+		t.Errorf("ProviderID = %s, want %s", got.ProviderID, sub.ProviderID)
+	}
+}
+
+func TestSubscriptionStore_GetByProviderID_NotFound(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewSubscriptionStore(db)
+	ctx := context.Background()
+
+	_, err := store.GetByProviderID(ctx, "nonexistent_provider_id")
+	if err != sqlite.ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 }
 

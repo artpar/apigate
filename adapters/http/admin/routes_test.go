@@ -734,3 +734,89 @@ func TestRoutesHandler_InvalidJSON(t *testing.T) {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
 	}
 }
+
+func TestNewRoutesHandlerWithConfig(t *testing.T) {
+	routeStore := newMockRouteStore()
+	upstreamStore := newMockUpstreamStoreRoutes()
+	logger := zerolog.Nop()
+
+	callbackCalled := false
+	callback := func() {
+		callbackCalled = true
+	}
+
+	cfg := admin.RoutesHandlerConfig{
+		Routes:        routeStore,
+		Upstreams:     upstreamStore,
+		Logger:        logger,
+		OnRouteChange: callback,
+	}
+
+	handler := admin.NewRoutesHandlerWithConfig(cfg)
+	if handler == nil {
+		t.Fatal("NewRoutesHandlerWithConfig returned nil")
+	}
+
+	// Create a route to trigger the callback
+	router := createRouter(handler)
+
+	body := `{
+		"name": "Test Route",
+		"path_pattern": "/test/*",
+		"match_type": "prefix",
+		"upstream_id": "ups_test"
+	}`
+
+	req := httptest.NewRequest("POST", "/routes", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusCreated)
+	}
+
+	// Give time for callback to be called
+	time.Sleep(10 * time.Millisecond)
+
+	if !callbackCalled {
+		t.Error("OnRouteChange callback was not called")
+	}
+}
+
+func TestNewRoutesHandlerWithConfig_NoCallback(t *testing.T) {
+	routeStore := newMockRouteStore()
+	upstreamStore := newMockUpstreamStoreRoutes()
+	logger := zerolog.Nop()
+
+	cfg := admin.RoutesHandlerConfig{
+		Routes:    routeStore,
+		Upstreams: upstreamStore,
+		Logger:    logger,
+		// No OnRouteChange callback
+	}
+
+	handler := admin.NewRoutesHandlerWithConfig(cfg)
+	if handler == nil {
+		t.Fatal("NewRoutesHandlerWithConfig returned nil")
+	}
+
+	// Create a route - should not panic even without callback
+	router := createRouter(handler)
+
+	body := `{
+		"name": "Test Route",
+		"path_pattern": "/test/*",
+		"match_type": "prefix",
+		"upstream_id": "ups_test"
+	}`
+
+	req := httptest.NewRequest("POST", "/routes", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusCreated)
+	}
+}
