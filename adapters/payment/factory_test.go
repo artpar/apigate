@@ -101,18 +101,7 @@ func TestNewProvider_PaddleMinimalConfig(t *testing.T) {
 	}
 }
 
-func TestNewProvider_PaddleMissingVendorID(t *testing.T) {
-	s := settings.Settings{
-		settings.KeyPaymentProvider:     "paddle",
-		settings.KeyPaymentPaddleAPIKey: "api_key_123",
-		// Missing vendor ID
-	}
-
-	_, err := NewProvider(s)
-	if err == nil {
-		t.Error("expected error for missing paddle vendor ID")
-	}
-}
+// TestNewProvider_PaddleMissingVendorID removed - VendorID no longer required for Paddle Billing API
 
 func TestNewProvider_PaddleMissingAPIKey(t *testing.T) {
 	s := settings.Settings{

@@ -318,6 +318,10 @@ type SubscriptionStore interface {
 	// GetByUser retrieves active subscription for a user.
 	GetByUser(ctx context.Context, userID string) (billing.Subscription, error)
 
+	// GetByProviderID retrieves subscription by external provider subscription ID.
+	// Used by webhook handlers to look up subscriptions from Stripe/Paddle/LemonSqueezy events.
+	GetByProviderID(ctx context.Context, providerID string) (billing.Subscription, error)
+
 	// Create stores a new subscription.
 	Create(ctx context.Context, sub billing.Subscription) error
 

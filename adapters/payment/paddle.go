@@ -11,32 +11,36 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/artpar/apigate/domain/billing"
 )
 
-// PaddleConfig holds Paddle configuration.
+// PaddleConfig holds Paddle Billing configuration.
 type PaddleConfig struct {
-	VendorID      string
-	APIKey        string
-	PublicKey     string
-	WebhookSecret string
-	Sandbox       bool
+	VendorID      string // Not used in Billing API, kept for compatibility
+	APIKey        string // Bearer token for Paddle Billing API
+	PublicKey     string // Not used in Billing API
+	WebhookSecret string // For webhook signature verification
+	Sandbox       bool   // Auto-detected from API key prefix
 }
 
-// PaddleProvider implements ports.PaymentProvider for Paddle.
+// PaddleProvider implements ports.PaymentProvider for Paddle Billing API.
 type PaddleProvider struct {
 	config     PaddleConfig
 	httpClient *http.Client
 	baseURL    string
 }
 
-// NewPaddleProvider creates a new Paddle payment provider.
+// NewPaddleProvider creates a new Paddle Billing payment provider.
 func NewPaddleProvider(config PaddleConfig) *PaddleProvider {
-	baseURL := "https://vendors.paddle.com/api/2.0"
-	if config.Sandbox {
-		baseURL = "https://sandbox-vendors.paddle.com/api/2.0"
+	// Auto-detect sandbox mode from API key prefix
+	isSandbox := strings.HasPrefix(config.APIKey, "pdl_sdbx_") || config.Sandbox
+
+	baseURL := "https://api.paddle.com"
+	if isSandbox {
+		baseURL = "https://sandbox-api.paddle.com"
 	}
 
 	return &PaddleProvider{
@@ -51,104 +55,219 @@ func (p *PaddleProvider) Name() string {
 	return "paddle"
 }
 
-// CreateCustomer creates a customer in Paddle (not directly supported, handled via subscriptions).
+// CreateCustomer creates a customer in Paddle Billing.
 func (p *PaddleProvider) CreateCustomer(ctx context.Context, email, name, userID string) (string, error) {
-	// Paddle doesn't have a separate customer creation API
-	// Customers are created implicitly when they subscribe
-	// Return the userID as the "customer ID" for our tracking
-	return userID, nil
-}
-
-// CreateCheckoutSession creates a Paddle checkout link.
-func (p *PaddleProvider) CreateCheckoutSession(ctx context.Context, customerID, priceID, successURL, cancelURL string, trialDays int) (string, error) {
-	// Paddle uses client-side checkout with Paddle.js
-	// This would generate a Pay Link via their API
 	payload := map[string]interface{}{
-		"vendor_id":       p.config.VendorID,
-		"vendor_auth_code": p.config.APIKey,
-		"product_id":      priceID,
-		"customer_email":  customerID, // In practice, this would be the email
-		"passthrough":     fmt.Sprintf(`{"user_id": "%s"}`, customerID),
-		"return_url":      successURL,
+		"email": email,
+		"name":  name,
+		"custom_data": map[string]string{
+			"user_id": userID,
+		},
 	}
 
-	// Add trial period if specified
-	if trialDays > 0 {
-		payload["trial_days"] = trialDays
-	}
-
-	resp, err := p.doRequest(ctx, "/product/generate_pay_link", payload)
+	resp, err := p.doRequest(ctx, "POST", "/customers", payload)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("create customer: %w", err)
 	}
 
-	if url, ok := resp["url"].(string); ok {
-		return url, nil
+	data, ok := resp["data"].(map[string]interface{})
+	if !ok {
+		return "", errors.New("invalid response from Paddle")
 	}
-	return "", errors.New("failed to generate Paddle pay link")
+
+	customerID, ok := data["id"].(string)
+	if !ok {
+		return "", errors.New("customer ID not found in response")
+	}
+
+	return customerID, nil
 }
 
-// CreatePortalSession creates a customer portal link (Paddle subscription management).
+// CreateCheckoutSession creates a Paddle Billing checkout transaction.
+func (p *PaddleProvider) CreateCheckoutSession(ctx context.Context, customerID, priceID, successURL, cancelURL string, trialDays int) (string, error) {
+	// First, get customer email if we have a customer ID
+	var customerEmail string
+	if strings.HasPrefix(customerID, "ctm_") {
+		// It's a Paddle customer ID, fetch the customer
+		customer, err := p.getCustomer(ctx, customerID)
+		if err == nil {
+			customerEmail = customer["email"].(string)
+		}
+	} else {
+		// Assume it's an email address
+		customerEmail = customerID
+	}
+
+	// Create a transaction (checkout) with Paddle Billing API
+	payload := map[string]interface{}{
+		"items": []map[string]interface{}{
+			{
+				"price_id": priceID,
+				"quantity": 1,
+			},
+		},
+		"checkout": map[string]interface{}{
+			"url": successURL,
+		},
+		"custom_data": map[string]string{
+			"user_id": customerID,
+		},
+	}
+
+	// Add customer if we have their ID
+	if strings.HasPrefix(customerID, "ctm_") {
+		payload["customer_id"] = customerID
+	} else if customerEmail != "" {
+		// For new customers, we can pass email
+		payload["customer"] = map[string]string{
+			"email": customerEmail,
+		}
+	}
+
+	resp, err := p.doRequest(ctx, "POST", "/transactions", payload)
+	if err != nil {
+		return "", fmt.Errorf("create checkout: %w", err)
+	}
+
+	data, ok := resp["data"].(map[string]interface{})
+	if !ok {
+		return "", errors.New("invalid response from Paddle")
+	}
+
+	// Get the checkout URL
+	checkout, ok := data["checkout"].(map[string]interface{})
+	if !ok {
+		return "", errors.New("checkout data not found in response")
+	}
+
+	checkoutURL, ok := checkout["url"].(string)
+	if !ok {
+		return "", errors.New("checkout URL not found in response")
+	}
+
+	return checkoutURL, nil
+}
+
+// CreatePortalSession creates a customer portal link for subscription management.
 func (p *PaddleProvider) CreatePortalSession(ctx context.Context, customerID, returnURL string) (string, error) {
-	// Paddle uses update_url from webhook data for subscription management
-	// This is typically stored when subscription is created
-	return "", errors.New("Paddle uses subscription-specific update URLs, not a general portal")
+	// Paddle Billing uses customer portal sessions
+	payload := map[string]interface{}{
+		"customer_id": customerID,
+	}
+
+	resp, err := p.doRequest(ctx, "POST", "/customer-portal-sessions", payload)
+	if err != nil {
+		return "", fmt.Errorf("create portal session: %w", err)
+	}
+
+	data, ok := resp["data"].(map[string]interface{})
+	if !ok {
+		return "", errors.New("invalid response from Paddle")
+	}
+
+	urls, ok := data["urls"].(map[string]interface{})
+	if !ok {
+		return "", errors.New("portal URLs not found in response")
+	}
+
+	// Get the general portal URL
+	generalURL, ok := urls["general"].(map[string]interface{})
+	if ok {
+		if overview, ok := generalURL["overview"].(string); ok {
+			return overview, nil
+		}
+	}
+
+	return "", errors.New("portal URL not found in response")
 }
 
 // CancelSubscription cancels a Paddle subscription.
 func (p *PaddleProvider) CancelSubscription(ctx context.Context, subscriptionID string, immediately bool) error {
-	payload := map[string]interface{}{
-		"vendor_id":       p.config.VendorID,
-		"vendor_auth_code": p.config.APIKey,
-		"subscription_id": subscriptionID,
+	endpoint := fmt.Sprintf("/subscriptions/%s/cancel", subscriptionID)
+
+	payload := map[string]interface{}{}
+	if immediately {
+		payload["effective_from"] = "immediately"
+	} else {
+		payload["effective_from"] = "next_billing_period"
 	}
 
-	_, err := p.doRequest(ctx, "/subscription/users_cancel", payload)
-	return err
+	_, err := p.doRequest(ctx, "POST", endpoint, payload)
+	if err != nil {
+		return fmt.Errorf("cancel subscription: %w", err)
+	}
+
+	return nil
 }
 
 // GetSubscription retrieves subscription details from Paddle.
 func (p *PaddleProvider) GetSubscription(ctx context.Context, subscriptionID string) (billing.Subscription, error) {
-	payload := map[string]interface{}{
-		"vendor_id":       p.config.VendorID,
-		"vendor_auth_code": p.config.APIKey,
-		"subscription_id": subscriptionID,
-	}
+	endpoint := fmt.Sprintf("/subscriptions/%s", subscriptionID)
 
-	resp, err := p.doRequest(ctx, "/subscription/users", payload)
+	resp, err := p.doRequest(ctx, "GET", endpoint, nil)
 	if err != nil {
-		return billing.Subscription{}, err
+		return billing.Subscription{}, fmt.Errorf("get subscription: %w", err)
 	}
 
-	// Parse response - Paddle returns an array
-	users, ok := resp["response"].([]interface{})
-	if !ok || len(users) == 0 {
-		return billing.Subscription{}, errors.New("subscription not found")
+	data, ok := resp["data"].(map[string]interface{})
+	if !ok {
+		return billing.Subscription{}, errors.New("invalid response from Paddle")
 	}
 
-	user := users[0].(map[string]interface{})
-	return billing.Subscription{
+	status := mapPaddleBillingStatus(data["status"].(string))
+
+	sub := billing.Subscription{
 		ID:     subscriptionID,
-		Status: mapPaddleStatus(user["state"].(string)),
-	}, nil
+		Status: status,
+	}
+
+	// Parse dates if available
+	if currentPeriodEnd, ok := data["current_billing_period"].(map[string]interface{}); ok {
+		if endStr, ok := currentPeriodEnd["ends_at"].(string); ok {
+			if t, err := time.Parse(time.RFC3339, endStr); err == nil {
+				sub.CurrentPeriodEnd = t
+			}
+		}
+	}
+
+	return sub, nil
 }
 
-// ReportUsage reports metered usage (Paddle handles this differently via modifiers).
+// ReportUsage reports metered usage to Paddle.
 func (p *PaddleProvider) ReportUsage(ctx context.Context, subscriptionItemID string, quantity int64, timestamp time.Time) error {
-	// Paddle uses subscription modifiers for usage-based billing
-	// This would add a one-time charge modifier
-	return errors.New("Paddle usage reporting requires subscription modifiers")
+	// Paddle Billing doesn't support metered usage in the same way as Stripe
+	// Usage-based billing is handled differently
+	return errors.New("Paddle Billing usage reporting not implemented")
 }
 
-// ParseWebhook parses and validates a Paddle webhook.
+// ParseWebhook parses and validates a Paddle Billing webhook.
 func (p *PaddleProvider) ParseWebhook(payload []byte, signature string) (string, map[string]any, error) {
-	// Verify signature
-	mac := hmac.New(sha256.New, []byte(p.config.WebhookSecret))
-	mac.Write(payload)
-	expectedSig := hex.EncodeToString(mac.Sum(nil))
+	// Paddle Billing uses a different webhook signature format
+	// The signature header contains: ts=timestamp;h1=hash
 
-	if !hmac.Equal([]byte(signature), []byte(expectedSig)) {
-		return "", nil, errors.New("invalid webhook signature")
+	if p.config.WebhookSecret != "" {
+		// Parse the signature header
+		parts := strings.Split(signature, ";")
+		var ts, h1 string
+		for _, part := range parts {
+			if strings.HasPrefix(part, "ts=") {
+				ts = strings.TrimPrefix(part, "ts=")
+			} else if strings.HasPrefix(part, "h1=") {
+				h1 = strings.TrimPrefix(part, "h1=")
+			}
+		}
+
+		if ts != "" && h1 != "" {
+			// Compute expected signature: HMAC-SHA256(ts + ":" + payload, secret)
+			mac := hmac.New(sha256.New, []byte(p.config.WebhookSecret))
+			mac.Write([]byte(ts + ":"))
+			mac.Write(payload)
+			expectedSig := hex.EncodeToString(mac.Sum(nil))
+
+			if !hmac.Equal([]byte(h1), []byte(expectedSig)) {
+				return "", nil, errors.New("invalid webhook signature")
+			}
+		}
 	}
 
 	var data map[string]any
@@ -156,21 +275,44 @@ func (p *PaddleProvider) ParseWebhook(payload []byte, signature string) (string,
 		return "", nil, err
 	}
 
-	eventType, _ := data["alert_name"].(string)
+	// Paddle Billing uses "event_type" instead of "alert_name"
+	eventType, _ := data["event_type"].(string)
 	return eventType, data, nil
 }
 
-func (p *PaddleProvider) doRequest(ctx context.Context, endpoint string, payload map[string]interface{}) (map[string]interface{}, error) {
-	body, err := json.Marshal(payload)
+func (p *PaddleProvider) getCustomer(ctx context.Context, customerID string) (map[string]interface{}, error) {
+	endpoint := fmt.Sprintf("/customers/%s", customerID)
+
+	resp, err := p.doRequest(ctx, "GET", endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+endpoint, bytes.NewReader(body))
+	data, ok := resp["data"].(map[string]interface{})
+	if !ok {
+		return nil, errors.New("invalid response from Paddle")
+	}
+
+	return data, nil
+}
+
+func (p *PaddleProvider) doRequest(ctx context.Context, method, endpoint string, payload map[string]interface{}) (map[string]interface{}, error) {
+	var bodyReader io.Reader
+	if payload != nil {
+		body, err := json.Marshal(payload)
+		if err != nil {
+			return nil, err
+		}
+		bodyReader = bytes.NewReader(body)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, p.baseURL+endpoint, bodyReader)
 	if err != nil {
 		return nil, err
 	}
+
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+p.config.APIKey)
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -185,23 +327,31 @@ func (p *PaddleProvider) doRequest(ctx context.Context, endpoint string, payload
 
 	var result map[string]interface{}
 	if err := json.Unmarshal(respBody, &result); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse response: %w (body: %s)", err, string(respBody))
 	}
 
-	if success, ok := result["success"].(bool); !ok || !success {
-		return nil, fmt.Errorf("Paddle API error: %v", result["error"])
+	// Paddle Billing API returns error in "error" field
+	if errData, ok := result["error"].(map[string]interface{}); ok {
+		errType, _ := errData["type"].(string)
+		errDetail, _ := errData["detail"].(string)
+		return nil, fmt.Errorf("Paddle API error: %s - %s", errType, errDetail)
+	}
+
+	// Check HTTP status code
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("Paddle API error (HTTP %d): %s", resp.StatusCode, string(respBody))
 	}
 
 	return result, nil
 }
 
-func mapPaddleStatus(state string) billing.SubscriptionStatus {
-	switch state {
+func mapPaddleBillingStatus(status string) billing.SubscriptionStatus {
+	switch status {
 	case "active":
 		return billing.SubscriptionStatusActive
 	case "past_due":
 		return billing.SubscriptionStatusPastDue
-	case "deleted", "cancelled":
+	case "canceled":
 		return billing.SubscriptionStatusCancelled
 	case "paused":
 		return billing.SubscriptionStatusPaused

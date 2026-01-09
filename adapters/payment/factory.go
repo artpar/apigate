@@ -30,8 +30,9 @@ func NewProvider(s settings.Settings) (ports.PaymentProvider, error) {
 			PublicKey:     s.Get(settings.KeyPaymentPaddlePublicKey),
 			WebhookSecret: s.Get(settings.KeyPaymentPaddleWebhookSecret),
 		}
-		if config.VendorID == "" || config.APIKey == "" {
-			return nil, fmt.Errorf("paddle vendor ID and API key are required")
+		// Paddle Billing API only requires API key (vendor ID was for Classic API)
+		if config.APIKey == "" {
+			return nil, fmt.Errorf("paddle API key is required")
 		}
 		return NewPaddleProvider(config), nil
 

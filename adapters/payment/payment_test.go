@@ -170,17 +170,11 @@ func TestNewProvider_Paddle_MissingConfig(t *testing.T) {
 		s    settings.Settings
 	}{
 		{
-			"missing vendor ID",
-			settings.Settings{
-				settings.KeyPaymentProvider:     "paddle",
-				settings.KeyPaymentPaddleAPIKey: "key123",
-			},
-		},
-		{
 			"missing API key",
 			settings.Settings{
 				settings.KeyPaymentProvider:       "paddle",
 				settings.KeyPaymentPaddleVendorID: "vendor123",
+				// VendorID alone is not enough - Paddle Billing API requires API key
 			},
 		},
 	}

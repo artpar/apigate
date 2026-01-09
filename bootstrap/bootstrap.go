@@ -304,6 +304,9 @@ func (a *App) initHTTPServer() error {
 	deliveryStore := sqlite.NewDeliveryStore(a.DB.DB)
 	a.webhookService = app.NewWebhookService(webhookStore, deliveryStore, a.Logger)
 
+	// Create subscription store for payment webhooks
+	subscriptionStore := sqlite.NewSubscriptionStore(a.DB)
+
 	// Create admin invite store
 	inviteStore := sqlite.NewInviteStore(a.DB.DB)
 
@@ -436,6 +439,22 @@ func (a *App) initHTTPServer() error {
 		}
 	}
 
+	// Create payment webhook service (handles incoming webhooks from Stripe/Paddle/LemonSqueezy)
+	paymentWebhookService := app.NewPaymentWebhookService(
+		deps.Users,
+		subscriptionStore,
+		planStore,
+		idgen.UUID{},
+		a.Logger,
+	)
+
+	// Create payment webhook HTTP handler
+	paymentWebhookHandler := web.NewPaymentWebhookHandler(
+		paymentProvider,
+		paymentWebhookService,
+		a.Logger,
+	)
+
 	// Register hasher with capability container
 	if a.Capabilities != nil {
 		hasherAdapter := capAdapters.WrapHasher("bcrypt", bcryptHasher)
@@ -456,13 +475,15 @@ func (a *App) initHTTPServer() error {
 
 	// Create router
 	routerCfg := apihttp.RouterConfig{
-		Metrics:       a.Metrics,
-		EnableOpenAPI: s.GetBool("openapi.enabled"),
-		AdminHandler:  adminHandler.Router(),
-		WebHandler:    webHandler.Router(),
-		PortalHandler: portalRouter,
-		DocsHandler:   docsRouter,
+		Metrics:               a.Metrics,
+		EnableOpenAPI:         s.GetBool("openapi.enabled"),
+		AdminHandler:          adminHandler.Router(),
+		WebHandler:            webHandler.Router(),
+		PortalHandler:         portalRouter,
+		DocsHandler:           docsRouter,
+		PaymentWebhookHandler: paymentWebhookHandler,
 	}
+	a.Logger.Info().Msg("payment webhook endpoints enabled at /payment-webhooks/{stripe,paddle,lemonsqueezy}")
 
 	// Add module handler if runtime is initialized
 	if a.ModuleRuntime != nil {

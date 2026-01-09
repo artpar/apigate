@@ -542,14 +542,15 @@ func Version(w http.ResponseWriter, r *http.Request) {
 
 // RouterConfig holds optional configuration for the router.
 type RouterConfig struct {
-	Metrics        *metrics.Collector
-	MetricsHandler http.Handler // Optional metrics exporter handler (for /metrics endpoint)
-	EnableOpenAPI  bool
-	AdminHandler   http.Handler // Optional admin API handler
-	WebHandler     http.Handler // Optional web UI handler
-	PortalHandler  http.Handler // Optional user portal handler
-	DocsHandler    http.Handler // Optional developer documentation portal handler
-	ModuleHandler  http.Handler // Optional declarative module handler (mounted at /api/v2)
+	Metrics               *metrics.Collector
+	MetricsHandler        http.Handler // Optional metrics exporter handler (for /metrics endpoint)
+	EnableOpenAPI         bool
+	AdminHandler          http.Handler // Optional admin API handler
+	WebHandler            http.Handler // Optional web UI handler
+	PortalHandler         http.Handler // Optional user portal handler
+	DocsHandler           http.Handler // Optional developer documentation portal handler
+	ModuleHandler         http.Handler // Optional declarative module handler (mounted at /api/v2)
+	PaymentWebhookHandler http.Handler // Optional payment webhook handler for Stripe/Paddle/LemonSqueezy
 }
 
 // NewRouter creates the main HTTP router.
@@ -622,6 +623,13 @@ func NewRouterWithConfig(proxyHandler *ProxyHandler, healthHandler *HealthHandle
 	// Mounted at root since modules define their own base paths (e.g., /api/users)
 	if cfg.ModuleHandler != nil {
 		r.Mount("/mod", cfg.ModuleHandler)
+	}
+
+	// Payment provider webhooks (Stripe, Paddle, LemonSqueezy)
+	// These endpoints receive POST requests from payment providers
+	// They are NOT authenticated - signature verification happens inside the handler
+	if cfg.PaymentWebhookHandler != nil {
+		r.Mount("/payment-webhooks", cfg.PaymentWebhookHandler)
 	}
 
 	// Web UI (if enabled) - pass through specific paths to the web handler

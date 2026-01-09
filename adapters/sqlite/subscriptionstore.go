@@ -46,6 +46,18 @@ func (s *SubscriptionStore) GetByUser(ctx context.Context, userID string) (billi
 	return scanSubscription(row)
 }
 
+// GetByProviderID retrieves subscription by external provider subscription ID.
+func (s *SubscriptionStore) GetByProviderID(ctx context.Context, providerID string) (billing.Subscription, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, user_id, plan_id, provider, provider_id, provider_item_id,
+		       status, current_period_start, current_period_end,
+		       cancel_at_period_end, cancelled_at, created_at, updated_at
+		FROM subscriptions
+		WHERE provider_id = ?
+	`, providerID)
+	return scanSubscription(row)
+}
+
 // Create stores a new subscription.
 func (s *SubscriptionStore) Create(ctx context.Context, sub billing.Subscription) error {
 	now := time.Now().UTC()

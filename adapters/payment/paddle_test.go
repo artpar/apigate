@@ -16,31 +16,31 @@ import (
 
 func TestNewPaddleProvider(t *testing.T) {
 	tests := []struct {
-		name           string
-		config         PaddleConfig
-		expectedURL    string
+		name        string
+		config      PaddleConfig
+		expectedURL string
 	}{
 		{
 			name: "production config",
 			config: PaddleConfig{
 				VendorID:      "vendor123",
-				APIKey:        "api_key_123",
+				APIKey:        "pdl_live_api_key_123", // Live key prefix
 				PublicKey:     "public_key_123",
 				WebhookSecret: "webhook_secret",
 				Sandbox:       false,
 			},
-			expectedURL: "https://vendors.paddle.com/api/2.0",
+			expectedURL: "https://api.paddle.com",
 		},
 		{
 			name: "sandbox config",
 			config: PaddleConfig{
 				VendorID:      "vendor123",
-				APIKey:        "api_key_123",
+				APIKey:        "pdl_sdbx_api_key_123", // Sandbox key auto-detects
 				PublicKey:     "public_key_123",
 				WebhookSecret: "webhook_secret",
-				Sandbox:       true,
+				Sandbox:       false, // Auto-detected from key prefix
 			},
-			expectedURL: "https://sandbox-vendors.paddle.com/api/2.0",
+			expectedURL: "https://sandbox-api.paddle.com",
 		},
 	}
 
@@ -75,17 +75,39 @@ func TestPaddleProvider_Name(t *testing.T) {
 }
 
 func TestPaddleProvider_CreateCustomer(t *testing.T) {
-	provider := NewPaddleProvider(PaddleConfig{})
+	// Create mock server for Paddle Billing API
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/customers" {
+			t.Errorf("unexpected path: %s, want /customers", r.URL.Path)
+		}
+		if r.Method != "POST" {
+			t.Errorf("unexpected method: %s, want POST", r.Method)
+		}
+
+		// Paddle Billing API response
+		resp := map[string]interface{}{
+			"data": map[string]interface{}{
+				"id":    "ctm_123abc",
+				"email": "test@example.com",
+				"name":  "Test User",
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	provider := NewPaddleProvider(PaddleConfig{APIKey: "api_key_123"})
+	provider.baseURL = server.URL
 	ctx := context.Background()
 
-	// Paddle doesn't have a separate customer API, so it returns the userID
 	customerID, err := provider.CreateCustomer(ctx, "test@example.com", "Test User", "user_123")
 
 	if err != nil {
 		t.Fatalf("CreateCustomer failed: %v", err)
 	}
-	if customerID != "user_123" {
-		t.Errorf("customerID = %s, want user_123", customerID)
+	if customerID != "ctm_123abc" {
+		t.Errorf("customerID = %s, want ctm_123abc", customerID)
 	}
 }
 
@@ -120,26 +142,27 @@ func TestPaddleProvider_ParseWebhook_ValidSignature(t *testing.T) {
 	}
 	provider := NewPaddleProvider(config)
 
-	payload := []byte(`{"alert_name":"subscription_created","subscription_id":"123"}`)
+	// Paddle Billing API uses event_type instead of alert_name
+	payload := []byte(`{"event_type":"subscription.created","data":{"id":"sub_123"}}`)
+	ts := "1234567890"
 
-	// Generate valid signature
+	// Paddle Billing signature format: ts=timestamp;h1=HMAC-SHA256(ts + ":" + payload, secret)
 	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(ts + ":"))
 	mac.Write(payload)
-	signature := hex.EncodeToString(mac.Sum(nil))
+	h1 := hex.EncodeToString(mac.Sum(nil))
+	signature := "ts=" + ts + ";h1=" + h1
 
 	eventType, data, err := provider.ParseWebhook(payload, signature)
 
 	if err != nil {
 		t.Fatalf("ParseWebhook failed: %v", err)
 	}
-	if eventType != "subscription_created" {
-		t.Errorf("eventType = %s, want subscription_created", eventType)
+	if eventType != "subscription.created" {
+		t.Errorf("eventType = %s, want subscription.created", eventType)
 	}
 	if data == nil {
 		t.Error("expected non-nil data")
-	}
-	if data["subscription_id"] != "123" {
-		t.Errorf("subscription_id = %v, want 123", data["subscription_id"])
 	}
 }
 
@@ -149,8 +172,9 @@ func TestPaddleProvider_ParseWebhook_InvalidSignature(t *testing.T) {
 	}
 	provider := NewPaddleProvider(config)
 
-	payload := []byte(`{"alert_name":"subscription_created"}`)
-	signature := "invalid_signature"
+	payload := []byte(`{"event_type":"subscription.created"}`)
+	// Properly formatted but wrong signature
+	signature := "ts=1234567890;h1=invalid_signature_hash"
 
 	_, _, err := provider.ParseWebhook(payload, signature)
 
@@ -167,9 +191,14 @@ func TestPaddleProvider_ParseWebhook_InvalidJSON(t *testing.T) {
 	provider := NewPaddleProvider(config)
 
 	payload := []byte(`not valid json`)
+	ts := "1234567890"
+
+	// Generate valid signature for invalid JSON
 	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(ts + ":"))
 	mac.Write(payload)
-	signature := hex.EncodeToString(mac.Sum(nil))
+	h1 := hex.EncodeToString(mac.Sum(nil))
+	signature := "ts=" + ts + ";h1=" + h1
 
 	_, _, err := provider.ParseWebhook(payload, signature)
 
@@ -178,17 +207,22 @@ func TestPaddleProvider_ParseWebhook_InvalidJSON(t *testing.T) {
 	}
 }
 
-func TestPaddleProvider_ParseWebhook_MissingAlertName(t *testing.T) {
+func TestPaddleProvider_ParseWebhook_MissingEventType(t *testing.T) {
 	secret := "test_secret"
 	config := PaddleConfig{
 		WebhookSecret: secret,
 	}
 	provider := NewPaddleProvider(config)
 
-	payload := []byte(`{"subscription_id":"123"}`)
+	// Payload without event_type field
+	payload := []byte(`{"data":{"id":"sub_123"}}`)
+	ts := "1234567890"
+
 	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(ts + ":"))
 	mac.Write(payload)
-	signature := hex.EncodeToString(mac.Sum(nil))
+	h1 := hex.EncodeToString(mac.Sum(nil))
+	signature := "ts=" + ts + ";h1=" + h1
 
 	eventType, data, err := provider.ParseWebhook(payload, signature)
 
@@ -203,7 +237,7 @@ func TestPaddleProvider_ParseWebhook_MissingAlertName(t *testing.T) {
 	}
 }
 
-func TestMapPaddleStatus(t *testing.T) {
+func TestMapPaddleBillingStatus(t *testing.T) {
 	tests := []struct {
 		name     string
 		state    string
@@ -220,13 +254,8 @@ func TestMapPaddleStatus(t *testing.T) {
 			expected: billing.SubscriptionStatusPastDue,
 		},
 		{
-			name:     "deleted state",
-			state:    "deleted",
-			expected: billing.SubscriptionStatusCancelled,
-		},
-		{
-			name:     "cancelled state",
-			state:    "cancelled",
+			name:     "canceled state",
+			state:    "canceled",
 			expected: billing.SubscriptionStatusCancelled,
 		},
 		{
@@ -253,9 +282,9 @@ func TestMapPaddleStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := mapPaddleStatus(tt.state)
+			result := mapPaddleBillingStatus(tt.state)
 			if result != tt.expected {
-				t.Errorf("mapPaddleStatus(%s) = %s, want %s", tt.state, result, tt.expected)
+				t.Errorf("mapPaddleBillingStatus(%s) = %s, want %s", tt.state, result, tt.expected)
 			}
 		})
 	}
@@ -276,19 +305,24 @@ func TestPaddleConfig_Empty(t *testing.T) {
 }
 
 func TestPaddleProvider_CreateCheckoutSession_WithMockServer(t *testing.T) {
-	// Create mock server
+	// Create mock server for Paddle Billing API
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/product/generate_pay_link" {
-			t.Errorf("unexpected path: %s", r.URL.Path)
+		// Paddle Billing API uses /transactions
+		if r.URL.Path != "/transactions" {
+			t.Errorf("unexpected path: %s, want /transactions", r.URL.Path)
 		}
 		if r.Method != "POST" {
-			t.Errorf("unexpected method: %s", r.Method)
+			t.Errorf("unexpected method: %s, want POST", r.Method)
 		}
 
-		// Return success response
+		// Paddle Billing API response format
 		resp := map[string]interface{}{
-			"success": true,
-			"url":     "https://checkout.paddle.com/checkout/123",
+			"data": map[string]interface{}{
+				"id": "txn_123",
+				"checkout": map[string]interface{}{
+					"url": "https://checkout.paddle.com/checkout/123",
+				},
+			},
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
@@ -303,7 +337,7 @@ func TestPaddleProvider_CreateCheckoutSession_WithMockServer(t *testing.T) {
 	provider.baseURL = server.URL
 
 	ctx := context.Background()
-	url, err := provider.CreateCheckoutSession(ctx, "customer@example.com", "product_123", "https://success.com", "https://cancel.com", 0)
+	url, err := provider.CreateCheckoutSession(ctx, "customer@example.com", "pri_123", "https://success.com", "https://cancel.com", 0)
 
 	if err != nil {
 		t.Fatalf("CreateCheckoutSession failed: %v", err)
@@ -313,26 +347,47 @@ func TestPaddleProvider_CreateCheckoutSession_WithMockServer(t *testing.T) {
 	}
 }
 
-func TestPaddleProvider_CreateCheckoutSession_WithTrialDays(t *testing.T) {
-	// Create mock server
+func TestPaddleProvider_CreateCheckoutSession_WithCustomerID(t *testing.T) {
+	// Create mock server for Paddle Billing API with existing customer
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var reqBody map[string]interface{}
-		json.NewDecoder(r.Body).Decode(&reqBody)
+		// Handle both customer fetch and transaction creation
+		if r.URL.Path == "/customers/ctm_123" && r.Method == "GET" {
+			// Return customer data
+			resp := map[string]interface{}{
+				"data": map[string]interface{}{
+					"id":    "ctm_123",
+					"email": "customer@example.com",
+					"name":  "Test Customer",
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+			return
+		}
 
-		// Check trial_days is set
-		if reqBody["trial_days"] == nil {
-			t.Error("expected trial_days in request")
-		}
-		if reqBody["trial_days"].(float64) != 14 {
-			t.Errorf("trial_days = %v, want 14", reqBody["trial_days"])
+		if r.URL.Path == "/transactions" && r.Method == "POST" {
+			var reqBody map[string]interface{}
+			json.NewDecoder(r.Body).Decode(&reqBody)
+
+			// Check customer_id is set when it's a Paddle customer ID
+			if reqBody["customer_id"] != "ctm_123" {
+				t.Errorf("customer_id = %v, want ctm_123", reqBody["customer_id"])
+			}
+
+			resp := map[string]interface{}{
+				"data": map[string]interface{}{
+					"id": "txn_456",
+					"checkout": map[string]interface{}{
+						"url": "https://checkout.paddle.com/checkout/existing",
+					},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+			return
 		}
 
-		resp := map[string]interface{}{
-			"success": true,
-			"url":     "https://checkout.paddle.com/checkout/trial",
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 	}))
 	defer server.Close()
 
@@ -344,22 +399,26 @@ func TestPaddleProvider_CreateCheckoutSession_WithTrialDays(t *testing.T) {
 	provider.baseURL = server.URL
 
 	ctx := context.Background()
-	url, err := provider.CreateCheckoutSession(ctx, "customer@example.com", "product_123", "https://success.com", "https://cancel.com", 14)
+	// Use a Paddle customer ID (ctm_ prefix)
+	url, err := provider.CreateCheckoutSession(ctx, "ctm_123", "pri_123", "https://success.com", "https://cancel.com", 0)
 
 	if err != nil {
 		t.Fatalf("CreateCheckoutSession failed: %v", err)
 	}
-	if url != "https://checkout.paddle.com/checkout/trial" {
-		t.Errorf("url = %s, want https://checkout.paddle.com/checkout/trial", url)
+	if url != "https://checkout.paddle.com/checkout/existing" {
+		t.Errorf("url = %s, want https://checkout.paddle.com/checkout/existing", url)
 	}
 }
 
 func TestPaddleProvider_CreateCheckoutSession_NoURL(t *testing.T) {
-	// Create mock server that returns success but no URL
+	// Create mock server that returns data but no checkout URL
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Paddle Billing response with missing checkout data
 		resp := map[string]interface{}{
-			"success": true,
-			// Missing "url" field
+			"data": map[string]interface{}{
+				"id": "txn_123",
+				// Missing "checkout" field
+			},
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
@@ -374,21 +433,25 @@ func TestPaddleProvider_CreateCheckoutSession_NoURL(t *testing.T) {
 	provider.baseURL = server.URL
 
 	ctx := context.Background()
-	_, err := provider.CreateCheckoutSession(ctx, "customer@example.com", "product_123", "https://success.com", "https://cancel.com", 0)
+	_, err := provider.CreateCheckoutSession(ctx, "customer@example.com", "pri_123", "https://success.com", "https://cancel.com", 0)
 
 	if err == nil {
-		t.Error("expected error when URL is missing")
+		t.Error("expected error when checkout URL is missing")
 	}
 }
 
 func TestPaddleProvider_CreateCheckoutSession_APIError(t *testing.T) {
-	// Create mock server that returns an error
+	// Create mock server that returns a Paddle Billing API error
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		resp := map[string]interface{}{
-			"success": false,
-			"error":   "Invalid product ID",
-		}
 		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		resp := map[string]interface{}{
+			"error": map[string]interface{}{
+				"type":   "request_error",
+				"code":   "invalid_field",
+				"detail": "Invalid price ID",
+			},
+		}
 		json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
@@ -409,21 +472,36 @@ func TestPaddleProvider_CreateCheckoutSession_APIError(t *testing.T) {
 }
 
 func TestPaddleProvider_CancelSubscription_Success(t *testing.T) {
-	// Create mock server
+	// Create mock server for Paddle Billing API
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/subscription/users_cancel" {
-			t.Errorf("unexpected path: %s", r.URL.Path)
+		// Paddle Billing API uses /subscriptions/{id}/cancel
+		if r.URL.Path != "/subscriptions/sub_123/cancel" {
+			t.Errorf("unexpected path: %s, want /subscriptions/sub_123/cancel", r.URL.Path)
+		}
+
+		if r.Method != "POST" {
+			t.Errorf("unexpected method: %s, want POST", r.Method)
+		}
+
+		// Check Authorization header
+		auth := r.Header.Get("Authorization")
+		if auth != "Bearer api_key_123" {
+			t.Errorf("Authorization = %s, want Bearer api_key_123", auth)
 		}
 
 		var reqBody map[string]interface{}
 		json.NewDecoder(r.Body).Decode(&reqBody)
 
-		if reqBody["subscription_id"] != "sub_123" {
-			t.Errorf("subscription_id = %v, want sub_123", reqBody["subscription_id"])
+		if reqBody["effective_from"] != "immediately" {
+			t.Errorf("effective_from = %v, want immediately", reqBody["effective_from"])
 		}
 
+		// Paddle Billing API response format
 		resp := map[string]interface{}{
-			"success": true,
+			"data": map[string]interface{}{
+				"id":     "sub_123",
+				"status": "canceled",
+			},
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
@@ -446,19 +524,28 @@ func TestPaddleProvider_CancelSubscription_Success(t *testing.T) {
 }
 
 func TestPaddleProvider_GetSubscription_Success(t *testing.T) {
-	// Create mock server
+	// Create mock server for Paddle Billing API
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/subscription/users" {
-			t.Errorf("unexpected path: %s", r.URL.Path)
+		// Paddle Billing API uses /subscriptions/{id}
+		if r.URL.Path != "/subscriptions/sub_123" {
+			t.Errorf("unexpected path: %s, want /subscriptions/sub_123", r.URL.Path)
 		}
 
+		if r.Method != "GET" {
+			t.Errorf("unexpected method: %s, want GET", r.Method)
+		}
+
+		// Check Authorization header
+		auth := r.Header.Get("Authorization")
+		if auth != "Bearer api_key_123" {
+			t.Errorf("Authorization = %s, want Bearer api_key_123", auth)
+		}
+
+		// Paddle Billing API response format
 		resp := map[string]interface{}{
-			"success": true,
-			"response": []interface{}{
-				map[string]interface{}{
-					"subscription_id": "sub_123",
-					"state":           "active",
-				},
+			"data": map[string]interface{}{
+				"id":     "sub_123",
+				"status": "active",
 			},
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -488,13 +575,17 @@ func TestPaddleProvider_GetSubscription_Success(t *testing.T) {
 }
 
 func TestPaddleProvider_GetSubscription_NotFound(t *testing.T) {
-	// Create mock server returning empty response
+	// Create mock server returning 404 error for Paddle Billing API
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		resp := map[string]interface{}{
-			"success":  true,
-			"response": []interface{}{},
-		}
 		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		resp := map[string]interface{}{
+			"error": map[string]interface{}{
+				"type":   "request_error",
+				"code":   "not_found",
+				"detail": "Subscription not found",
+			},
+		}
 		json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()

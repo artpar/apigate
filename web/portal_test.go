@@ -326,6 +326,15 @@ func (m *mockSubscriptionStore) Update(ctx context.Context, sub billing.Subscrip
 	return nil
 }
 
+func (m *mockSubscriptionStore) GetByProviderID(ctx context.Context, providerID string) (billing.Subscription, error) {
+	for _, sub := range m.subscriptions {
+		if sub.ProviderID == providerID {
+			return sub, nil
+		}
+	}
+	return billing.Subscription{}, errNotFound
+}
+
 // mockInvoiceStore implements ports.InvoiceStore for testing.
 type mockInvoiceStore struct {
 	invoices []billing.Invoice
@@ -3941,8 +3950,8 @@ func TestPortalHandler_ChangePlan_PaidPlanNoStripePriceCoverage(t *testing.T) {
 		t.Errorf("Status = %d, want Found (redirect)", w.Code)
 	}
 	loc := w.Header().Get("Location")
-	if !strings.Contains(loc, "error=payment") {
-		t.Errorf("Location = %q, want to contain error=payment", loc)
+	if !strings.Contains(loc, "error=no_price") {
+		t.Errorf("Location = %q, want to contain error=no_price", loc)
 	}
 }
 
