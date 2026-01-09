@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/artpar/apigate/ports"
@@ -45,14 +46,18 @@ func (h *Handler) InvitesPage(w http.ResponseWriter, r *http.Request) {
 
 	data := struct {
 		PageData
-		Invites []InviteWithCreator
-		Success string
-		Error   string
+		Invites    []InviteWithCreator
+		Success    string
+		Error      string
+		InviteLink string // Shown after invite creation
+		EmailSent  bool   // Whether email was sent
 	}{
-		PageData: h.newPageData(ctx, "Admin Invites"),
-		Invites:  invitesWithCreator,
-		Success:  r.URL.Query().Get("success"),
-		Error:    r.URL.Query().Get("error"),
+		PageData:   h.newPageData(ctx, "Admin Invites"),
+		Invites:    invitesWithCreator,
+		Success:    r.URL.Query().Get("success"),
+		Error:      r.URL.Query().Get("error"),
+		InviteLink: r.URL.Query().Get("link"),
+		EmailSent:  r.URL.Query().Get("email_sent") == "true",
 	}
 
 	h.render(w, "invites", data)
@@ -102,11 +107,12 @@ func (h *Handler) InviteCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Send invite email if email sender is configured
-	if h.emailSender != nil {
-		baseURL := getBaseURL(r)
-		inviteURL := baseURL + "/admin/register/" + rawToken
+	baseURL := getBaseURL(r)
+	inviteURL := baseURL + "/admin/register/" + rawToken
 
+	// Try to send invite email if email sender is configured
+	emailSent := false
+	if h.emailSender != nil {
 		err := h.emailSender.Send(ctx, ports.EmailMessage{
 			To:      email,
 			Subject: "You're invited to APIGate",
@@ -119,10 +125,17 @@ func (h *Handler) InviteCreate(w http.ResponseWriter, r *http.Request) {
 		})
 		if err != nil {
 			h.logger.Error().Err(err).Str("email", email).Msg("Failed to send invite email")
+		} else {
+			emailSent = true
 		}
 	}
 
-	http.Redirect(w, r, "/invites?success=created", http.StatusFound)
+	// Always show the link so admin can share manually (even if email was sent)
+	redirectURL := "/invites?success=created&link=" + url.QueryEscape(inviteURL)
+	if emailSent {
+		redirectURL += "&email_sent=true"
+	}
+	http.Redirect(w, r, redirectURL, http.StatusFound)
 }
 
 // InviteDelete deletes an admin invite.
@@ -172,13 +185,15 @@ func (h *Handler) AdminRegisterPage(w http.ResponseWriter, r *http.Request) {
 
 	data := struct {
 		PageData
-		Email string
-		Token string
-		Error string
+		Email     string
+		Token     string
+		Error     string
+		LinkError bool
 	}{
-		PageData: h.newPageData(ctx, "Complete Registration"),
-		Email:    invite.Email,
-		Token:    token,
+		PageData:  h.newPageData(ctx, "Complete Registration"),
+		Email:     invite.Email,
+		Token:     token,
+		LinkError: false, // Valid link, show registration form
 	}
 
 	h.render(w, "admin_register", data)

@@ -16,7 +16,23 @@
 
     {{if .Success}}
     <div class="alert alert-success">
-        {{if eq .Success "created"}}Invitation sent successfully.{{end}}
+        {{if eq .Success "created"}}
+            {{if .InviteLink}}
+            <strong>Invitation created!</strong>
+            {{if .EmailSent}}
+            An email was sent to the invitee.
+            {{else}}
+            Email is not configured - share this link manually:
+            {{end}}
+            <div class="invite-link-box" style="display:flex;gap:0.5rem;margin-top:0.5rem;">
+                <input type="text" class="form-control" value="{{.InviteLink}}" readonly id="invite-link" style="flex:1;">
+                <button type="button" class="btn btn-sm btn-secondary" onclick="navigator.clipboard.writeText(document.getElementById('invite-link').value); this.textContent='Copied!'">Copy Link</button>
+            </div>
+            <small style="color:#666;">This link expires in 48 hours.</small>
+            {{else}}
+            Invitation sent successfully.
+            {{end}}
+        {{end}}
         {{if eq .Success "deleted"}}Invitation deleted.{{end}}
     </div>
     {{end}}

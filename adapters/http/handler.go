@@ -657,6 +657,13 @@ func NewRouterWithConfig(proxyHandler *ProxyHandler, healthHandler *HealthHandle
 		r.Get("/register", func(w http.ResponseWriter, req *http.Request) {
 			http.Redirect(w, req, "/portal/signup", http.StatusFound)
 		})
+		// Admin setup redirect (users might try /admin/setup)
+		r.Get("/admin/setup", func(w http.ResponseWriter, req *http.Request) {
+			http.Redirect(w, req, "/setup", http.StatusFound)
+		})
+		// Admin registration from invite link
+		r.Get("/admin/register/*", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Post("/admin/register/*", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
 		r.Get("/login", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
 		r.Post("/login", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
 		r.Post("/logout", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
@@ -702,6 +709,16 @@ func NewRouterWithConfig(proxyHandler *ProxyHandler, healthHandler *HealthHandle
 		r.Post("/webhooks/*", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
 		r.Delete("/webhooks/*", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
 		r.Get("/system", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		// Admin invites management
+		r.Get("/invites", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Post("/invites", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Delete("/invites/*", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		// Entitlements management
+		r.Get("/entitlements", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Get("/entitlements/*", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Post("/entitlements", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Post("/entitlements/*", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
+		r.Delete("/entitlements/*", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
 		// Routes management
 		r.Get("/routes", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
 		r.Get("/routes/*", func(w http.ResponseWriter, req *http.Request) { webHandler.ServeHTTP(w, req) })
