@@ -144,6 +144,7 @@ func (h *PortalHandler) Router() chi.Router {
 
 		// API Keys
 		r.Get("/api-keys", h.APIKeysPage)
+		r.Get("/api-keys/partial", h.APIKeysPartial)
 		r.Post("/api-keys", h.CreateAPIKey)
 		r.Post("/api-keys/{id}/revoke", h.RevokeAPIKey)
 
@@ -973,6 +974,26 @@ func (h *PortalHandler) RevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/portal/api-keys?revoked=true", http.StatusFound)
 }
 
+// APIKeysPartial returns just the API keys table rows for HTMX polling updates.
+func (h *PortalHandler) APIKeysPartial(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := getPortalUser(ctx)
+
+	keys, err := h.keys.ListByUser(ctx, user.ID)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to get keys for partial")
+		keys = nil
+	}
+
+	rows := h.renderAPIKeysTableRows(keys)
+	if rows == "" {
+		rows = `<tr><td colspan="6" class="text-center">No API keys yet</td></tr>`
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(rows))
+}
+
 // -----------------------------------------------------------------------------
 // Usage
 // -----------------------------------------------------------------------------
@@ -1277,14 +1298,23 @@ func (h *PortalHandler) PlansPage(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("changed") == "true" {
 		success = "Your plan has been changed successfully."
 	}
-	if r.URL.Query().Get("error") == "payment" {
-		errorMsg = "Payment is required for this plan. Please contact support."
-	}
-	if r.URL.Query().Get("error") == "cancelled" {
+	switch r.URL.Query().Get("error") {
+	case "no_provider":
+		errorMsg = "Payments are not yet configured. Please contact the administrator."
+	case "no_price":
+		errorMsg = "This plan is not available for purchase yet. Please contact support."
+	case "customer_failed":
+		errorMsg = "Could not set up your billing account. Please try again or contact support."
+	case "checkout_failed":
+		errorMsg = "Payment service is temporarily unavailable. Please try again in a few minutes."
+	case "payment":
+		errorMsg = "There was a payment error. Please try again or contact support."
+	case "cancelled":
 		errorMsg = "Payment was cancelled. You can try again when ready."
-	}
-	if r.URL.Query().Get("error") == "no_subscription" {
+	case "no_subscription":
 		errorMsg = "No active subscription found. Please upgrade to a paid plan first."
+	case "invalid":
+		errorMsg = "Invalid plan selected."
 	}
 
 	// Check if user has a Stripe subscription
@@ -1329,7 +1359,7 @@ func (h *PortalHandler) ChangePlan(w http.ResponseWriter, r *http.Request) {
 		// Check if payment provider is configured (NoopProvider returns "none")
 		if h.payment == nil || h.payment.Name() == "none" {
 			h.logger.Error().Msg("no payment provider configured for paid plan change")
-			http.Redirect(w, r, "/portal/plans?error=payment", http.StatusFound)
+			http.Redirect(w, r, "/portal/plans?error=no_provider", http.StatusFound)
 			return
 		}
 
@@ -1341,7 +1371,7 @@ func (h *PortalHandler) ChangePlan(w http.ResponseWriter, r *http.Request) {
 			customerID, err = h.payment.CreateCustomer(ctx, dbUser.Email, dbUser.Name, dbUser.ID)
 			if err != nil {
 				h.logger.Error().Err(err).Msg("failed to create Stripe customer")
-				http.Redirect(w, r, "/portal/plans?error=payment", http.StatusFound)
+				http.Redirect(w, r, "/portal/plans?error=customer_failed", http.StatusFound)
 				return
 			}
 			// Store customer ID
@@ -1356,7 +1386,7 @@ func (h *PortalHandler) ChangePlan(w http.ResponseWriter, r *http.Request) {
 		priceID := newPlan.StripePriceID
 		if priceID == "" && h.payment.Name() != "dummy" {
 			h.logger.Error().Str("plan_id", newPlanID).Msg("plan has no price ID configured")
-			http.Redirect(w, r, "/portal/plans?error=payment", http.StatusFound)
+			http.Redirect(w, r, "/portal/plans?error=no_price", http.StatusFound)
 			return
 		}
 
@@ -1373,7 +1403,7 @@ func (h *PortalHandler) ChangePlan(w http.ResponseWriter, r *http.Request) {
 		checkoutURL, err := h.payment.CreateCheckoutSession(ctx, customerID, priceID, successURL, cancelURL, newPlan.TrialDays)
 		if err != nil {
 			h.logger.Error().Err(err).Msg("failed to create checkout session")
-			http.Redirect(w, r, "/portal/plans?error=payment", http.StatusFound)
+			http.Redirect(w, r, "/portal/plans?error=checkout_failed", http.StatusFound)
 			return
 		}
 

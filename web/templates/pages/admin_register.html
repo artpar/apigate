@@ -1,0 +1,75 @@
+{{define "content"}}
+<div class="login-container">
+    <div class="card login-card">
+        <div class="login-header">
+            <h1 class="login-title">Complete Registration</h1>
+        </div>
+        <div class="login-body">
+            {{if .Error}}
+            <div class="alert alert-error mb-4">{{.Error}}</div>
+            {{end}}
+
+            {{if .LinkError}}
+            <div class="text-center">
+                <p class="text-secondary mb-4">Please contact an administrator for a new invitation link.</p>
+                <a href="/login" class="btn btn-primary">Back to Login</a>
+            </div>
+            {{else}}
+            <p class="text-secondary mb-4" style="text-align: center;">
+                You've been invited to join APIGate as an administrator.
+            </p>
+
+            <form action="/admin/register/{{.Token}}" method="POST" class="form">
+                <div class="form-group">
+                    <label for="email" class="form-label">Email</label>
+                    <input type="email" id="email" name="email" value="{{.Email}}" class="form-input" disabled>
+                </div>
+                <div class="form-group">
+                    <label for="name" class="form-label">Name</label>
+                    <input type="text" id="name" name="name" required class="form-input" autofocus placeholder="Your name">
+                </div>
+                <div class="form-group">
+                    <label for="password" class="form-label">Password</label>
+                    <input type="password" id="password" name="password" required class="form-input" minlength="8" placeholder="Minimum 8 characters">
+                </div>
+                <div class="form-group">
+                    <label for="confirm_password" class="form-label">Confirm Password</label>
+                    <input type="password" id="confirm_password" name="confirm_password" required class="form-input" minlength="8">
+                </div>
+                <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 8px;">Create Account</button>
+            </form>
+
+            <div class="text-center mt-4" style="padding-top: 16px; border-top: 1px solid var(--border-color);">
+                <span class="text-sm text-secondary">Already have an account?</span>
+                <a href="/login" class="link text-sm" style="margin-left: 4px;">Sign in</a>
+            </div>
+            {{end}}
+        </div>
+    </div>
+</div>
+<script>
+(function() {
+    var alert = document.querySelector('.alert-error');
+    if (alert) {
+        document.querySelectorAll('input').forEach(function(input) {
+            input.addEventListener('input', function() {
+                alert.style.display = 'none';
+            });
+        });
+    }
+
+    // Password confirmation validation
+    var password = document.getElementById('password');
+    var confirm = document.getElementById('confirm_password');
+    if (password && confirm) {
+        confirm.addEventListener('input', function() {
+            if (password.value !== confirm.value) {
+                confirm.setCustomValidity('Passwords do not match');
+            } else {
+                confirm.setCustomValidity('');
+            }
+        });
+    }
+})();
+</script>
+{{end}}

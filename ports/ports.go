@@ -780,3 +780,42 @@ type CapabilityRegistry interface {
 	// ProviderMapping returns the provider mapping store.
 	ProviderMapping() ProviderMappingStore
 }
+
+// -----------------------------------------------------------------------------
+// Admin Invite Ports
+// -----------------------------------------------------------------------------
+
+// AdminInvite represents an invitation for a new admin user.
+type AdminInvite struct {
+	ID        string
+	Email     string
+	TokenHash []byte
+	CreatedBy string
+	CreatedAt time.Time
+	ExpiresAt time.Time
+	UsedAt    *time.Time
+}
+
+// InviteStore persists admin invitations.
+type InviteStore interface {
+	// Create stores a new invite.
+	Create(ctx context.Context, invite AdminInvite) error
+
+	// GetByTokenHash retrieves an invite by token hash.
+	GetByTokenHash(ctx context.Context, hash []byte) (AdminInvite, error)
+
+	// List returns all invites with pagination.
+	List(ctx context.Context, limit, offset int) ([]AdminInvite, error)
+
+	// MarkUsed marks an invite as used.
+	MarkUsed(ctx context.Context, id string, usedAt time.Time) error
+
+	// Delete removes an invite.
+	Delete(ctx context.Context, id string) error
+
+	// DeleteExpired removes all expired unused invites.
+	DeleteExpired(ctx context.Context) (int64, error)
+
+	// Count returns total invite count.
+	Count(ctx context.Context) (int, error)
+}

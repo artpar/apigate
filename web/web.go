@@ -71,6 +71,7 @@ type Handler struct {
 	webhooks            ports.WebhookStore
 	deliveries          ports.DeliveryStore
 	webhookService      WebhookDispatcher
+	invites             ports.InviteStore
 	appSettings         AppSettings
 	logger              zerolog.Logger
 	hasher              ports.Hasher
@@ -99,6 +100,7 @@ type Deps struct {
 	Webhooks            ports.WebhookStore
 	Deliveries          ports.DeliveryStore
 	WebhookService      WebhookDispatcher
+	Invites             ports.InviteStore
 	AppSettings         AppSettings
 	Logger              zerolog.Logger
 	Hasher              ports.Hasher
@@ -136,6 +138,7 @@ func NewHandler(deps Deps) (*Handler, error) {
 		webhooks:            deps.Webhooks,
 		deliveries:          deps.Deliveries,
 		webhookService:      deps.WebhookService,
+		invites:             deps.Invites,
 		appSettings:         deps.AppSettings,
 		logger:              deps.Logger,
 		hasher:              deps.Hasher,
@@ -172,6 +175,10 @@ func (h *Handler) Router() chi.Router {
 	r.Post("/forgot-password", h.ForgotPasswordSubmit)
 	r.Get("/reset-password", h.ResetPasswordPage)
 	r.Post("/reset-password", h.ResetPasswordSubmit)
+
+	// Admin registration via invite (no auth required)
+	r.Get("/admin/register/{token}", h.AdminRegisterPage)
+	r.Post("/admin/register/{token}", h.AdminRegisterSubmit)
 
 	// Legal pages (no auth required)
 	r.Get("/terms", h.TermsPage)
@@ -245,6 +252,11 @@ func (h *Handler) Router() chi.Router {
 		// Settings
 		r.Get("/settings", h.SettingsPage)
 		r.Post("/settings", h.SettingsUpdate)
+
+		// Admin Invites
+		r.Get("/invites", h.InvitesPage)
+		r.Post("/invites", h.InviteCreate)
+		r.Delete("/invites/{id}", h.InviteDelete)
 
 		// Payment Providers
 		r.Get("/payments", h.PaymentsPage)

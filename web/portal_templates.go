@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/artpar/apigate/core/terminology"
 	"github.com/artpar/apigate/domain/billing"
@@ -56,6 +57,12 @@ func (h *PortalHandler) renderLandingPage() string {
 
         .footer { text-align: center; padding: 32px 24px; color: #999; font-size: 13px; border-top: 1px solid #e5e5e5; }
 
+        .seller-section { max-width: 640px; margin: 0 auto 80px; text-align: center; padding: 40px 24px; background: linear-gradient(135deg, #f8f9fa, #e9ecef); border-radius: 12px; }
+        .seller-section h3 { font-size: 20px; font-weight: 600; margin-bottom: 12px; color: #111; }
+        .seller-section p { color: #666; font-size: 15px; margin-bottom: 20px; line-height: 1.5; }
+        .btn-admin { background: linear-gradient(135deg, #4f46e5, #7c3aed); color: #fff; padding: 12px 24px; border-radius: 4px; text-decoration: none; font-size: 15px; display: inline-block; }
+        .btn-admin:hover { opacity: 0.9; }
+
         @media (max-width: 640px) {
             .hero h1 { font-size: 28px; }
             .features-grid { grid-template-columns: 1fr; gap: 24px; }
@@ -95,6 +102,12 @@ func (h *PortalHandler) renderLandingPage() string {
                 <p>Start free, upgrade when you need more. Pay only for what you use.</p>
             </div>
         </div>
+    </section>
+
+    <section class="seller-section">
+        <h3>Are you an API provider?</h3>
+        <p>Monetize your API with usage-based billing, rate limiting, and customer management. Self-hosted and open source.</p>
+        <a href="/login" class="btn-admin">Admin Dashboard</a>
     </section>
 
     <footer class="footer">
@@ -518,31 +531,10 @@ func (h *PortalHandler) renderDashboardPage(user *PortalUser, keyCount int, requ
 }
 
 func (h *PortalHandler) renderAPIKeysPage(user *PortalUser, keys []key.Key, revokedMsg bool) string {
-	keyRows := ""
-	for _, k := range keys {
-		status := "Active"
-		statusClass := "status-active"
-		revokeBtn := ""
-		if k.RevokedAt != nil {
-			status = "Revoked"
-			statusClass = "status-revoked"
-			revokeBtn = "-" // Already revoked
-		} else {
-			revokeBtn = fmt.Sprintf(`<form method="POST" action="/portal/api-keys/%s/revoke" style="display:inline" onsubmit="showConfirmModal(this, 'Are you sure you want to revoke this API key? This cannot be undone.', 'Revoke API Key'); return false;"><button type="submit" class="btn btn-sm btn-danger">Revoke</button></form>`, k.ID)
-		}
-		keyRows += fmt.Sprintf(`
-            <tr>
-                <td>%s</td>
-                <td><code>%s****</code></td>
-                <td><span class="%s">%s</span></td>
-                <td>%s</td>
-                <td>%s</td>
-            </tr>
-        `, k.Name, k.Prefix, statusClass, status, k.CreatedAt.Format("Jan 2, 2006"), revokeBtn)
-	}
+	keyRows := h.renderAPIKeysTableRows(keys)
 
 	if keyRows == "" {
-		keyRows = `<tr><td colspan="5" class="text-center">No API keys yet</td></tr>`
+		keyRows = `<tr><td colspan="6" class="text-center">No API keys yet</td></tr>`
 	}
 
 	successMsg := ""
@@ -558,6 +550,7 @@ func (h *PortalHandler) renderAPIKeysPage(user *PortalUser, keys []key.Key, revo
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>API Keys - %s</title>
     <style>%s</style>
+    <script src="/static/js/htmx.min.js"></script>
 </head>
 <body>
     %s
@@ -574,11 +567,12 @@ func (h *PortalHandler) renderAPIKeysPage(user *PortalUser, keys []key.Key, revo
                         <th>Name</th>
                         <th>Key</th>
                         <th>Status</th>
+                        <th>Last Used</th>
                         <th>Created</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody id="api-keys-table" hx-get="/portal/api-keys/partial" hx-trigger="every 30s" hx-swap="innerHTML">
                     %s
                 </tbody>
             </table>
@@ -608,6 +602,71 @@ func (h *PortalHandler) renderAPIKeysPage(user *PortalUser, keys []key.Key, revo
     %s
 </body>
 </html>`, h.appName, portalCSS, h.renderPortalNav(user), successMsg, keyRows, portalConfirmJS)
+}
+
+// renderAPIKeysTableRows renders just the table rows for API keys (used for HTMX partial updates).
+func (h *PortalHandler) renderAPIKeysTableRows(keys []key.Key) string {
+	if len(keys) == 0 {
+		return ""
+	}
+
+	var rows string
+	for _, k := range keys {
+		status := "Active"
+		statusClass := "status-active"
+		revokeBtn := ""
+		if k.RevokedAt != nil {
+			status = "Revoked"
+			statusClass = "status-revoked"
+			revokeBtn = "-"
+		} else {
+			revokeBtn = fmt.Sprintf(`<form method="POST" action="/portal/api-keys/%s/revoke" style="display:inline" onsubmit="showConfirmModal(this, 'Are you sure you want to revoke this API key? This cannot be undone.', 'Revoke API Key'); return false;"><button type="submit" class="btn btn-sm btn-danger">Revoke</button></form>`, k.ID)
+		}
+
+		lastUsed := "Never"
+		if k.LastUsed != nil {
+			lastUsed = timeAgo(*k.LastUsed)
+		}
+
+		rows += fmt.Sprintf(`
+            <tr>
+                <td>%s</td>
+                <td><code>%s****</code></td>
+                <td><span class="%s">%s</span></td>
+                <td>%s</td>
+                <td>%s</td>
+                <td>%s</td>
+            </tr>
+        `, k.Name, k.Prefix, statusClass, status, lastUsed, k.CreatedAt.Format("Jan 2, 2006"), revokeBtn)
+	}
+	return rows
+}
+
+// timeAgo returns a human-readable time ago string.
+func timeAgo(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		mins := int(d.Minutes())
+		if mins == 1 {
+			return "1 minute ago"
+		}
+		return fmt.Sprintf("%d minutes ago", mins)
+	case d < 24*time.Hour:
+		hours := int(d.Hours())
+		if hours == 1 {
+			return "1 hour ago"
+		}
+		return fmt.Sprintf("%d hours ago", hours)
+	default:
+		days := int(d.Hours() / 24)
+		if days == 1 {
+			return "1 day ago"
+		}
+		return fmt.Sprintf("%d days ago", days)
+	}
 }
 
 func (h *PortalHandler) renderKeyCreatedPage(w http.ResponseWriter, r *http.Request, user *PortalUser, rawKey, keyName string) {
@@ -828,6 +887,7 @@ func (h *PortalHandler) renderPortalNav(user *PortalUser) string {
     <nav class="portal-nav">
         <div class="nav-brand">
             <a href="/portal/dashboard">%s</a>
+            <span class="role-badge" style="background: linear-gradient(135deg, #059669, #10b981); color: white; padding: 2px 8px; font-size: 0.65rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; border-radius: 4px; margin-left: 8px;">Developer Portal</span>
         </div>
         <div class="nav-links">
             <a href="/portal/dashboard">Dashboard</a>

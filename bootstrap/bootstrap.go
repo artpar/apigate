@@ -304,6 +304,9 @@ func (a *App) initHTTPServer() error {
 	deliveryStore := sqlite.NewDeliveryStore(a.DB.DB)
 	a.webhookService = app.NewWebhookService(webhookStore, deliveryStore, a.Logger)
 
+	// Create admin invite store
+	inviteStore := sqlite.NewInviteStore(a.DB.DB)
+
 	// Start webhook retry worker (checks for failed deliveries every minute)
 	a.webhookService.StartRetryWorker(ctx, time.Minute)
 	a.Logger.Info().Msg("webhook service initialized with retry worker")
@@ -349,9 +352,13 @@ func (a *App) initHTTPServer() error {
 		Settings:       a.Settings.Store(),
 		AuthTokens:     tokenStore,
 		EmailSender:    emailSender,
-		Webhooks:       webhookStore,
-		Deliveries:     deliveryStore,
-		WebhookService: a.webhookService,
+		Webhooks:            webhookStore,
+		Deliveries:          deliveryStore,
+		WebhookService:      a.webhookService,
+		Invites:             inviteStore,
+		Entitlements:        deps.Entitlements,
+		PlanEntitlements:    deps.PlanEntitlements,
+		EntitlementReloader: a,
 		AppSettings: web.AppSettings{
 			UpstreamURL:     s.Get(settings.KeyUpstreamURL),
 			UpstreamTimeout: s.GetOrDefault(settings.KeyUpstreamTimeout, "30s"),

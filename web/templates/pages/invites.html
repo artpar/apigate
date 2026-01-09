@@ -1,0 +1,122 @@
+{{define "content"}}
+<div class="page">
+    <div class="page-header">
+        <h1 class="page-title">Admin Invites</h1>
+    </div>
+
+    <p class="page-desc">Invite new administrators to join APIGate. They'll receive an email with a registration link.</p>
+
+    {{if .Error}}
+    <div class="alert alert-error">
+        {{if eq .Error "email_required"}}Email address is required.{{end}}
+        {{if eq .Error "user_exists"}}A user with this email already exists.{{end}}
+        {{if eq .Error "internal"}}An error occurred. Please try again.{{end}}
+    </div>
+    {{end}}
+
+    {{if .Success}}
+    <div class="alert alert-success">
+        {{if eq .Success "created"}}Invitation sent successfully.{{end}}
+        {{if eq .Success "deleted"}}Invitation deleted.{{end}}
+    </div>
+    {{end}}
+
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title">Send Invite</h2>
+        </div>
+        <div class="card-body">
+            <form method="POST" action="/invites" class="form-inline">
+                <div class="form-group">
+                    <label for="email">Email Address</label>
+                    <input type="email" id="email" name="email" class="form-control" placeholder="admin@example.com" required>
+                </div>
+                <button type="submit" class="btn btn-primary">Send Invitation</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title">Pending Invitations</h2>
+        </div>
+        <div class="card-body flush">
+            {{if .Invites}}
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Email</th>
+                        <th>Invited By</th>
+                        <th>Created</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .Invites}}
+                    <tr id="invite-{{.ID}}">
+                        <td>{{.Email}}</td>
+                        <td>{{.CreatorEmail}}</td>
+                        <td>{{formatTime .CreatedAt}}</td>
+                        <td>
+                            {{if .IsUsed}}
+                            <span class="badge badge-success">Used</span>
+                            {{else if .IsExpired}}
+                            <span class="badge badge-secondary">Expired</span>
+                            {{else}}
+                            <span class="badge badge-primary">Pending</span>
+                            {{end}}
+                        </td>
+                        <td>
+                            {{if not .IsUsed}}
+                            <button type="button" class="btn btn-sm btn-danger"
+                                    hx-delete="/invites/{{.ID}}"
+                                    hx-target="#invite-{{.ID}}"
+                                    hx-swap="outerHTML"
+                                    hx-confirm="Delete this invitation?">Delete</button>
+                            {{end}}
+                        </td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+            {{else}}
+            <div class="table-empty">No invitations yet.</div>
+            {{end}}
+        </div>
+    </div>
+</div>
+{{end}}
+
+{{define "panel-docs"}}
+<div class="panel-section">
+    <h3>Admin Invites</h3>
+    <p>Invite new administrators to manage APIGate. Invitations are valid for 48 hours.</p>
+</div>
+
+<div class="panel-section">
+    <h4>How It Works</h4>
+    <ul class="panel-list">
+        <li>Enter the email address of the person you want to invite</li>
+        <li>They'll receive an email with a registration link</li>
+        <li>They click the link and set their password</li>
+        <li>They can then log in as an admin</li>
+    </ul>
+</div>
+
+<div class="panel-section">
+    <h4>Security</h4>
+    <p>Invitation links expire after 48 hours and can only be used once. Delete unused invitations to revoke access.</p>
+</div>
+{{end}}
+
+{{define "panel-reference"}}
+<div class="panel-section">
+    <h3>Invite Status</h3>
+    <ul class="panel-list">
+        <li><strong>Pending</strong> - Waiting to be used</li>
+        <li><strong>Used</strong> - Recipient has registered</li>
+        <li><strong>Expired</strong> - Past 48 hour limit</li>
+    </ul>
+</div>
+{{end}}
