@@ -42,3 +42,4 @@ coverage.out
 
 # Conversation exports
 2025-*.txt
+subprojects/
