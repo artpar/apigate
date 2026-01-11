@@ -24,7 +24,8 @@ func NewRouteStore(db *DB) *RouteStore {
 // Get retrieves a route by ID.
 func (s *RouteStore) Get(ctx context.Context, id string) (route.Route, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, name, description, path_pattern, match_type, methods, headers,
+		SELECT id, name, description, example_request, example_response,
+		       path_pattern, match_type, methods, headers,
 		       upstream_id, path_rewrite, method_override,
 		       request_transform, response_transform,
 		       metering_expr, metering_mode, metering_unit, protocol,
@@ -38,7 +39,8 @@ func (s *RouteStore) Get(ctx context.Context, id string) (route.Route, error) {
 // List returns all routes ordered by priority.
 func (s *RouteStore) List(ctx context.Context) ([]route.Route, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, description, path_pattern, match_type, methods, headers,
+		SELECT id, name, description, example_request, example_response,
+		       path_pattern, match_type, methods, headers,
 		       upstream_id, path_rewrite, method_override,
 		       request_transform, response_transform,
 		       metering_expr, metering_mode, metering_unit, protocol,
@@ -65,7 +67,8 @@ func (s *RouteStore) List(ctx context.Context) ([]route.Route, error) {
 // ListEnabled returns only enabled routes ordered by priority.
 func (s *RouteStore) ListEnabled(ctx context.Context) ([]route.Route, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, description, path_pattern, match_type, methods, headers,
+		SELECT id, name, description, example_request, example_response,
+		       path_pattern, match_type, methods, headers,
 		       upstream_id, path_rewrite, method_override,
 		       request_transform, response_transform,
 		       metering_expr, metering_mode, metering_unit, protocol,
@@ -122,14 +125,16 @@ func (s *RouteStore) Create(ctx context.Context, r route.Route) error {
 
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO routes (
-			id, name, description, path_pattern, match_type, methods, headers,
+			id, name, description, example_request, example_response,
+			path_pattern, match_type, methods, headers,
 			upstream_id, path_rewrite, method_override,
 			request_transform, response_transform,
 			metering_expr, metering_mode, metering_unit, protocol,
 			priority, enabled, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
-		r.ID, r.Name, r.Description, r.PathPattern, string(r.MatchType),
+		r.ID, r.Name, r.Description, r.ExampleRequest, r.ExampleResponse,
+		r.PathPattern, string(r.MatchType),
 		methodsJSON, headersJSON,
 		r.UpstreamID, nullString(r.PathRewrite), nullString(r.MethodOverride),
 		reqTransformJSON, respTransformJSON,
@@ -169,7 +174,8 @@ func (s *RouteStore) Update(ctx context.Context, r route.Route) error {
 
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE routes
-		SET name = ?, description = ?, path_pattern = ?, match_type = ?,
+		SET name = ?, description = ?, example_request = ?, example_response = ?,
+		    path_pattern = ?, match_type = ?,
 		    methods = ?, headers = ?,
 		    upstream_id = ?, path_rewrite = ?, method_override = ?,
 		    request_transform = ?, response_transform = ?,
@@ -177,7 +183,8 @@ func (s *RouteStore) Update(ctx context.Context, r route.Route) error {
 		    priority = ?, enabled = ?, updated_at = ?
 		WHERE id = ?
 	`,
-		r.Name, r.Description, r.PathPattern, string(r.MatchType),
+		r.Name, r.Description, r.ExampleRequest, r.ExampleResponse,
+		r.PathPattern, string(r.MatchType),
 		methodsJSON, headersJSON,
 		r.UpstreamID, nullString(r.PathRewrite), nullString(r.MethodOverride),
 		reqTransformJSON, respTransformJSON,
@@ -223,7 +230,8 @@ func scanRoute(row *sql.Row) (route.Route, error) {
 	var enabled int
 
 	err := row.Scan(
-		&r.ID, &r.Name, &r.Description, &r.PathPattern, &matchType,
+		&r.ID, &r.Name, &r.Description, &r.ExampleRequest, &r.ExampleResponse,
+		&r.PathPattern, &matchType,
 		&methodsJSON, &headersJSON,
 		&r.UpstreamID, &pathRewrite, &methodOverride,
 		&reqTransformJSON, &respTransformJSON,
@@ -288,7 +296,8 @@ func scanRouteRows(rows *sql.Rows) (route.Route, error) {
 	var enabled int
 
 	err := rows.Scan(
-		&r.ID, &r.Name, &r.Description, &r.PathPattern, &matchType,
+		&r.ID, &r.Name, &r.Description, &r.ExampleRequest, &r.ExampleResponse,
+		&r.PathPattern, &matchType,
 		&methodsJSON, &headersJSON,
 		&r.UpstreamID, &pathRewrite, &methodOverride,
 		&reqTransformJSON, &respTransformJSON,

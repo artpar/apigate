@@ -57,22 +57,25 @@ func (h *Handler) RouteCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rt := route.Route{
-		ID:             uuid.New().String(),
-		Name:           r.FormValue("name"),
-		PathPattern:    r.FormValue("path_pattern"),
-		MatchType:      route.MatchType(r.FormValue("match_type")),
-		Methods:        parseCSV(r.FormValue("methods")),
-		UpstreamID:     r.FormValue("upstream_id"),
-		PathRewrite:    r.FormValue("path_rewrite"),
-		MethodOverride: r.FormValue("method_override"),
-		MeteringExpr:   r.FormValue("metering_expr"),
-		MeteringMode:   r.FormValue("metering_mode"),
-		MeteringUnit:   r.FormValue("metering_unit"),
-		Protocol:       route.Protocol(r.FormValue("protocol")),
-		Priority:       parseInt(r.FormValue("priority")),
-		Enabled:        r.FormValue("enabled") == "on",
-		CreatedAt:      time.Now(),
-		UpdatedAt:      time.Now(),
+		ID:              uuid.New().String(),
+		Name:            r.FormValue("name"),
+		Description:     r.FormValue("description"),
+		ExampleRequest:  r.FormValue("example_request"),
+		ExampleResponse: r.FormValue("example_response"),
+		PathPattern:     r.FormValue("path_pattern"),
+		MatchType:       route.MatchType(r.FormValue("match_type")),
+		Methods:         parseCSV(r.FormValue("methods")),
+		UpstreamID:      r.FormValue("upstream_id"),
+		PathRewrite:     r.FormValue("path_rewrite"),
+		MethodOverride:  r.FormValue("method_override"),
+		MeteringExpr:    r.FormValue("metering_expr"),
+		MeteringMode:    r.FormValue("metering_mode"),
+		MeteringUnit:    r.FormValue("metering_unit"),
+		Protocol:        route.Protocol(r.FormValue("protocol")),
+		Priority:        parseInt(r.FormValue("priority")),
+		Enabled:         r.FormValue("enabled") == "on",
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
 	}
 
 	// Default metering unit if not provided
@@ -132,22 +135,25 @@ func (h *Handler) RouteUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rt := route.Route{
-		ID:             id,
-		Name:           r.FormValue("name"),
-		PathPattern:    r.FormValue("path_pattern"),
-		MatchType:      route.MatchType(r.FormValue("match_type")),
-		Methods:        parseCSV(r.FormValue("methods")),
-		UpstreamID:     r.FormValue("upstream_id"),
-		PathRewrite:    r.FormValue("path_rewrite"),
-		MethodOverride: r.FormValue("method_override"),
-		MeteringExpr:   r.FormValue("metering_expr"),
-		MeteringMode:   r.FormValue("metering_mode"),
-		MeteringUnit:   r.FormValue("metering_unit"),
-		Protocol:       route.Protocol(r.FormValue("protocol")),
-		Priority:       parseInt(r.FormValue("priority")),
-		Enabled:        r.FormValue("enabled") == "on",
-		CreatedAt:      existing.CreatedAt,
-		UpdatedAt:      time.Now(),
+		ID:              id,
+		Name:            r.FormValue("name"),
+		Description:     r.FormValue("description"),
+		ExampleRequest:  r.FormValue("example_request"),
+		ExampleResponse: r.FormValue("example_response"),
+		PathPattern:     r.FormValue("path_pattern"),
+		MatchType:       route.MatchType(r.FormValue("match_type")),
+		Methods:         parseCSV(r.FormValue("methods")),
+		UpstreamID:      r.FormValue("upstream_id"),
+		PathRewrite:     r.FormValue("path_rewrite"),
+		MethodOverride:  r.FormValue("method_override"),
+		MeteringExpr:    r.FormValue("metering_expr"),
+		MeteringMode:    r.FormValue("metering_mode"),
+		MeteringUnit:    r.FormValue("metering_unit"),
+		Protocol:        route.Protocol(r.FormValue("protocol")),
+		Priority:        parseInt(r.FormValue("priority")),
+		Enabled:         r.FormValue("enabled") == "on",
+		CreatedAt:       existing.CreatedAt,
+		UpdatedAt:       time.Now(),
 	}
 
 	// Default metering unit if not provided
@@ -198,12 +204,35 @@ func (h *Handler) PartialRoutes(w http.ResponseWriter, r *http.Request) {
 		upstreamMap[u.ID] = u.Name
 	}
 
+	// Check documentation status for customer-facing docs
+	var documentedCount, wildcardCount, totalEnabled int
+	for _, rt := range routes {
+		if !rt.Enabled {
+			continue
+		}
+		totalEnabled++
+		// Check if route is a wildcard (can't be meaningfully documented)
+		if strings.Contains(rt.PathPattern, "*") || strings.Contains(rt.PathPattern, "{path}") {
+			wildcardCount++
+		} else if rt.Description != "" || rt.ExampleRequest != "" || rt.ExampleResponse != "" {
+			documentedCount++
+		}
+	}
+
 	data := struct {
-		Routes      []route.Route
-		UpstreamMap map[string]string
+		Routes          []route.Route
+		UpstreamMap     map[string]string
+		DocumentedCount int
+		WildcardCount   int
+		TotalEnabled    int
+		ShowDocsWarning bool
 	}{
-		Routes:      routes,
-		UpstreamMap: upstreamMap,
+		Routes:          routes,
+		UpstreamMap:     upstreamMap,
+		DocumentedCount: documentedCount,
+		WildcardCount:   wildcardCount,
+		TotalEnabled:    totalEnabled,
+		ShowDocsWarning: totalEnabled > 0 && wildcardCount == totalEnabled,
 	}
 	h.renderPartial(w, "partial_routes", data)
 }

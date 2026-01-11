@@ -2,6 +2,7 @@
 package web
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
@@ -442,63 +443,117 @@ func (h *DocsHandler) renderAPIReference(spec *openapi.Spec) string {
 			continue
 		}
 
-		var methods []string
-		var summary string
+		// Collect all operations with their details
 		if pathItem.Get != nil {
-			methods = append(methods, "GET")
-			if summary == "" {
-				summary = pathItem.Get.Summary
-			}
+			endpoints = append(endpoints, concreteEndpoint{
+				path:        path,
+				methods:     []string{"GET"},
+				summary:     pathItem.Get.Summary,
+				description: pathItem.Get.Description,
+				operation:   pathItem.Get,
+			})
 		}
 		if pathItem.Post != nil {
-			methods = append(methods, "POST")
-			if summary == "" {
-				summary = pathItem.Post.Summary
-			}
+			endpoints = append(endpoints, concreteEndpoint{
+				path:        path,
+				methods:     []string{"POST"},
+				summary:     pathItem.Post.Summary,
+				description: pathItem.Post.Description,
+				operation:   pathItem.Post,
+			})
 		}
 		if pathItem.Put != nil {
-			methods = append(methods, "PUT")
+			endpoints = append(endpoints, concreteEndpoint{
+				path:        path,
+				methods:     []string{"PUT"},
+				summary:     pathItem.Put.Summary,
+				description: pathItem.Put.Description,
+				operation:   pathItem.Put,
+			})
 		}
 		if pathItem.Patch != nil {
-			methods = append(methods, "PATCH")
+			endpoints = append(endpoints, concreteEndpoint{
+				path:        path,
+				methods:     []string{"PATCH"},
+				summary:     pathItem.Patch.Summary,
+				description: pathItem.Patch.Description,
+				operation:   pathItem.Patch,
+			})
 		}
 		if pathItem.Delete != nil {
-			methods = append(methods, "DELETE")
-		}
-
-		if len(methods) > 0 {
 			endpoints = append(endpoints, concreteEndpoint{
-				path:    path,
-				methods: methods,
-				summary: summary,
+				path:        path,
+				methods:     []string{"DELETE"},
+				summary:     pathItem.Delete.Summary,
+				description: pathItem.Delete.Description,
+				operation:   pathItem.Delete,
 			})
 		}
 	}
 
-	// Sort by path
+	// Sort by path then method
 	sort.Slice(endpoints, func(i, j int) bool {
-		return endpoints[i].path < endpoints[j].path
+		if endpoints[i].path != endpoints[j].path {
+			return endpoints[i].path < endpoints[j].path
+		}
+		return endpoints[i].methods[0] < endpoints[j].methods[0]
 	})
 
-	// Build endpoint list
+	// Build endpoint list with detailed documentation
 	endpointsHTML := ""
 	if len(endpoints) == 0 {
-		endpointsHTML = `<p style="color: #666; font-size: 14px;">No specific endpoints documented. Contact the API provider for endpoint details.</p>`
+		endpointsHTML = `
+		<div class="docs-callout info">
+			<strong>No endpoints documented yet.</strong>
+			<p style="margin-top: 8px;">The API administrator needs to create specific routes with documentation.</p>
+			<p>If you're the admin, go to <strong>Routes</strong> in the admin panel and add endpoint descriptions, example requests, and example responses to your routes.</p>
+		</div>`
 	} else {
 		for _, ep := range endpoints {
-			methodBadges := ""
-			for _, m := range ep.methods {
-				methodBadges += fmt.Sprintf(`<span class="method-badge">%s</span>`, m)
+			methodBadge := fmt.Sprintf(`<span class="method-badge method-%s">%s</span>`, strings.ToLower(ep.methods[0]), ep.methods[0])
+
+			descText := ""
+			if ep.description != "" {
+				descText = fmt.Sprintf(`<p class="endpoint-desc">%s</p>`, ep.description)
 			}
-			summaryText := ""
-			if ep.summary != "" {
-				summaryText = fmt.Sprintf(`<span style="color: #666; font-size: 13px; margin-left: 8px;">%s</span>`, ep.summary)
+
+			// Build example sections
+			exampleHTML := ""
+			if ep.operation != nil {
+				// Request example
+				if ep.operation.RequestBody != nil && ep.operation.RequestBody.Content != nil {
+					if jsonMedia, ok := ep.operation.RequestBody.Content["application/json"]; ok && jsonMedia.Schema != nil && jsonMedia.Schema.Example != nil {
+						exampleJSON := h.formatExample(jsonMedia.Schema.Example)
+						exampleHTML += fmt.Sprintf(`
+						<div class="example-section">
+							<h5>Example Request</h5>
+							<pre class="code-block"><code>%s</code></pre>
+						</div>`, exampleJSON)
+					}
+				}
+
+				// Response example
+				if resp, ok := ep.operation.Responses["200"]; ok && resp.Content != nil {
+					if jsonMedia, ok := resp.Content["application/json"]; ok && jsonMedia.Schema != nil && jsonMedia.Schema.Example != nil {
+						exampleJSON := h.formatExample(jsonMedia.Schema.Example)
+						exampleHTML += fmt.Sprintf(`
+						<div class="example-section">
+							<h5>Example Response</h5>
+							<pre class="code-block"><code>%s</code></pre>
+						</div>`, exampleJSON)
+					}
+				}
 			}
+
 			endpointsHTML += fmt.Sprintf(`
-				<div style="display: flex; align-items: center; gap: 8px; padding: 12px 0; border-bottom: 1px solid #e5e5e5;">
-					<div style="display: flex; gap: 4px; min-width: 60px;">%s</div>
-					<code style="flex: 1;">%s</code>%s
-				</div>`, methodBadges, ep.path, summaryText)
+				<div class="endpoint-card">
+					<div class="endpoint-header">
+						%s
+						<code class="endpoint-path">%s</code>
+					</div>
+					%s
+					%s
+				</div>`, methodBadge, ep.path, descText, exampleHTML)
 		}
 	}
 
@@ -508,10 +563,7 @@ func (h *DocsHandler) renderAPIReference(spec *openapi.Spec) string {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>API Reference - %s</title>
-    <style>
-        %s
-        .method-badge { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: 500; background: #111; color: #fff; }
-    </style>
+    <style>%s</style>
 </head>
 <body>
     %s
@@ -561,9 +613,11 @@ func (h *DocsHandler) renderAPIReference(spec *openapi.Spec) string {
 
 // concreteEndpoint represents a specific endpoint (not a wildcard)
 type concreteEndpoint struct {
-	path    string
-	methods []string
-	summary string
+	path        string
+	methods     []string
+	summary     string
+	description string
+	operation   *openapi.Operation
 }
 
 func (h *DocsHandler) renderEndpoint(method, path string, op *openapi.Operation) string {
@@ -618,6 +672,28 @@ func (h *DocsHandler) renderEndpoint(method, path string, op *openapi.Operation)
                 %s
             </div>
         </div>`, methodClass, method, path, tags, op.Summary, paramsHTML, bodyHTML)
+}
+
+// formatExample formats an example value as pretty-printed JSON
+func (h *DocsHandler) formatExample(v any) string {
+	if v == nil {
+		return ""
+	}
+	// If it's already a string, check if it's valid JSON to pretty print
+	if str, ok := v.(string); ok {
+		var parsed any
+		if err := json.Unmarshal([]byte(str), &parsed); err == nil {
+			if b, err := json.MarshalIndent(parsed, "", "  "); err == nil {
+				return string(b)
+			}
+		}
+		return str
+	}
+	// Otherwise, marshal and pretty-print
+	if b, err := json.MarshalIndent(v, "", "  "); err == nil {
+		return string(b)
+	}
+	return fmt.Sprintf("%v", v)
 }
 
 func (h *DocsHandler) renderExamples(baseURL string) string {
@@ -1055,6 +1131,23 @@ code { background: #f5f5f5; padding: 2px 6px; border-radius: 3px; font-family: u
 .status-success { color: #166534; }
 .status-error { color: #991b1b; }
 .response-body { background: #111; color: #e5e5e5; padding: 16px; border-radius: 4px; overflow-x: auto; font-family: ui-monospace, monospace; font-size: 13px; min-height: 200px; white-space: pre-wrap; }
+
+.endpoint-card { background: #fff; border: 1px solid #e5e5e5; border-radius: 6px; padding: 16px; margin-bottom: 12px; }
+.endpoint-card:hover { border-color: #ccc; }
+.endpoint-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.endpoint-path { font-family: ui-monospace, monospace; font-size: 14px; color: #111; background: #f5f5f5; padding: 4px 8px; border-radius: 4px; }
+.endpoint-desc { color: #666; font-size: 14px; margin-bottom: 12px; }
+
+.method-badge { display: inline-block; padding: 3px 8px; border-radius: 3px; font-size: 11px; font-weight: 600; text-transform: uppercase; font-family: ui-monospace, monospace; }
+.method-get { background: #dcfce7; color: #166534; }
+.method-post { background: #dbeafe; color: #1e40af; }
+.method-put { background: #fef3c7; color: #92400e; }
+.method-patch { background: #fef3c7; color: #92400e; }
+.method-delete { background: #fee2e2; color: #991b1b; }
+
+.example-section { margin-top: 12px; padding-top: 12px; border-top: 1px solid #f0f0f0; }
+.example-section h5 { font-size: 12px; font-weight: 500; color: #666; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; }
+.example-section .code-block { margin-bottom: 0; border-radius: 4px; }
 
 @media (max-width: 768px) {
     .docs-nav { display: none; }

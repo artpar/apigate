@@ -113,6 +113,49 @@
             </div>
         </div>
 
+        <!-- API Documentation (for customer-facing docs) -->
+        <div class="card mb-4">
+            <div class="section-header">
+                <div class="section-title">
+                    API Documentation
+                    <span class="info-tooltip" data-tip="This information appears in the customer-facing API documentation. Fill this out to help your API consumers understand this endpoint.">i</span>
+                </div>
+                <div class="section-actions">
+                    <span class="badge badge-info">For Consumer Docs</span>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="form-group">
+                    <label for="description" class="form-label">
+                        Endpoint Description
+                        <span class="info-tooltip" data-tip="A clear description of what this endpoint does. Shown to API consumers in the documentation.">i</span>
+                    </label>
+                    <textarea id="description" name="description" class="form-input" rows="2"
+                        placeholder="Retrieves a list of users with optional filtering and pagination.">{{.Route.Description}}</textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="example_request" class="form-label">
+                        Example Request Body
+                        <span class="info-tooltip" data-tip="A sample JSON request body. Shown in code examples for POST/PUT/PATCH endpoints.">i</span>
+                    </label>
+                    <textarea id="example_request" name="example_request" class="form-input" rows="4"
+                        placeholder='{"name": "John", "email": "john@example.com"}'>{{.Route.ExampleRequest}}</textarea>
+                    <div class="form-hint">JSON format. Leave empty for GET endpoints.</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="example_response" class="form-label">
+                        Example Response
+                        <span class="info-tooltip" data-tip="A sample JSON response. Helps consumers understand the response format.">i</span>
+                    </label>
+                    <textarea id="example_response" name="example_response" class="form-input" rows="4"
+                        placeholder='{"id": 1, "name": "John", "email": "john@example.com", "created_at": "2024-01-15T10:30:00Z"}'>{{.Route.ExampleResponse}}</textarea>
+                    <div class="form-hint">JSON format. Shows consumers what to expect from this endpoint.</div>
+                </div>
+            </div>
+        </div>
+
         <!-- Upstream Configuration -->
         <div class="card mb-4">
             <div class="section-header">

@@ -109,6 +109,16 @@
 {{end}}
 
 {{define "partial_routes"}}
+{{if .ShowDocsWarning}}
+<div class="alert alert-warning" style="margin-bottom: 16px;">
+    <strong>Documentation Tip:</strong> All your routes use wildcard patterns (like <code>/*</code> or <code>/api/*</code>).
+    While wildcards work for proxying, they can't appear in customer-facing API documentation.
+    <br><br>
+    For better docs, consider creating <strong>specific routes</strong> for each endpoint (e.g., <code>/users</code>, <code>/products/{id}</code>)
+    with descriptions and example requests/responses.
+    <a href="/docs/api-reference" target="_blank" style="margin-left: 8px;">Preview Docs</a>
+</div>
+{{end}}
 <table class="table">
     <thead>
         <tr>

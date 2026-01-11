@@ -3,6 +3,7 @@
 package openapi
 
 import (
+	"encoding/json"
 	"regexp"
 	"sort"
 	"strings"
@@ -234,13 +235,33 @@ func (g *RouteGenerator) generateRoutePath(spec *Spec, r route.Route) {
 
 		// Add request body for methods that typically have one
 		if method == "POST" || method == "PUT" || method == "PATCH" {
+			mediaType := MediaType{
+				Schema: &Schema{Type: "object"},
+			}
+			// Add example request if available
+			if r.ExampleRequest != "" {
+				mediaType.Schema.Example = parseJSONExample(r.ExampleRequest)
+			}
 			op.RequestBody = &RequestBody{
 				Description: "Request body to forward to upstream",
 				Content: map[string]MediaType{
-					"application/json": {
-						Schema: &Schema{Type: "object"},
-					},
+					"application/json": mediaType,
 				},
+			}
+		}
+
+		// Add example response if available
+		if r.ExampleResponse != "" {
+			if resp, ok := op.Responses["200"]; ok {
+				resp.Content = map[string]MediaType{
+					"application/json": {
+						Schema: &Schema{
+							Type:    "object",
+							Example: parseJSONExample(r.ExampleResponse),
+						},
+					},
+				}
+				op.Responses["200"] = resp
 			}
 		}
 
@@ -379,4 +400,20 @@ func generateOperationID(routeName, method string) string {
 	}
 
 	return strings.ToLower(method) + "_" + name
+}
+
+// parseJSONExample parses a JSON string into an interface{} for OpenAPI examples.
+// Returns the string as-is if it's not valid JSON.
+func parseJSONExample(jsonStr string) any {
+	jsonStr = strings.TrimSpace(jsonStr)
+	if jsonStr == "" {
+		return nil
+	}
+
+	var result any
+	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		// Not valid JSON, return as string
+		return jsonStr
+	}
+	return result
 }

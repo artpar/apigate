@@ -42,6 +42,10 @@ type Route struct {
 	Name        string
 	Description string
 
+	// API Documentation (for customer-facing docs)
+	ExampleRequest  string // Sample request body (JSON) shown in docs
+	ExampleResponse string // Sample response body (JSON) shown in docs
+
 	// Matching criteria
 	PathPattern string    // Pattern to match: "/api/v1/*", "/users/{id}", regex
 	MatchType   MatchType // How to interpret pattern
