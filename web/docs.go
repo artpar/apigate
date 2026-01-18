@@ -95,15 +95,17 @@ func (h *DocsHandler) APIReferencePage(w http.ResponseWriter, r *http.Request) {
 // ExamplesPage renders code examples in multiple languages.
 func (h *DocsHandler) ExamplesPage(w http.ResponseWriter, r *http.Request) {
 	baseURL := h.getBaseURL(r)
+	spec := h.generateOpenAPISpec(r)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(h.renderExamples(baseURL)))
+	w.Write([]byte(h.renderExamples(baseURL, spec)))
 }
 
 // TryItPage renders the interactive API console.
 func (h *DocsHandler) TryItPage(w http.ResponseWriter, r *http.Request) {
 	baseURL := h.getBaseURL(r)
+	spec := h.generateOpenAPISpec(r)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(h.renderTryIt(baseURL)))
+	w.Write([]byte(h.renderTryIt(baseURL, spec)))
 }
 
 // OpenAPISpec returns the OpenAPI JSON specification.
@@ -783,7 +785,76 @@ func (h *DocsHandler) formatExample(v any) string {
 	return fmt.Sprintf("%v", v)
 }
 
-func (h *DocsHandler) renderExamples(baseURL string) string {
+func (h *DocsHandler) renderExamples(baseURL string, spec *openapi.Spec) string {
+	// Find actual GET and POST endpoints from the spec
+	getEndpoint := "/your-endpoint"
+	getDescription := ""
+	postEndpoint := "/your-endpoint"
+	postDescription := ""
+	postExampleBody := `{
+    "name": "Example",
+    "value": 123
+  }`
+
+	// Collect concrete endpoints (skip wildcards)
+	for path, pathItem := range spec.Paths {
+		if strings.Contains(path, "{path}") || strings.Contains(path, "*") {
+			continue
+		}
+
+		// Find first GET endpoint
+		if getEndpoint == "/your-endpoint" && pathItem.Get != nil {
+			getEndpoint = path
+			if pathItem.Get.Description != "" {
+				getDescription = pathItem.Get.Description
+			} else if pathItem.Get.Summary != "" {
+				getDescription = pathItem.Get.Summary
+			}
+		}
+
+		// Find first POST endpoint with example body
+		if postEndpoint == "/your-endpoint" && pathItem.Post != nil {
+			postEndpoint = path
+			if pathItem.Post.Description != "" {
+				postDescription = pathItem.Post.Description
+			} else if pathItem.Post.Summary != "" {
+				postDescription = pathItem.Post.Summary
+			}
+			// Try to get example request body
+			if pathItem.Post.RequestBody != nil && pathItem.Post.RequestBody.Content != nil {
+				if jsonMedia, ok := pathItem.Post.RequestBody.Content["application/json"]; ok && jsonMedia.Schema != nil && jsonMedia.Schema.Example != nil {
+					postExampleBody = h.formatExample(jsonMedia.Schema.Example)
+				}
+			}
+		}
+
+		// Stop if we found both
+		if getEndpoint != "/your-endpoint" && postEndpoint != "/your-endpoint" {
+			break
+		}
+	}
+
+	// Build endpoint info callouts
+	getCallout := ""
+	if getEndpoint != "/your-endpoint" && getDescription != "" {
+		getCallout = fmt.Sprintf(`<div class="docs-callout info" style="margin-bottom: 16px;"><strong>%s</strong><p style="margin: 4px 0 0 0;">%s</p></div>`, getEndpoint, getDescription)
+	}
+
+	postCallout := ""
+	if postEndpoint != "/your-endpoint" && postDescription != "" {
+		postCallout = fmt.Sprintf(`<div class="docs-callout info" style="margin-bottom: 16px;"><strong>%s</strong><p style="margin: 4px 0 0 0;">%s</p></div>`, postEndpoint, postDescription)
+	}
+
+	// If no endpoints found, show a warning
+	noEndpointsWarning := ""
+	if getEndpoint == "/your-endpoint" && postEndpoint == "/your-endpoint" {
+		noEndpointsWarning = `
+        <div class="docs-callout warning" style="margin-bottom: 24px;">
+            <strong>No documented endpoints yet</strong>
+            <p style="margin-top: 8px;">The API administrator needs to create routes with documentation. Check the <a href="/docs/api-reference">API Reference</a> for available endpoints.</p>
+        </div>`
+	}
+
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -800,10 +871,13 @@ func (h *DocsHandler) renderExamples(baseURL string) string {
         </nav>
 
         <h1>Code Examples</h1>
-        <p class="docs-lead">Ready-to-use code snippets for common operations.</p>
+        <p class="docs-lead">Ready-to-use code snippets for your API endpoints.</p>
+
+        %s
 
         <div class="docs-section">
             <h2>Making a GET Request</h2>
+            %s
             <div class="code-tabs">
                 <button class="code-tab active" data-lang="curl">cURL</button>
                 <button class="code-tab" data-lang="javascript">JavaScript</button>
@@ -811,15 +885,15 @@ func (h *DocsHandler) renderExamples(baseURL string) string {
                 <button class="code-tab" data-lang="go">Go</button>
             </div>
 
-            <pre class="code-block" data-lang="curl"><code>curl -X GET "%s/api/resource" \
+            <pre class="code-block" data-lang="curl"><code>curl -X GET "%s%s" \
   -H "X-API-Key: your_api_key" \
   -H "Content-Type: application/json"</code></pre>
 
             <pre class="code-block hidden" data-lang="javascript"><code>const API_KEY = 'your_api_key';
 const BASE_URL = '%s';
 
-async function getResource() {
-  const response = await fetch(BASE_URL + '/api/resource', {
+async function getData() {
+  const response = await fetch(BASE_URL + '%s', {
     method: 'GET',
     headers: {
       'X-API-Key': API_KEY,
@@ -835,7 +909,7 @@ async function getResource() {
 }
 
 // Usage
-getResource()
+getData()
   .then(data => console.log(data))
   .catch(err => console.error(err));</code></pre>
 
@@ -844,9 +918,9 @@ getResource()
 API_KEY = 'your_api_key'
 BASE_URL = '%s'
 
-def get_resource():
+def get_data():
     response = requests.get(
-        f'{BASE_URL}/api/resource',
+        f'{BASE_URL}%s',
         headers={
             'X-API-Key': API_KEY,
             'Content-Type': 'application/json'
@@ -856,7 +930,7 @@ def get_resource():
     return response.json()
 
 # Usage
-data = get_resource()
+data = get_data()
 print(data)</code></pre>
 
             <pre class="code-block hidden" data-lang="go"><code>package main
@@ -873,8 +947,8 @@ const (
     baseURL = "%s"
 )
 
-func getResource() (map[string]interface{}, error) {
-    req, err := http.NewRequest("GET", baseURL+"/api/resource", nil)
+func getData() (map[string]interface{}, error) {
+    req, err := http.NewRequest("GET", baseURL+"%s", nil)
     if err != nil {
         return nil, err
     }
@@ -897,7 +971,7 @@ func getResource() (map[string]interface{}, error) {
 }
 
 func main() {
-    data, err := getResource()
+    data, err := getData()
     if err != nil {
         fmt.Println("Error:", err)
         return
@@ -908,22 +982,20 @@ func main() {
 
         <div class="docs-section">
             <h2>Making a POST Request</h2>
+            %s
             <div class="code-tabs">
                 <button class="code-tab active" data-lang="curl2">cURL</button>
                 <button class="code-tab" data-lang="javascript2">JavaScript</button>
                 <button class="code-tab" data-lang="python2">Python</button>
             </div>
 
-            <pre class="code-block" data-lang="curl2"><code>curl -X POST "%s/api/resource" \
+            <pre class="code-block" data-lang="curl2"><code>curl -X POST "%s%s" \
   -H "X-API-Key: your_api_key" \
   -H "Content-Type: application/json" \
-  -d '{
-    "name": "Example",
-    "value": 123
-  }'</code></pre>
+  -d '%s'</code></pre>
 
-            <pre class="code-block hidden" data-lang="javascript2"><code>async function createResource(data) {
-  const response = await fetch(BASE_URL + '/api/resource', {
+            <pre class="code-block hidden" data-lang="javascript2"><code>async function createData(data) {
+  const response = await fetch(BASE_URL + '%s', {
     method: 'POST',
     headers: {
       'X-API-Key': API_KEY,
@@ -936,12 +1008,12 @@ func main() {
 }
 
 // Usage
-createResource({ name: 'Example', value: 123 })
+createData(%s)
   .then(data => console.log(data));</code></pre>
 
-            <pre class="code-block hidden" data-lang="python2"><code>def create_resource(data):
+            <pre class="code-block hidden" data-lang="python2"><code>def create_data(data):
     response = requests.post(
-        f'{BASE_URL}/api/resource',
+        f'{BASE_URL}%s',
         headers={
             'X-API-Key': API_KEY,
             'Content-Type': 'application/json'
@@ -951,7 +1023,7 @@ createResource({ name: 'Example', value: 123 })
     return response.json()
 
 # Usage
-result = create_resource({'name': 'Example', 'value': 123})
+result = create_data(%s)
 print(result)</code></pre>
         </div>
 
@@ -982,17 +1054,203 @@ print(result)</code></pre>
     </main>
     <script>%s</script>
 </body>
-</html>`, h.appName, docsCSS, h.renderDocsNav("examples"), baseURL, baseURL, baseURL, baseURL, baseURL, docsJS)
+</html>`, h.appName, docsCSS, h.renderDocsNav("examples"), noEndpointsWarning,
+		getCallout, baseURL, getEndpoint,
+		baseURL, getEndpoint,
+		baseURL, getEndpoint,
+		baseURL, getEndpoint,
+		postCallout, baseURL, postEndpoint, postExampleBody,
+		postEndpoint, postExampleBody,
+		postEndpoint, postExampleBody,
+		docsJS)
 }
 
-func (h *DocsHandler) renderTryIt(baseURL string) string {
+func (h *DocsHandler) renderTryIt(baseURL string, spec *openapi.Spec) string {
+	// Collect available endpoints from spec
+	type endpointInfo struct {
+		method      string
+		path        string
+		description string
+		exampleBody string
+	}
+	var endpoints []endpointInfo
+	availableMethods := make(map[string]bool)
+
+	for path, pathItem := range spec.Paths {
+		// Skip wildcards
+		if strings.Contains(path, "{path}") || strings.Contains(path, "*") {
+			continue
+		}
+
+		if pathItem.Get != nil {
+			desc := pathItem.Get.Summary
+			if desc == "" {
+				desc = pathItem.Get.Description
+			}
+			endpoints = append(endpoints, endpointInfo{method: "GET", path: path, description: desc})
+			availableMethods["GET"] = true
+		}
+		if pathItem.Post != nil {
+			desc := pathItem.Post.Summary
+			if desc == "" {
+				desc = pathItem.Post.Description
+			}
+			exBody := ""
+			if pathItem.Post.RequestBody != nil && pathItem.Post.RequestBody.Content != nil {
+				if jsonMedia, ok := pathItem.Post.RequestBody.Content["application/json"]; ok && jsonMedia.Schema != nil && jsonMedia.Schema.Example != nil {
+					exBody = h.formatExample(jsonMedia.Schema.Example)
+				}
+			}
+			endpoints = append(endpoints, endpointInfo{method: "POST", path: path, description: desc, exampleBody: exBody})
+			availableMethods["POST"] = true
+		}
+		if pathItem.Put != nil {
+			desc := pathItem.Put.Summary
+			if desc == "" {
+				desc = pathItem.Put.Description
+			}
+			exBody := ""
+			if pathItem.Put.RequestBody != nil && pathItem.Put.RequestBody.Content != nil {
+				if jsonMedia, ok := pathItem.Put.RequestBody.Content["application/json"]; ok && jsonMedia.Schema != nil && jsonMedia.Schema.Example != nil {
+					exBody = h.formatExample(jsonMedia.Schema.Example)
+				}
+			}
+			endpoints = append(endpoints, endpointInfo{method: "PUT", path: path, description: desc, exampleBody: exBody})
+			availableMethods["PUT"] = true
+		}
+		if pathItem.Patch != nil {
+			desc := pathItem.Patch.Summary
+			if desc == "" {
+				desc = pathItem.Patch.Description
+			}
+			exBody := ""
+			if pathItem.Patch.RequestBody != nil && pathItem.Patch.RequestBody.Content != nil {
+				if jsonMedia, ok := pathItem.Patch.RequestBody.Content["application/json"]; ok && jsonMedia.Schema != nil && jsonMedia.Schema.Example != nil {
+					exBody = h.formatExample(jsonMedia.Schema.Example)
+				}
+			}
+			endpoints = append(endpoints, endpointInfo{method: "PATCH", path: path, description: desc, exampleBody: exBody})
+			availableMethods["PATCH"] = true
+		}
+		if pathItem.Delete != nil {
+			desc := pathItem.Delete.Summary
+			if desc == "" {
+				desc = pathItem.Delete.Description
+			}
+			endpoints = append(endpoints, endpointInfo{method: "DELETE", path: path, description: desc})
+			availableMethods["DELETE"] = true
+		}
+	}
+
+	// Sort endpoints by path, then method
+	sort.Slice(endpoints, func(i, j int) bool {
+		if endpoints[i].path != endpoints[j].path {
+			return endpoints[i].path < endpoints[j].path
+		}
+		return endpoints[i].method < endpoints[j].method
+	})
+
+	// Build endpoint buttons HTML
+	endpointButtonsHTML := ""
+	firstEndpointIdx := 0
+	if len(endpoints) > 0 {
+		endpointButtonsHTML = `<div class="form-group"><label>Select an Endpoint <span class="label-hint">(click to populate)</span></label><div class="endpoint-buttons">`
+		for idx, ep := range endpoints {
+			methodClass := strings.ToLower(ep.method)
+			title := ep.description
+			if title == "" {
+				title = ep.method + " " + ep.path
+			}
+			exampleAttr := ""
+			hasExample := ""
+			if ep.exampleBody != "" {
+				// Escape for HTML attribute
+				escaped := strings.ReplaceAll(ep.exampleBody, `"`, `&quot;`)
+				escaped = strings.ReplaceAll(escaped, "\n", "&#10;")
+				exampleAttr = fmt.Sprintf(` data-example="%s"`, escaped)
+				hasExample = " has-example"
+			}
+			// Escape description for data attribute
+			escapedDesc := strings.ReplaceAll(ep.description, `"`, `&quot;`)
+			activeClass := ""
+			if idx == firstEndpointIdx {
+				activeClass = " active"
+			}
+			endpointButtonsHTML += fmt.Sprintf(`<button type="button" class="endpoint-btn method-%s%s%s" data-method="%s" data-path="%s" data-desc="%s" title="%s"%s><span class="method-badge method-%s">%s</span> %s</button>`,
+				methodClass, hasExample, activeClass, ep.method, ep.path, escapedDesc, title, exampleAttr, methodClass, ep.method, ep.path)
+		}
+		endpointButtonsHTML += `</div></div>`
+	} else {
+		endpointButtonsHTML = `<div class="docs-callout warning" style="margin-bottom: 16px;"><strong>No documented endpoints available</strong><p style="margin-top: 8px;">The API administrator needs to configure routes with documentation before you can test them here.</p><p style="margin-top: 8px;"><a href="/docs/api-reference">View API Reference</a> | <a href="/portal">Get API Key</a></p></div>`
+	}
+
+	// Get default endpoint and example body
+	defaultEndpoint := ""
+	defaultMethod := "GET"
+	defaultExampleBody := ""
+	defaultDescription := ""
+	if len(endpoints) > 0 {
+		defaultEndpoint = endpoints[0].path
+		defaultMethod = endpoints[0].method
+		defaultExampleBody = endpoints[0].exampleBody
+		defaultDescription = endpoints[0].description
+	}
+
+	// Build method options - only show methods that have endpoints
+	methodOptionsHTML := ""
+	allMethods := []string{"GET", "POST", "PUT", "PATCH", "DELETE"}
+	for _, m := range allMethods {
+		if availableMethods[m] || len(endpoints) == 0 {
+			selected := ""
+			if m == defaultMethod {
+				selected = " selected"
+			}
+			methodOptionsHTML += fmt.Sprintf(`<option value="%s"%s>%s</option>`, m, selected, m)
+		}
+	}
+
+	// Escape default example body for textarea
+	escapedExampleBody := defaultExampleBody
+
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Try It - %s API</title>
-    <style>%s</style>
+    <style>%s
+.endpoint-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.endpoint-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border: 1px solid #e5e5e5; border-radius: 6px; background: #fff; cursor: pointer; font-size: 13px; font-family: ui-monospace, monospace; transition: all 0.15s ease; }
+.endpoint-btn:hover { border-color: #111; background: #f9f9f9; transform: translateY(-1px); }
+.endpoint-btn.active { border-color: #111; background: #111; color: #fff; }
+.endpoint-btn.active .method-badge { background: rgba(255,255,255,0.2); color: #fff; }
+.endpoint-btn.has-example::after { content: ''; width: 6px; height: 6px; background: #10b981; border-radius: 50%%; margin-left: 4px; }
+.label-hint { font-weight: 400; color: #888; font-size: 12px; }
+.endpoint-desc { font-size: 13px; color: #666; padding: 8px 12px; background: #f9f9f9; border-radius: 4px; margin-bottom: 16px; min-height: 20px; }
+.endpoint-desc:empty::before { content: 'Select an endpoint above to see its description'; color: #999; font-style: italic; }
+.validation-error { color: #dc2626; font-size: 12px; margin-top: 4px; display: none; }
+.validation-error.show { display: block; }
+.form-input.error { border-color: #dc2626; }
+.btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn { transition: all 0.15s ease; }
+.btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-secondary { background: #f3f4f6; color: #374151; border: 1px solid #e5e5e5; }
+.btn-secondary:hover:not(:disabled) { background: #e5e7eb; border-color: #d1d5db; }
+.btn-icon { display: inline-flex; align-items: center; gap: 6px; }
+.spinner { width: 14px; height: 14px; border: 2px solid transparent; border-top-color: currentColor; border-radius: 50%%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.response-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.response-header h3 { margin: 0; }
+.response-actions { display: flex; gap: 8px; }
+.response-tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+.response-tab { padding: 6px 12px; border: none; background: #e5e5e5; cursor: pointer; font-size: 13px; border-radius: 4px; }
+.response-tab.active { background: #111; color: white; }
+.response-content { display: none; }
+.response-content.active { display: block; }
+.curl-preview { background: #1e1e1e; color: #d4d4d4; padding: 12px; border-radius: 6px; font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all; margin-bottom: 16px; }
+.copy-feedback { position: fixed; bottom: 20px; right: 20px; background: #111; color: #fff; padding: 10px 16px; border-radius: 6px; font-size: 13px; opacity: 0; transition: opacity 0.2s ease; z-index: 1000; }
+.copy-feedback.show { opacity: 1; }
+</style>
 </head>
 <body>
     %s
@@ -1002,61 +1260,223 @@ func (h *DocsHandler) renderTryIt(baseURL string) string {
         </nav>
 
         <h1>Try It</h1>
-        <p class="docs-lead">Test API endpoints directly from your browser.</p>
+        <p class="docs-lead">Test API endpoints directly in your browser. Select an endpoint below and send a request.</p>
 
         <div class="try-it-console">
             <div class="try-it-form">
                 <div class="form-group">
-                    <label>API Key</label>
-                    <input type="password" id="apiKey" placeholder="Enter your API key" class="form-input">
+                    <label>API Key <span class="label-hint">(<a href="/portal" target="_blank">Get one here</a>)</span></label>
+                    <input type="password" id="apiKey" placeholder="Paste your API key here" class="form-input" autocomplete="off">
+                    <div class="validation-error" id="apiKeyError">API key is required to make requests</div>
                 </div>
+
+                %s
+
+                <div class="endpoint-desc" id="endpointDesc">%s</div>
 
                 <div class="form-row">
                     <div class="form-group" style="width: 120px;">
                         <label>Method</label>
-                        <select id="method" class="form-input">
-                            <option value="GET">GET</option>
-                            <option value="POST">POST</option>
-                            <option value="PUT">PUT</option>
-                            <option value="PATCH">PATCH</option>
-                            <option value="DELETE">DELETE</option>
-                        </select>
+                        <select id="method" class="form-input">%s</select>
                     </div>
 
                     <div class="form-group" style="flex: 1;">
                         <label>Endpoint</label>
-                        <input type="text" id="endpoint" placeholder="/your-endpoint" value="/" class="form-input">
+                        <input type="text" id="endpoint" placeholder="/endpoint" value="%s" class="form-input">
+                        <div class="validation-error" id="endpointError">Please enter an endpoint path</div>
                     </div>
                 </div>
 
-                <div class="form-group" id="bodyGroup">
-                    <label>Request Body (JSON)</label>
-                    <textarea id="requestBody" rows="6" class="form-input" placeholder='{"key": "value"}'></textarea>
+                <div class="form-group" id="bodyGroup"%s>
+                    <label>Request Body <span class="label-hint">(JSON format)</span></label>
+                    <textarea id="requestBody" rows="6" class="form-input" placeholder='{"key": "value"}'>%s</textarea>
+                    <div class="validation-error" id="bodyError">Invalid JSON format</div>
                 </div>
 
-                <button id="sendRequest" class="btn btn-primary">Send Request</button>
+                <div class="curl-preview" id="curlPreview"></div>
+
+                <div class="btn-row">
+                    <button id="sendRequest" class="btn btn-primary btn-icon">
+                        <span class="btn-text">Send Request</span>
+                    </button>
+                    <button id="copyCurl" class="btn btn-secondary btn-icon" title="Copy as cURL command">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                        Copy cURL
+                    </button>
+                </div>
             </div>
 
             <div class="try-it-response">
-                <h3>Response</h3>
+                <div class="response-header">
+                    <h3>Response</h3>
+                    <div class="response-actions">
+                        <button id="copyResponse" class="btn btn-sm btn-secondary btn-icon" style="display: none;">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                            Copy
+                        </button>
+                    </div>
+                </div>
                 <div class="response-meta" id="responseMeta"></div>
-                <pre class="response-body" id="responseBody">Click "Send Request" to see the response</pre>
+                <div class="response-tabs" id="responseTabs" style="display: none;">
+                    <button class="response-tab active" data-tab="body">Body</button>
+                    <button class="response-tab" data-tab="headers">Headers</button>
+                </div>
+                <div class="response-content active" id="responseBodyTab">
+                    <pre class="response-body" id="responseBody">Select an endpoint and click "Send Request" to see the response here.</pre>
+                </div>
+                <div class="response-content" id="responseHeadersTab">
+                    <pre class="response-body" id="responseHeaders"></pre>
+                </div>
             </div>
         </div>
     </main>
+    <div class="copy-feedback" id="copyFeedback">Copied to clipboard!</div>
     <script>
         const baseURL = '%s';
+        let lastResponseBody = '';
+        let lastResponseHeaders = '';
 
-        document.getElementById('sendRequest').addEventListener('click', async () => {
+        // Show copy feedback
+        function showCopyFeedback(message) {
+            const feedback = document.getElementById('copyFeedback');
+            feedback.textContent = message || 'Copied to clipboard!';
+            feedback.classList.add('show');
+            setTimeout(() => feedback.classList.remove('show'), 2000);
+        }
+
+        // Generate cURL command
+        function generateCurl() {
             const apiKey = document.getElementById('apiKey').value;
             const method = document.getElementById('method').value;
             const endpoint = document.getElementById('endpoint').value;
             const bodyInput = document.getElementById('requestBody').value;
 
-            if (!apiKey) {
-                alert('Please enter your API key');
-                return;
+            let curl = 'curl -X ' + method + ' "' + baseURL + endpoint + '"';
+            curl += ' \\\n  -H "Content-Type: application/json"';
+            if (apiKey) {
+                curl += ' \\\n  -H "X-API-Key: ' + apiKey + '"';
+            } else {
+                curl += ' \\\n  -H "X-API-Key: YOUR_API_KEY"';
             }
+
+            if (['POST', 'PUT', 'PATCH'].includes(method) && bodyInput.trim()) {
+                try {
+                    const formatted = JSON.stringify(JSON.parse(bodyInput));
+                    curl += " \\\n  -d '" + formatted + "'";
+                } catch (e) {
+                    curl += " \\\n  -d '" + bodyInput.replace(/'/g, "'\\''") + "'";
+                }
+            }
+
+            document.getElementById('curlPreview').textContent = curl;
+            return curl;
+        }
+
+        // Update cURL on any input change
+        ['apiKey', 'method', 'endpoint', 'requestBody'].forEach(id => {
+            document.getElementById(id).addEventListener('input', generateCurl);
+            document.getElementById(id).addEventListener('change', generateCurl);
+        });
+
+        // Handle endpoint button clicks
+        document.querySelectorAll('.endpoint-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                // Update active state
+                document.querySelectorAll('.endpoint-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+
+                // Update form fields
+                const method = btn.dataset.method;
+                const path = btn.dataset.path;
+                const example = btn.dataset.example;
+                const desc = btn.dataset.desc;
+
+                document.getElementById('method').value = method;
+                document.getElementById('endpoint').value = path;
+                document.getElementById('endpointDesc').textContent = desc || '';
+
+                // Clear validation errors
+                clearErrors();
+
+                // Update body field
+                const bodyGroup = document.getElementById('bodyGroup');
+                const bodyInput = document.getElementById('requestBody');
+                if (['POST', 'PUT', 'PATCH'].includes(method)) {
+                    bodyGroup.style.display = 'block';
+                    if (example) {
+                        bodyInput.value = example;
+                    } else {
+                        bodyInput.value = '';
+                    }
+                } else {
+                    bodyGroup.style.display = 'none';
+                    bodyInput.value = '';
+                }
+
+                generateCurl();
+            });
+        });
+
+        // Clear validation errors
+        function clearErrors() {
+            document.querySelectorAll('.validation-error').forEach(e => e.classList.remove('show'));
+            document.querySelectorAll('.form-input').forEach(e => e.classList.remove('error'));
+        }
+
+        // Show validation error
+        function showError(inputId, errorId) {
+            document.getElementById(inputId).classList.add('error');
+            document.getElementById(errorId).classList.add('show');
+        }
+
+        // Validate form
+        function validateForm() {
+            clearErrors();
+            let valid = true;
+
+            const apiKey = document.getElementById('apiKey').value.trim();
+            const endpoint = document.getElementById('endpoint').value.trim();
+            const method = document.getElementById('method').value;
+            const bodyInput = document.getElementById('requestBody').value.trim();
+
+            if (!apiKey) {
+                showError('apiKey', 'apiKeyError');
+                valid = false;
+            }
+
+            if (!endpoint) {
+                showError('endpoint', 'endpointError');
+                valid = false;
+            }
+
+            if (['POST', 'PUT', 'PATCH'].includes(method) && bodyInput) {
+                try {
+                    JSON.parse(bodyInput);
+                } catch (e) {
+                    showError('requestBody', 'bodyError');
+                    valid = false;
+                }
+            }
+
+            return valid;
+        }
+
+        // Send request
+        document.getElementById('sendRequest').addEventListener('click', async () => {
+            if (!validateForm()) return;
+
+            const apiKey = document.getElementById('apiKey').value;
+            const method = document.getElementById('method').value;
+            const endpoint = document.getElementById('endpoint').value;
+            const bodyInput = document.getElementById('requestBody').value;
+
+            const sendBtn = document.getElementById('sendRequest');
+            const btnText = sendBtn.querySelector('.btn-text');
+            const originalText = btnText.textContent;
+
+            // Show loading state
+            sendBtn.disabled = true;
+            btnText.innerHTML = '<span class="spinner"></span> Sending...';
 
             const options = {
                 method: method,
@@ -1067,19 +1487,14 @@ func (h *DocsHandler) renderTryIt(baseURL string) string {
             };
 
             if (['POST', 'PUT', 'PATCH'].includes(method) && bodyInput) {
-                try {
-                    options.body = JSON.stringify(JSON.parse(bodyInput));
-                } catch (e) {
-                    alert('Invalid JSON in request body');
-                    return;
-                }
+                options.body = JSON.stringify(JSON.parse(bodyInput));
             }
 
             const responseMeta = document.getElementById('responseMeta');
             const responseBody = document.getElementById('responseBody');
-
-            responseMeta.textContent = 'Loading...';
-            responseBody.textContent = '';
+            const responseHeaders = document.getElementById('responseHeaders');
+            const responseTabs = document.getElementById('responseTabs');
+            const copyResponseBtn = document.getElementById('copyResponse');
 
             try {
                 const startTime = performance.now();
@@ -1090,18 +1505,60 @@ func (h *DocsHandler) renderTryIt(baseURL string) string {
                 const statusClass = response.ok ? 'status-success' : 'status-error';
                 responseMeta.innerHTML = '<span class="' + statusClass + '">Status: ' + response.status + ' ' + response.statusText + '</span> | Time: ' + duration + 'ms';
 
+                // Show headers
+                let headersText = '';
+                response.headers.forEach((value, key) => {
+                    headersText += key + ': ' + value + '\n';
+                });
+                responseHeaders.textContent = headersText || '(no headers)';
+                lastResponseHeaders = headersText;
+
                 const text = await response.text();
                 try {
                     const data = JSON.parse(text);
-                    responseBody.textContent = JSON.stringify(data, null, 2);
+                    lastResponseBody = JSON.stringify(data, null, 2);
+                    responseBody.textContent = lastResponseBody;
                 } catch (e) {
-                    // Not JSON - show raw response
-                    responseBody.textContent = text || '(empty response)';
+                    lastResponseBody = text || '(empty response)';
+                    responseBody.textContent = lastResponseBody;
                 }
+
+                // Show tabs and copy button
+                responseTabs.style.display = 'flex';
+                copyResponseBtn.style.display = 'inline-flex';
             } catch (err) {
                 responseMeta.innerHTML = '<span class="status-error">Network Error</span>';
-                responseBody.textContent = 'Request failed: ' + err.message;
+                responseBody.textContent = 'Request failed: ' + err.message + '\n\nThis could be due to:\n• CORS restrictions\n• Network connectivity issues\n• Invalid endpoint';
+                lastResponseBody = '';
+                responseTabs.style.display = 'none';
+                copyResponseBtn.style.display = 'none';
+            } finally {
+                sendBtn.disabled = false;
+                btnText.textContent = originalText;
             }
+        });
+
+        // Response tab switching
+        document.querySelectorAll('.response-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.response-tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.response-content').forEach(c => c.classList.remove('active'));
+                tab.classList.add('active');
+                document.getElementById('response' + tab.dataset.tab.charAt(0).toUpperCase() + tab.dataset.tab.slice(1) + 'Tab').classList.add('active');
+            });
+        });
+
+        // Copy cURL
+        document.getElementById('copyCurl').addEventListener('click', () => {
+            const curl = generateCurl();
+            navigator.clipboard.writeText(curl).then(() => showCopyFeedback('cURL command copied!'));
+        });
+
+        // Copy response
+        document.getElementById('copyResponse').addEventListener('click', () => {
+            const activeTab = document.querySelector('.response-tab.active');
+            const content = activeTab.dataset.tab === 'headers' ? lastResponseHeaders : lastResponseBody;
+            navigator.clipboard.writeText(content).then(() => showCopyFeedback('Response copied!'));
         });
 
         // Show/hide body based on method
@@ -1112,10 +1569,46 @@ func (h *DocsHandler) renderTryIt(baseURL string) string {
             } else {
                 bodyGroup.style.display = 'none';
             }
+            generateCurl();
         });
+
+        // Clear error on input
+        document.querySelectorAll('.form-input').forEach(input => {
+            input.addEventListener('input', () => {
+                input.classList.remove('error');
+                const errorEl = input.parentElement.querySelector('.validation-error');
+                if (errorEl) errorEl.classList.remove('show');
+            });
+        });
+
+        // Initialize
+        generateCurl();
     </script>
 </body>
-</html>`, h.appName, docsCSS, h.renderDocsNav("try-it"), baseURL)
+</html>`, h.appName, docsCSS, h.renderDocsNav("try-it"),
+		endpointButtonsHTML,
+		defaultDescription,
+		methodOptionsHTML,
+		defaultEndpoint,
+		h.hiddenStyle(defaultMethod),
+		escapedExampleBody,
+		baseURL)
+}
+
+// selectedAttr returns " selected" if the values match, empty string otherwise
+func (h *DocsHandler) selectedAttr(current, option string) string {
+	if current == option {
+		return " selected"
+	}
+	return ""
+}
+
+// hiddenStyle returns style to hide body group for GET/DELETE methods
+func (h *DocsHandler) hiddenStyle(method string) string {
+	if method == "GET" || method == "DELETE" {
+		return ` style="display: none;"`
+	}
+	return ""
 }
 
 func (h *DocsHandler) renderDocsNav(active string) string {
