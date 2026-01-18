@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -10,12 +11,43 @@ import (
 	"github.com/artpar/apigate/domain/billing"
 	"github.com/artpar/apigate/domain/entitlement"
 	"github.com/artpar/apigate/domain/key"
+	"github.com/artpar/apigate/domain/settings"
 	"github.com/artpar/apigate/domain/usage"
 	"github.com/artpar/apigate/ports"
 )
 
 // Portal HTML templates - simple inline templates for the user portal.
 // These are separate from the admin templates to keep the portal lightweight.
+
+// =============================================================================
+// Custom Portal Settings Helpers
+// =============================================================================
+
+// getCustomPortalSetting returns a custom portal setting value or empty string.
+func (h *PortalHandler) getCustomPortalSetting(key string) string {
+	if h.settings == nil {
+		return ""
+	}
+	all, err := h.settings.GetAll(context.Background())
+	if err != nil {
+		return ""
+	}
+	return all.Get(key)
+}
+
+// getCustomPortalCSS returns custom portal CSS if configured, wrapped in a style tag.
+func (h *PortalHandler) getCustomPortalCSS() string {
+	customCSS := h.getCustomPortalSetting(settings.KeyCustomPortalCSS)
+	if customCSS == "" {
+		return ""
+	}
+	return fmt.Sprintf("<style>%s</style>", customCSS)
+}
+
+// getCustomPortalWelcome returns custom welcome HTML if configured.
+func (h *PortalHandler) getCustomPortalWelcome() string {
+	return h.getCustomPortalSetting(settings.KeyCustomPortalWelcome)
+}
 
 // renderLandingPage renders the public landing page
 func (h *PortalHandler) renderLandingPage() string {
@@ -481,6 +513,13 @@ func (h *PortalHandler) renderDashboardPage(user *PortalUser, keyCount int, requ
         </div>`, planName, labels.UsageUnitPlural, rateLimitPerMinute, labels.RateLimitLabel)
 	}
 
+	// Get custom portal CSS and welcome HTML
+	customCSS := h.getCustomPortalCSS()
+	customWelcome := h.getCustomPortalWelcome()
+	if customWelcome != "" {
+		customWelcome = fmt.Sprintf(`<div class="custom-welcome">%s</div>`, customWelcome)
+	}
+
 	return fmt.Sprintf(`
 <!DOCTYPE html>
 <html lang="en">
@@ -489,6 +528,7 @@ func (h *PortalHandler) renderDashboardPage(user *PortalUser, keyCount int, requ
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard - %s</title>
     <style>%s</style>
+    %s
 </head>
 <body>
     %s
@@ -497,6 +537,7 @@ func (h *PortalHandler) renderDashboardPage(user *PortalUser, keyCount int, requ
             <h1>Dashboard</h1>
             <p>Welcome back, %s!</p>
         </div>
+        %s
         %s
         %s
         <div class="stats-grid">
@@ -533,7 +574,7 @@ func (h *PortalHandler) renderDashboardPage(user *PortalUser, keyCount int, requ
         </div>
     </main>
 </body>
-</html>`, h.appName, portalCSS, h.renderPortalNav(user), user.Name, quotaSection, gettingStartedSection, keyCount, requestCount, labels.QuotaLabel, entitlementsSection)
+</html>`, h.appName, portalCSS, customCSS, h.renderPortalNav(user), user.Name, customWelcome, quotaSection, gettingStartedSection, keyCount, requestCount, labels.QuotaLabel, entitlementsSection)
 }
 
 func (h *PortalHandler) renderAPIKeysPage(user *PortalUser, keys []key.Key, revokedMsg bool) string {

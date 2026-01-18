@@ -1409,6 +1409,18 @@ func (h *Handler) SettingsPage(w http.ResponseWriter, r *http.Request) {
 			PaddleWebhookSecret  string
 			LemonAPIKey          string
 			LemonWebhookSecret   string
+			// Customization settings
+			CustomDocsHomeHTML     string
+			CustomDocsCSS          string
+			CustomPortalWelcome    string
+			CustomPortalCSS        string
+			CustomLogoURL          string
+			CustomPrimaryColor     string
+			CustomSupportEmail     string
+			CustomSupportURL       string
+			CustomFooterHTML       string
+			CustomDocsHeroTitle    string
+			CustomDocsHeroSubtitle string
 		}
 		Success string
 		Error   string
@@ -1448,6 +1460,19 @@ func (h *Handler) SettingsPage(w http.ResponseWriter, r *http.Request) {
 	data.Settings.PaddleWebhookSecret = maskSecret(allSettings.Get(settings.KeyPaymentPaddleWebhookSecret))
 	data.Settings.LemonAPIKey = maskSecret(allSettings.Get(settings.KeyPaymentLemonAPIKey))
 	data.Settings.LemonWebhookSecret = maskSecret(allSettings.Get(settings.KeyPaymentLemonWebhookSecret))
+
+	// Customization settings
+	data.Settings.CustomDocsHomeHTML = allSettings.Get(settings.KeyCustomDocsHomeHTML)
+	data.Settings.CustomDocsCSS = allSettings.Get(settings.KeyCustomDocsCSS)
+	data.Settings.CustomPortalWelcome = allSettings.Get(settings.KeyCustomPortalWelcome)
+	data.Settings.CustomPortalCSS = allSettings.Get(settings.KeyCustomPortalCSS)
+	data.Settings.CustomLogoURL = allSettings.Get(settings.KeyCustomLogoURL)
+	data.Settings.CustomPrimaryColor = allSettings.Get(settings.KeyCustomPrimaryColor)
+	data.Settings.CustomSupportEmail = allSettings.Get(settings.KeyCustomSupportEmail)
+	data.Settings.CustomSupportURL = allSettings.Get(settings.KeyCustomSupportURL)
+	data.Settings.CustomFooterHTML = allSettings.Get(settings.KeyCustomFooterHTML)
+	data.Settings.CustomDocsHeroTitle = allSettings.Get(settings.KeyCustomDocsHeroTitle)
+	data.Settings.CustomDocsHeroSubtitle = allSettings.Get(settings.KeyCustomDocsHeroSubtitle)
 
 	// Check for success/error messages in query params
 	data.Success = r.URL.Query().Get("success")
@@ -1539,6 +1564,24 @@ func (h *Handler) SettingsUpdate(w http.ResponseWriter, r *http.Request) {
 		if value != "" && !strings.Contains(value, "...") {
 			settingsToSave[key] = value
 		}
+	}
+
+	// Customization settings - save as-is (can be empty to clear)
+	customizationSettings := map[string]string{
+		settings.KeyCustomDocsHomeHTML:     r.FormValue("custom_docs_home_html"),
+		settings.KeyCustomDocsCSS:          r.FormValue("custom_docs_css"),
+		settings.KeyCustomPortalWelcome:    r.FormValue("custom_portal_welcome"),
+		settings.KeyCustomPortalCSS:        r.FormValue("custom_portal_css"),
+		settings.KeyCustomLogoURL:          strings.TrimSpace(r.FormValue("custom_logo_url")),
+		settings.KeyCustomPrimaryColor:     strings.TrimSpace(r.FormValue("custom_primary_color")),
+		settings.KeyCustomSupportEmail:     strings.TrimSpace(r.FormValue("custom_support_email")),
+		settings.KeyCustomSupportURL:       strings.TrimSpace(r.FormValue("custom_support_url")),
+		settings.KeyCustomFooterHTML:       r.FormValue("custom_footer_html"),
+		settings.KeyCustomDocsHeroTitle:    strings.TrimSpace(r.FormValue("custom_docs_hero_title")),
+		settings.KeyCustomDocsHeroSubtitle: strings.TrimSpace(r.FormValue("custom_docs_hero_subtitle")),
+	}
+	for key, value := range customizationSettings {
+		settingsToSave[key] = value
 	}
 
 	for key, value := range settingsToSave {

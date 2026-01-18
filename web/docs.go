@@ -2,6 +2,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/artpar/apigate/core/openapi"
+	"github.com/artpar/apigate/domain/settings"
 	"github.com/artpar/apigate/ports"
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog"
@@ -155,10 +157,104 @@ func (h *DocsHandler) generateOpenAPISpec(r *http.Request) *openapi.Spec {
 }
 
 // =============================================================================
+// Customization Helpers
+// =============================================================================
+
+// getCustomSetting returns a custom setting value or empty string if not set.
+func (h *DocsHandler) getCustomSetting(key string) string {
+	if h.settings == nil {
+		return ""
+	}
+	all, err := h.settings.GetAll(context.Background())
+	if err != nil {
+		return ""
+	}
+	return all.Get(key)
+}
+
+// getCustomCSS returns custom CSS if configured, wrapped in a style tag.
+func (h *DocsHandler) getCustomCSS() string {
+	customCSS := h.getCustomSetting(settings.KeyCustomDocsCSS)
+	if customCSS == "" {
+		return ""
+	}
+	return fmt.Sprintf("<style>%s</style>", customCSS)
+}
+
+// getCustomFooter returns custom footer HTML if configured.
+func (h *DocsHandler) getCustomFooter() string {
+	return h.getCustomSetting(settings.KeyCustomFooterHTML)
+}
+
+// getPrimaryColor returns the custom primary color or default.
+func (h *DocsHandler) getPrimaryColor() string {
+	color := h.getCustomSetting(settings.KeyCustomPrimaryColor)
+	if color == "" {
+		return "#111"
+	}
+	return color
+}
+
+// getLogoURL returns custom logo URL if configured.
+func (h *DocsHandler) getLogoURL() string {
+	return h.getCustomSetting(settings.KeyCustomLogoURL)
+}
+
+// =============================================================================
 // Template Rendering
 // =============================================================================
 
 func (h *DocsHandler) renderDocsHome() string {
+	// Check for full custom HTML override
+	customHTML := h.getCustomSetting(settings.KeyCustomDocsHomeHTML)
+	if customHTML != "" {
+		// Replace template variables in custom HTML
+		customHTML = strings.ReplaceAll(customHTML, "{{APP_NAME}}", h.appName)
+		customHTML = strings.ReplaceAll(customHTML, "{{NAV}}", h.renderDocsNav("home"))
+		customHTML = strings.ReplaceAll(customHTML, "{{CUSTOM_CSS}}", h.getCustomCSS())
+		customHTML = strings.ReplaceAll(customHTML, "{{FOOTER}}", h.getCustomFooter())
+		customHTML = strings.ReplaceAll(customHTML, "{{PRIMARY_COLOR}}", h.getPrimaryColor())
+		customHTML = strings.ReplaceAll(customHTML, "{{LOGO_URL}}", h.getLogoURL())
+		return customHTML
+	}
+
+	// Use custom hero title/subtitle if configured
+	heroTitle := h.getCustomSetting(settings.KeyCustomDocsHeroTitle)
+	if heroTitle == "" {
+		heroTitle = "API Documentation"
+	}
+	heroSubtitle := h.getCustomSetting(settings.KeyCustomDocsHeroSubtitle)
+	if heroSubtitle == "" {
+		heroSubtitle = "Everything you need to integrate with the API"
+	}
+
+	// Get custom footer
+	footer := h.getCustomFooter()
+	if footer != "" {
+		footer = fmt.Sprintf("<footer class=\"docs-footer\">%s</footer>", footer)
+	}
+
+	// Build custom CSS with primary color override
+	primaryColor := h.getPrimaryColor()
+	colorCSS := ""
+	if primaryColor != "#111" {
+		colorCSS = fmt.Sprintf(`
+<style>
+:root { --primary-color: %s; }
+.docs-header { background: %s; }
+.btn { background: %s; }
+.btn:hover { background: %s; filter: brightness(1.2); }
+.docs-nav a.active { color: white; }
+</style>`, primaryColor, primaryColor, primaryColor, primaryColor)
+	}
+
+	// Get logo
+	logoHTML := h.appName
+	logoURL := h.getLogoURL()
+	if logoURL != "" {
+		logoHTML = fmt.Sprintf(`<img src="%s" alt="%s" style="height: 24px;">`, logoURL, h.appName)
+	}
+
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -166,13 +262,15 @@ func (h *DocsHandler) renderDocsHome() string {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Documentation - %s</title>
     <style>%s</style>
+    %s
+    %s
 </head>
 <body>
     %s
     <main class="docs-content">
         <div class="docs-hero">
-            <h1>API Documentation</h1>
-            <p>Everything you need to integrate with the API</p>
+            <h1>%s</h1>
+            <p>%s</p>
         </div>
 
         <div class="docs-cards">
@@ -207,8 +305,12 @@ func (h *DocsHandler) renderDocsHome() string {
             </a>
         </div>
     </main>
+    %s
 </body>
-</html>`, h.appName, docsCSS, h.renderDocsNav("home"))
+</html>`, h.appName, docsCSS, colorCSS, h.getCustomCSS(),
+		h.renderDocsNavWithLogo("home", logoHTML),
+		heroTitle, heroSubtitle,
+		footer)
 }
 
 func (h *DocsHandler) renderQuickstart(baseURL string, spec *openapi.Spec) string {
@@ -1634,6 +1736,33 @@ func (h *DocsHandler) renderDocsNav(active string) string {
 		navItems += fmt.Sprintf(`<a href="%s" class="%s">%s</a>`, link.path, activeClass, link.label)
 	}
 
+	return h.renderDocsNavWithLogo(active, h.appName)
+}
+
+// renderDocsNavWithLogo renders the docs navigation with a custom logo/text.
+func (h *DocsHandler) renderDocsNavWithLogo(active string, logoHTML string) string {
+	links := []struct {
+		path  string
+		label string
+		key   string
+	}{
+		{"/docs", "Home", "home"},
+		{"/docs/quickstart", "Quickstart", "quickstart"},
+		{"/docs/authentication", "Authentication", "authentication"},
+		{"/docs/api-reference", "API Reference", "api-reference"},
+		{"/docs/examples", "Examples", "examples"},
+		{"/docs/try-it", "Try It", "try-it"},
+	}
+
+	navItems := ""
+	for _, link := range links {
+		activeClass := ""
+		if link.key == active {
+			activeClass = "active"
+		}
+		navItems += fmt.Sprintf(`<a href="%s" class="%s">%s</a>`, link.path, activeClass, link.label)
+	}
+
 	return fmt.Sprintf(`
     <header class="docs-header">
         <div class="docs-header-content">
@@ -1641,7 +1770,7 @@ func (h *DocsHandler) renderDocsNav(active string) string {
             <nav class="docs-nav">%s</nav>
             <a href="/portal" class="btn btn-sm">Get API Key</a>
         </div>
-    </header>`, h.appName, navItems)
+    </header>`, logoHTML, navItems)
 }
 
 // =============================================================================

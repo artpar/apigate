@@ -71,6 +71,114 @@
                 </div>
             </div>
 
+            <!-- Branding & Customization -->
+            <div class="card-body" style="border-bottom: 1px solid #e5e7eb;">
+                <h3 class="card-title mb-4">Branding & Customization</h3>
+                <p class="text-muted mb-4">Customize the look of your documentation and portal pages.</p>
+                <div class="form">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                        <div class="form-group">
+                            <label class="form-label" for="custom_logo_url">Logo URL</label>
+                            <input type="url" id="custom_logo_url" name="custom_logo_url" class="form-input" value="{{.Settings.CustomLogoURL}}" placeholder="https://example.com/logo.png">
+                            <p class="form-hint">URL to your logo image</p>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="custom_primary_color">Primary Color</label>
+                            <div style="display: flex; gap: 8px; align-items: center;">
+                                <input type="color" id="custom_primary_color_picker" value="{{if .Settings.CustomPrimaryColor}}{{.Settings.CustomPrimaryColor}}{{else}}#111111{{end}}" style="width: 40px; height: 38px; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer;" onchange="document.getElementById('custom_primary_color').value = this.value">
+                                <input type="text" id="custom_primary_color" name="custom_primary_color" class="form-input" value="{{.Settings.CustomPrimaryColor}}" placeholder="#111111" style="flex: 1;" oninput="document.getElementById('custom_primary_color_picker').value = this.value || '#111111'">
+                            </div>
+                            <p class="form-hint">Brand color for buttons and links</p>
+                        </div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                        <div class="form-group">
+                            <label class="form-label" for="custom_support_email">Support Email</label>
+                            <input type="email" id="custom_support_email" name="custom_support_email" class="form-input" value="{{.Settings.CustomSupportEmail}}" placeholder="support@example.com">
+                            <p class="form-hint">Shown in docs footer</p>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="custom_support_url">Support URL</label>
+                            <input type="url" id="custom_support_url" name="custom_support_url" class="form-input" value="{{.Settings.CustomSupportURL}}" placeholder="https://support.example.com">
+                            <p class="form-hint">Link to your support docs</p>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="custom_docs_hero_title">Docs Hero Title</label>
+                        <input type="text" id="custom_docs_hero_title" name="custom_docs_hero_title" class="form-input" value="{{.Settings.CustomDocsHeroTitle}}" placeholder="Welcome to Our API">
+                        <p class="form-hint">Main heading on documentation home page</p>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="custom_docs_hero_subtitle">Docs Hero Subtitle</label>
+                        <input type="text" id="custom_docs_hero_subtitle" name="custom_docs_hero_subtitle" class="form-input" value="{{.Settings.CustomDocsHeroSubtitle}}" placeholder="Everything you need to integrate with our API">
+                        <p class="form-hint">Subheading below the main title</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Advanced HTML/CSS Customization -->
+            <div class="card-body" style="border-bottom: 1px solid #e5e7eb;">
+                <h3 class="card-title mb-4">Advanced Customization</h3>
+                <p class="text-muted mb-4">Edit HTML and CSS for full control over your pages. Use template variables like <code>{{`{{APP_NAME}}`}}</code>, <code>{{`{{NAV}}`}}</code>, <code>{{`{{CUSTOM_CSS}}`}}</code>, <code>{{`{{FOOTER}}`}}</code>.</p>
+
+                <div class="form-group">
+                    <label class="form-label" for="custom_docs_css">Custom Docs CSS</label>
+                    <textarea id="custom_docs_css" name="custom_docs_css" class="form-input" rows="6" style="font-family: monospace; font-size: 13px;" placeholder="/* Custom styles for documentation pages */
+.hero-title { color: #your-brand-color; }
+.btn-primary { background: #your-color; }">{{.Settings.CustomDocsCSS}}</textarea>
+                    <p class="form-hint">CSS injected into all documentation pages</p>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="custom_portal_css">Custom Portal CSS</label>
+                    <textarea id="custom_portal_css" name="custom_portal_css" class="form-input" rows="6" style="font-family: monospace; font-size: 13px;" placeholder="/* Custom styles for portal pages */
+.sidebar { background: #your-color; }">{{.Settings.CustomPortalCSS}}</textarea>
+                    <p class="form-hint">CSS injected into all customer portal pages</p>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="custom_footer_html">Custom Footer HTML</label>
+                    <textarea id="custom_footer_html" name="custom_footer_html" class="form-input" rows="4" style="font-family: monospace; font-size: 13px;" placeholder="<p>© 2024 Your Company. <a href='/terms'>Terms</a> | <a href='/privacy'>Privacy</a></p>">{{.Settings.CustomFooterHTML}}</textarea>
+                    <p class="form-hint">Footer HTML shown on docs pages</p>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="custom_portal_welcome">Custom Portal Welcome HTML</label>
+                    <textarea id="custom_portal_welcome" name="custom_portal_welcome" class="form-input" rows="6" style="font-family: monospace; font-size: 13px;" placeholder="<div class='welcome-message'>
+  <h2>Welcome to the Developer Portal</h2>
+  <p>Get started by creating an API key.</p>
+</div>">{{.Settings.CustomPortalWelcome}}</textarea>
+                    <p class="form-hint">Welcome section HTML on portal dashboard</p>
+                </div>
+
+                <details style="margin-top: 16px;">
+                    <summary style="cursor: pointer; color: #6b7280; font-size: 14px;">
+                        <strong>Full HTML Override (Advanced)</strong> - Replace entire docs home page
+                    </summary>
+                    <div style="margin-top: 12px;">
+                        <div class="form-group">
+                            <label class="form-label" for="custom_docs_home_html">Full Docs Home HTML</label>
+                            <textarea id="custom_docs_home_html" name="custom_docs_home_html" class="form-input" rows="12" style="font-family: monospace; font-size: 13px;" placeholder="<!DOCTYPE html>
+<html>
+<head>
+  <title>{{`{{APP_NAME}}`}} - API Documentation</title>
+  <style>/* Your CSS here */</style>
+  {{`{{CUSTOM_CSS}}`}}
+</head>
+<body>
+  {{`{{NAV}}`}}
+  <main>
+    <h1>Your Custom Content</h1>
+  </main>
+  {{`{{FOOTER}}`}}
+</body>
+</html>">{{.Settings.CustomDocsHomeHTML}}</textarea>
+                            <p class="form-hint">Complete HTML for docs home page. When set, overrides all other doc home settings.</p>
+                        </div>
+                    </div>
+                </details>
+            </div>
+
             <div class="card-body">
                 <button type="submit" class="btn btn-primary">Save Settings</button>
             </div>

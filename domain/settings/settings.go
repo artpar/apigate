@@ -76,6 +76,19 @@ const (
 	KeyPortalBaseURL = "portal.base_url"
 	KeyPortalAppName = "portal.app_name"
 
+	// Customization settings (HTML/CSS for branding)
+	KeyCustomDocsHomeHTML     = "custom.docs_home_html"      // Full HTML override for docs home page
+	KeyCustomDocsCSS          = "custom.docs_css"            // Custom CSS injected into all docs pages
+	KeyCustomPortalWelcome    = "custom.portal_welcome_html" // Custom welcome section HTML for portal
+	KeyCustomPortalCSS        = "custom.portal_css"          // Custom CSS injected into all portal pages
+	KeyCustomLogoURL          = "custom.logo_url"            // Custom logo URL
+	KeyCustomPrimaryColor     = "custom.primary_color"       // Primary brand color (hex)
+	KeyCustomSupportEmail     = "custom.support_email"       // Support email shown in docs/portal
+	KeyCustomSupportURL       = "custom.support_url"         // Support URL/docs link
+	KeyCustomFooterHTML       = "custom.footer_html"         // Custom footer HTML
+	KeyCustomDocsHeroTitle    = "custom.docs_hero_title"     // Custom docs hero title
+	KeyCustomDocsHeroSubtitle = "custom.docs_hero_subtitle"  // Custom docs hero subtitle
+
 	// Email settings
 	KeyEmailProvider     = "email.provider" // smtp, sendgrid, ses, postmark, none
 	KeyEmailFromAddress  = "email.from_address"
