@@ -19,6 +19,12 @@ import (
 
 // renderLandingPage renders the public landing page
 func (h *PortalHandler) renderLandingPage() string {
+	// Determine button text based on setup status
+	adminButtonText := "Get Started"
+	adminButtonHref := "/login"
+	if h.isSetup != nil && h.isSetup() {
+		adminButtonText = "Admin Dashboard"
+	}
 	return fmt.Sprintf(`
 <!DOCTYPE html>
 <html lang="en">
@@ -107,14 +113,14 @@ func (h *PortalHandler) renderLandingPage() string {
     <section class="seller-section">
         <h3>Are you an API provider?</h3>
         <p>Monetize your API with usage-based billing, rate limiting, and customer management. Self-hosted and open source.</p>
-        <a href="/login" class="btn-admin">Admin Dashboard</a>
+        <a href="%s" class="btn-admin">%s</a>
     </section>
 
     <footer class="footer">
         <p>%s</p>
     </footer>
 </body>
-</html>`, h.appName, h.appName, h.appName)
+</html>`, h.appName, h.appName, adminButtonHref, adminButtonText, h.appName)
 }
 
 func (h *PortalHandler) renderSignupPage(name, email string, errors map[string]string) string {
@@ -682,6 +688,49 @@ func (h *PortalHandler) renderKeyCreatedPage(w http.ResponseWriter, r *http.Requ
 	}
 	baseURL := fmt.Sprintf("%s://%s", scheme, r.Host)
 
+	// Find a real documented endpoint to use as an example
+	exampleEndpoint := "/your-endpoint"
+	exampleMethod := "GET"
+	helpText := `<p style="margin: 12px 0 0 0; color: #6c757d; font-size: 13px;">Replace <code style="background: #e9ecef; padding: 2px 6px; border-radius: 4px;">your-endpoint</code> with the API path you want to call.</p>`
+
+	if h.openAPIService != nil {
+		spec := h.openAPIService.GetCustomerSpec(r.Context(), baseURL)
+		if spec != nil {
+			// Look for a concrete endpoint (not a wildcard) to use as an example
+			for path, pathItem := range spec.Paths {
+				// Skip wildcard/proxy routes
+				if strings.Contains(path, "{path}") || strings.Contains(path, "*") {
+					continue
+				}
+
+				// Prefer GET endpoints for examples
+				if pathItem.Get != nil {
+					exampleEndpoint = path
+					exampleMethod = "GET"
+					break
+				}
+				// Fall back to POST
+				if pathItem.Post != nil {
+					exampleEndpoint = path
+					exampleMethod = "POST"
+				}
+			}
+
+			// Update help text based on whether we found a real endpoint
+			if exampleEndpoint != "/your-endpoint" {
+				helpText = fmt.Sprintf(`<p style="margin: 12px 0 0 0; color: #6c757d; font-size: 13px;">This example uses the <code style="background: #e9ecef; padding: 2px 6px; border-radius: 4px;">%s %s</code> endpoint. <a href="/docs/api-reference">See all available endpoints →</a></p>`, exampleMethod, exampleEndpoint)
+			} else {
+				helpText = `<p style="margin: 12px 0 0 0; color: #6c757d; font-size: 13px;">Check the <a href="/docs/api-reference">API Reference</a> for available endpoints.</p>`
+			}
+		}
+	}
+
+	// Build the curl example based on method
+	curlExample := fmt.Sprintf(`curl -H "X-API-Key: <span style="color: #ce9178;">%s</span>" \`, rawKey)
+	if exampleMethod == "POST" {
+		curlExample = fmt.Sprintf(`curl -X POST -H "X-API-Key: <span style="color: #ce9178;">%s</span>" \`, rawKey)
+	}
+
 	html := fmt.Sprintf(`
 <!DOCTYPE html>
 <html lang="en">
@@ -715,10 +764,10 @@ func (h *PortalHandler) renderKeyCreatedPage(w http.ResponseWriter, r *http.Requ
                 <p style="margin: 0 0 12px 0; color: #6c757d; font-size: 14px;">Include your API key in the <code style="background: #e9ecef; padding: 2px 6px; border-radius: 4px;">X-API-Key</code> header with every request:</p>
                 <div style="background: #1e1e1e; color: #d4d4d4; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 13px; overflow-x: auto;">
                     <div style="color: #6a9955;">## Example request with curl</div>
-                    <div>curl -H "X-API-Key: <span style="color: #ce9178;">%s</span>" \</div>
-                    <div style="padding-left: 20px;">%s/your-endpoint</div>
+                    <div>%s</div>
+                    <div style="padding-left: 20px;">%s%s</div>
                 </div>
-                <p style="margin: 12px 0 0 0; color: #6c757d; font-size: 13px;">Replace <code style="background: #e9ecef; padding: 2px 6px; border-radius: 4px;">your-endpoint</code> with the API path you want to call.</p>
+                %s
             </div>
 
             <div style="margin-top: 20px;">
@@ -727,7 +776,7 @@ func (h *PortalHandler) renderKeyCreatedPage(w http.ResponseWriter, r *http.Requ
         </div>
     </main>
 </body>
-</html>`, h.appName, portalCSS, h.renderPortalNav(user), displayName, rawKey, rawKey, baseURL)
+</html>`, h.appName, portalCSS, h.renderPortalNav(user), displayName, rawKey, curlExample, baseURL, exampleEndpoint, helpText)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(html))

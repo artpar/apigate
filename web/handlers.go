@@ -2163,10 +2163,20 @@ func (h *Handler) SetupStep(w http.ResponseWriter, r *http.Request) {
 
 // SetupStepSubmit handles setup step submission.
 func (h *Handler) SetupStepSubmit(w http.ResponseWriter, r *http.Request) {
-	// If already set up, redirect to dashboard
+	// Check for active setup session
+	highestCompleted := -1
+	if cookie, err := r.Cookie("setup_step"); err == nil {
+		highestCompleted, _ = strconv.Atoi(cookie.Value)
+	}
+
+	// If already set up AND not in an active setup session, redirect to dashboard
 	if h.isSetup != nil && h.isSetup() {
-		http.Redirect(w, r, "/dashboard", http.StatusFound)
-		return
+		if highestCompleted < 0 || highestCompleted >= 3 {
+			// No active setup session, redirect to dashboard
+			http.Redirect(w, r, "/dashboard", http.StatusFound)
+			return
+		}
+		// Active setup session - allow continuing
 	}
 
 	step, _ := strconv.Atoi(chi.URLParam(r, "step"))
@@ -2298,11 +2308,11 @@ func (h *Handler) SetupStepSubmit(w http.ResponseWriter, r *http.Request) {
 
 		now := time.Now().UTC()
 		user := ports.User{
-			ID:           "admin",
+			ID:           fmt.Sprintf("admin_%d", time.Now().UnixNano()),
 			Name:         name,
 			Email:        email,
 			PasswordHash: passwordHash,
-			PlanID:       "free", // Default plan; will be updated in step 2 if custom plan created
+			PlanID:       "admin", // Admin users have the special "admin" plan
 			Status:       "active",
 			CreatedAt:    now,
 			UpdatedAt:    now,
@@ -2420,11 +2430,15 @@ func (h *Handler) SetupStepSubmit(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Update admin user's plan to the newly created plan (ISSUE-011 fix)
-		adminUser, err := h.users.Get(r.Context(), "admin")
-		if err == nil {
-			adminUser.PlanID = planID
-			adminUser.UpdatedAt = now
-			_ = h.users.Update(r.Context(), adminUser)
+		// Get admin user ID from JWT claims (set in step 1)
+		claims := getClaims(r.Context())
+		if claims != nil {
+			adminUser, err := h.users.Get(r.Context(), claims.UserID)
+			if err == nil {
+				adminUser.PlanID = planID
+				adminUser.UpdatedAt = now
+				_ = h.users.Update(r.Context(), adminUser)
+			}
 		}
 
 		// Track step completion for sequence validation

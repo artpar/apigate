@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/artpar/apigate/adapters/auth"
+	"github.com/artpar/apigate/core/openapi"
 	"github.com/artpar/apigate/core/terminology"
 	domainAuth "github.com/artpar/apigate/domain/auth"
 	"github.com/artpar/apigate/domain/billing"
@@ -41,6 +42,8 @@ type PortalHandler struct {
 	hasher           ports.Hasher
 	idGen            ports.IDGenerator
 	payment          ports.PaymentProvider
+	openAPIService   *openapi.Service
+	isSetup          func() bool
 
 	// Portal-specific settings
 	baseURL string
@@ -67,6 +70,8 @@ type PortalDeps struct {
 	Hasher           ports.Hasher
 	IDGen            ports.IDGenerator
 	Payment          ports.PaymentProvider
+	OpenAPIService   *openapi.Service
+	IsSetup          func() bool
 	JWTSecret        string
 	BaseURL          string
 	AppName          string
@@ -99,6 +104,8 @@ func NewPortalHandler(deps PortalDeps) (*PortalHandler, error) {
 		hasher:           deps.Hasher,
 		idGen:            deps.IDGen,
 		payment:          deps.Payment,
+		openAPIService:   deps.OpenAPIService,
+		isSetup:          deps.IsSetup,
 		baseURL:          deps.BaseURL,
 		appName:          appName,
 	}, nil

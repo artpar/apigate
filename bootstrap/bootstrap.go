@@ -420,6 +420,11 @@ func (a *App) initHTTPServer() error {
 			Hasher:           bcryptHasher,
 			IDGen:            deps.IDGen,
 			Payment:          paymentProvider,
+			OpenAPIService:   openAPIService,
+			IsSetup: func() bool {
+				users, err := deps.Users.List(context.Background(), 1, 0)
+				return err == nil && len(users) > 0
+			},
 			JWTSecret:        s.Get(settings.KeyAuthJWTSecret),
 			BaseURL:          s.Get(settings.KeyPortalBaseURL),
 			AppName:          s.GetOrDefault(settings.KeyPortalAppName, "APIGate"),

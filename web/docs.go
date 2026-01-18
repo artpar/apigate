@@ -73,8 +73,9 @@ func (h *DocsHandler) DocsHome(w http.ResponseWriter, r *http.Request) {
 // QuickstartPage renders the quickstart guide.
 func (h *DocsHandler) QuickstartPage(w http.ResponseWriter, r *http.Request) {
 	baseURL := h.getBaseURL(r)
+	spec := h.generateOpenAPISpec(r)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(h.renderQuickstart(baseURL)))
+	w.Write([]byte(h.renderQuickstart(baseURL, spec)))
 }
 
 // AuthenticationPage renders the authentication documentation.
@@ -208,7 +209,57 @@ func (h *DocsHandler) renderDocsHome() string {
 </html>`, h.appName, docsCSS, h.renderDocsNav("home"))
 }
 
-func (h *DocsHandler) renderQuickstart(baseURL string) string {
+func (h *DocsHandler) renderQuickstart(baseURL string, spec *openapi.Spec) string {
+	// Find a real documented endpoint to use as an example
+	exampleEndpoint := "/your-endpoint"
+	exampleMethod := "GET"
+	exampleDescription := ""
+
+	// Look for a concrete endpoint (not a wildcard) to use as an example
+	for path, pathItem := range spec.Paths {
+		// Skip wildcard/proxy routes
+		if strings.Contains(path, "{path}") || strings.Contains(path, "*") {
+			continue
+		}
+
+		// Prefer GET endpoints for examples
+		if pathItem.Get != nil {
+			exampleEndpoint = path
+			exampleMethod = "GET"
+			if pathItem.Get.Summary != "" {
+				exampleDescription = pathItem.Get.Summary
+			} else if pathItem.Get.Description != "" {
+				exampleDescription = pathItem.Get.Description
+			}
+			break
+		}
+		// Fall back to other methods
+		if pathItem.Post != nil {
+			exampleEndpoint = path
+			exampleMethod = "POST"
+			if pathItem.Post.Summary != "" {
+				exampleDescription = pathItem.Post.Summary
+			}
+		}
+	}
+
+	// Build endpoint info section
+	endpointInfo := ""
+	if exampleEndpoint != "/your-endpoint" {
+		endpointInfo = fmt.Sprintf(`
+            <div class="docs-callout info">
+                <strong>Example Endpoint:</strong> <code>%s %s</code>
+                <p style="margin-top: 4px; margin-bottom: 0;">%s</p>
+                <p style="margin-top: 8px; margin-bottom: 0;"><a href="/docs/api-reference">See all available endpoints →</a></p>
+            </div>`, exampleMethod, exampleEndpoint, exampleDescription)
+	} else {
+		endpointInfo = `
+            <div class="docs-callout warning">
+                <strong>No endpoints documented yet.</strong>
+                <p style="margin-top: 4px; margin-bottom: 0;">Check the <a href="/docs/api-reference">API Reference</a> for available endpoints, or contact the API provider for documentation.</p>
+            </div>`
+	}
+
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -242,18 +293,20 @@ func (h *DocsHandler) renderQuickstart(baseURL string) string {
             <h2>Step 2: Make Your First Request</h2>
             <p>Use your API key to authenticate requests. Include it in the <code>X-API-Key</code> header:</p>
 
+            %s
+
             <div class="code-tabs">
                 <button class="code-tab active" data-lang="curl">cURL</button>
                 <button class="code-tab" data-lang="javascript">JavaScript</button>
                 <button class="code-tab" data-lang="python">Python</button>
             </div>
 
-            <pre class="code-block" data-lang="curl"><code>curl -X GET "%s/your-endpoint" \
+            <pre class="code-block" data-lang="curl"><code>curl -X %s "%s%s" \
   -H "X-API-Key: your_api_key_here" \
   -H "Content-Type: application/json"</code></pre>
 
-            <pre class="code-block hidden" data-lang="javascript"><code>const response = await fetch('%s/your-endpoint', {
-  method: 'GET',
+            <pre class="code-block hidden" data-lang="javascript"><code>const response = await fetch('%s%s', {
+  method: '%s',
   headers: {
     'X-API-Key': 'your_api_key_here',
     'Content-Type': 'application/json'
@@ -265,8 +318,8 @@ console.log(data);</code></pre>
 
             <pre class="code-block hidden" data-lang="python"><code>import requests
 
-response = requests.get(
-    '%s/your-endpoint',
+response = requests.%s(
+    '%s%s',
     headers={
         'X-API-Key': 'your_api_key_here',
         'Content-Type': 'application/json'
@@ -306,7 +359,11 @@ print(response.json())</code></pre>
     </main>
     <script>%s</script>
 </body>
-</html>`, h.appName, docsCSS, h.renderDocsNav("quickstart"), h.appName, baseURL, baseURL, baseURL, docsJS)
+</html>`, h.appName, docsCSS, h.renderDocsNav("quickstart"), h.appName, endpointInfo,
+		exampleMethod, baseURL, exampleEndpoint,
+		baseURL, exampleEndpoint, exampleMethod,
+		strings.ToLower(exampleMethod), baseURL, exampleEndpoint,
+		docsJS)
 }
 
 func (h *DocsHandler) renderAuthentication(baseURL string) string {
@@ -435,11 +492,23 @@ func (h *DocsHandler) renderAPIReference(spec *openapi.Spec) string {
 		baseURL = spec.Servers[0].URL
 	}
 
-	// Collect only concrete endpoints (no wildcards)
+	// Check for wildcard routes and collect concrete endpoints
+	hasWildcardRoutes := false
+	var wildcardPaths []string
 	var endpoints []concreteEndpoint
 	for path, pathItem := range spec.Paths {
-		// Skip wildcard/proxy routes - they can't be meaningfully documented
-		if strings.Contains(path, "{path}") || strings.Contains(path, "*") {
+		// Detect wildcard/proxy routes
+		if strings.Contains(path, "{path}") || strings.Contains(path, "*") || strings.HasSuffix(path, "/*") {
+			hasWildcardRoutes = true
+			// Clean up path for display
+			displayPath := strings.TrimSuffix(path, "/{path}")
+			displayPath = strings.TrimSuffix(displayPath, "/*")
+			if displayPath == "" {
+				displayPath = "/*"
+			} else {
+				displayPath += "/*"
+			}
+			wildcardPaths = append(wildcardPaths, displayPath)
 			continue
 		}
 
@@ -557,6 +626,22 @@ func (h *DocsHandler) renderAPIReference(spec *openapi.Spec) string {
 		}
 	}
 
+	// Build wildcard warning banner if applicable
+	wildcardBanner := ""
+	if hasWildcardRoutes {
+		sort.Strings(wildcardPaths)
+		pathList := ""
+		for _, p := range wildcardPaths {
+			pathList += fmt.Sprintf("<code>%s</code> ", p)
+		}
+		wildcardBanner = fmt.Sprintf(`
+        <div class="docs-callout warning" style="margin-bottom: 24px;">
+            <strong>Additional endpoints may be available</strong>
+            <p style="margin-top: 8px; margin-bottom: 8px;">This API includes wildcard routes (%s) that proxy requests to the upstream server. These routes may expose additional endpoints not documented here.</p>
+            <p style="margin-bottom: 0;">Contact the API provider for complete documentation of available endpoints.</p>
+        </div>`, pathList)
+	}
+
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -574,6 +659,8 @@ func (h *DocsHandler) renderAPIReference(spec *openapi.Spec) string {
 
         <h1>API Reference</h1>
         <p class="docs-lead">All requests require authentication via the <code>X-API-Key</code> header.</p>
+
+        %s
 
         <div class="docs-section">
             <h2>Base URL</h2>
@@ -608,7 +695,7 @@ func (h *DocsHandler) renderAPIReference(spec *openapi.Spec) string {
         </div>
     </main>
 </body>
-</html>`, h.appName, docsCSS, h.renderDocsNav("api-reference"), baseURL, baseURL, endpointsHTML)
+</html>`, h.appName, docsCSS, h.renderDocsNav("api-reference"), wildcardBanner, baseURL, baseURL, endpointsHTML)
 }
 
 // concreteEndpoint represents a specific endpoint (not a wildcard)
