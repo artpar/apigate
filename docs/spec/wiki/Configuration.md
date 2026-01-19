@@ -94,6 +94,20 @@ Configure APIGate via environment variables, command-line flags, or runtime sett
 | `APIGATE_PORTAL_BASE_URL` | - | Base URL for email links |
 | `APIGATE_PORTAL_APP_NAME` | `APIGate` | Application name in portal |
 
+### TLS/HTTPS
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `APIGATE_TLS_ENABLED` | `false` | Enable TLS/HTTPS |
+| `APIGATE_TLS_MODE` | `none` | TLS mode: `none`, `acme`, `manual` |
+| `APIGATE_TLS_DOMAIN` | - | Domain(s) for ACME (comma-separated) |
+| `APIGATE_TLS_EMAIL` | - | Contact email for ACME notifications |
+| `APIGATE_TLS_CERT` | - | Certificate file path (manual mode) |
+| `APIGATE_TLS_KEY` | - | Private key file path (manual mode) |
+| `APIGATE_TLS_HTTP_REDIRECT` | `true` | Redirect HTTP to HTTPS |
+| `APIGATE_TLS_MIN_VERSION` | `1.2` | Minimum TLS version: `1.2` or `1.3` |
+| `APIGATE_TLS_ACME_STAGING` | `false` | Use Let's Encrypt staging server |
+
 ### Logging
 
 | Variable | Default | Description |
@@ -196,6 +210,18 @@ portal:
   enabled: true
   base_url: https://api.example.com
   app_name: "Acme API"
+
+tls:
+  enabled: true
+  mode: acme  # "none", "acme", or "manual"
+  domain: api.example.com
+  email: admin@example.com
+  # For manual mode:
+  # cert_path: /path/to/cert.pem
+  # key_path: /path/to/key.pem
+  http_redirect: true
+  min_version: "1.2"  # "1.2" or "1.3"
+  acme_staging: false # Use staging for testing
 
 logging:
   level: info
@@ -385,12 +411,35 @@ apigate secrets rotate --type session
 apigate secrets rotate --type encryption
 ```
 
-### 3. Use a Reverse Proxy for TLS
+### 3. Configure TLS/HTTPS
 
-APIGate does not handle TLS directly. Use a reverse proxy like nginx or Caddy:
+APIGate supports built-in TLS with automatic certificate management (ACME/Let's Encrypt) or manual certificates.
+
+**Option A: Automatic ACME (Recommended)**
+```bash
+# Enable automatic Let's Encrypt certificates
+APIGATE_TLS_ENABLED=true
+APIGATE_TLS_MODE=acme
+APIGATE_TLS_DOMAIN=api.example.com
+APIGATE_TLS_EMAIL=admin@example.com
+APIGATE_SERVER_PORT=443
+```
+
+**Option B: Manual Certificates**
+```bash
+# Use your own certificates
+APIGATE_TLS_ENABLED=true
+APIGATE_TLS_MODE=manual
+APIGATE_TLS_CERT=/etc/letsencrypt/live/example.com/fullchain.pem
+APIGATE_TLS_KEY=/etc/letsencrypt/live/example.com/privkey.pem
+APIGATE_SERVER_PORT=443
+```
+
+**Option C: Reverse Proxy**
+
+Alternatively, use nginx or Caddy as a TLS termination proxy:
 
 ```nginx
-# nginx example
 server {
     listen 443 ssl;
     ssl_certificate /etc/ssl/certs/apigate.crt;
@@ -401,6 +450,8 @@ server {
     }
 }
 ```
+
+See [[Certificates]] for detailed TLS configuration.
 
 ---
 

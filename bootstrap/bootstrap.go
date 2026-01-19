@@ -51,6 +51,17 @@ const (
 	EnvServerHost  = "APIGATE_SERVER_HOST"
 	EnvLogLevel    = "APIGATE_LOG_LEVEL"
 	EnvLogFormat   = "APIGATE_LOG_FORMAT"
+
+	// TLS environment variables (synced to database settings)
+	EnvTLSEnabled      = "APIGATE_TLS_ENABLED"
+	EnvTLSMode         = "APIGATE_TLS_MODE"
+	EnvTLSDomain       = "APIGATE_TLS_DOMAIN"
+	EnvTLSEmail        = "APIGATE_TLS_EMAIL"
+	EnvTLSCert         = "APIGATE_TLS_CERT"
+	EnvTLSKey          = "APIGATE_TLS_KEY"
+	EnvTLSHTTPRedirect = "APIGATE_TLS_HTTP_REDIRECT"
+	EnvTLSMinVersion   = "APIGATE_TLS_MIN_VERSION"
+	EnvTLSACMEStaging  = "APIGATE_TLS_ACME_STAGING"
 )
 
 // App represents the running application.
@@ -152,6 +163,12 @@ func NewWithConfig(cfg Config) (*App, error) {
 	// Initialize HTTP server (after module runtime so handlers are available)
 	if err := a.initHTTPServer(); err != nil {
 		return nil, fmt.Errorf("init http server: %w", err)
+	}
+
+	// Sync TLS environment variables to database settings
+	// This allows configuring TLS via APIGATE_TLS_* env vars
+	if err := a.syncTLSEnvToSettings(context.Background()); err != nil {
+		logger.Warn().Err(err).Msg("failed to sync TLS env vars to settings")
 	}
 
 	// Initialize TLS configuration (after HTTP server configured)
@@ -566,6 +583,51 @@ func (a *App) initHTTPServer() error {
 	}
 
 	a.Logger.Info().Str("addr", addr).Msg("http server configured")
+	return nil
+}
+
+// syncTLSEnvToSettings syncs TLS environment variables to database settings.
+// This allows users to configure TLS via environment variables, which are then
+// persisted to the database. Environment variables take precedence over existing
+// database values when set.
+func (a *App) syncTLSEnvToSettings(ctx context.Context) error {
+	batch := make(settings.Settings)
+
+	// Map environment variables to settings keys
+	envToSettingMap := map[string]string{
+		EnvTLSEnabled:      settings.KeyTLSEnabled,
+		EnvTLSMode:         settings.KeyTLSMode,
+		EnvTLSDomain:       settings.KeyTLSDomain,
+		EnvTLSEmail:        settings.KeyTLSEmail,
+		EnvTLSCert:         settings.KeyTLSCertPath,
+		EnvTLSKey:          settings.KeyTLSKeyPath,
+		EnvTLSHTTPRedirect: settings.KeyTLSHTTPRedirect,
+		EnvTLSMinVersion:   settings.KeyTLSMinVersion,
+		EnvTLSACMEStaging:  settings.KeyTLSACMEStaging,
+	}
+
+	for envVar, settingKey := range envToSettingMap {
+		if v := os.Getenv(envVar); v != "" {
+			batch[settingKey] = v
+			a.Logger.Debug().Str("env", envVar).Str("setting", settingKey).Msg("syncing TLS env to setting")
+		}
+	}
+
+	if len(batch) == 0 {
+		return nil
+	}
+
+	// Save to database
+	if err := a.Settings.SetBatch(ctx, batch); err != nil {
+		return fmt.Errorf("sync TLS settings: %w", err)
+	}
+
+	// Reload settings to pick up changes
+	if err := a.Settings.Load(ctx); err != nil {
+		return fmt.Errorf("reload settings: %w", err)
+	}
+
+	a.Logger.Info().Int("count", len(batch)).Msg("TLS settings synced from environment")
 	return nil
 }
 

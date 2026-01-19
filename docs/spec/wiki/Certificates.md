@@ -54,10 +54,24 @@ TLS certificates enable HTTPS for your API gateway:
 
 ## TLS Configuration
 
-TLS is configured through settings, not environment variables.
+TLS can be configured via environment variables, CLI settings, or the Admin UI.
 
 ### Enable ACME (Let's Encrypt)
 
+**Via Environment Variables (Recommended for Docker/Systemd):**
+```bash
+# Set these in your .env file or systemd unit
+APIGATE_TLS_ENABLED=true
+APIGATE_TLS_MODE=acme
+APIGATE_TLS_DOMAIN=api.example.com
+APIGATE_TLS_EMAIL=admin@example.com
+APIGATE_SERVER_PORT=443
+
+# For testing, use staging server
+APIGATE_TLS_ACME_STAGING=true
+```
+
+**Via CLI Settings:**
 ```bash
 # Enable TLS with ACME
 apigate settings set tls.enabled true
@@ -86,6 +100,16 @@ When ACME mode is enabled, APIGate automatically:
 
 ### Configure Manual TLS
 
+**Via Environment Variables:**
+```bash
+APIGATE_TLS_ENABLED=true
+APIGATE_TLS_MODE=manual
+APIGATE_TLS_CERT=/etc/letsencrypt/live/example.com/fullchain.pem
+APIGATE_TLS_KEY=/etc/letsencrypt/live/example.com/privkey.pem
+APIGATE_SERVER_PORT=443
+```
+
+**Via CLI Settings:**
 ```bash
 # Enable TLS with manual certificates
 apigate settings set tls.enabled true
@@ -224,17 +248,17 @@ When using ACME, certificates are automatically renewed:
 
 ## TLS Settings Reference
 
-| Setting | Description | Default |
-|---------|-------------|---------|
-| `tls.enabled` | Enable TLS/HTTPS | `false` |
-| `tls.mode` | Certificate mode: `acme`, `manual`, or `none` | `none` |
-| `tls.domain` | Domain for ACME certificates | - |
-| `tls.acme_email` | Contact email for ACME | - |
-| `tls.cert_path` | Certificate file path (manual mode) | - |
-| `tls.key_path` | Private key file path (manual mode) | - |
-| `tls.http_redirect` | Redirect HTTP to HTTPS | `true` |
-| `tls.min_version` | Minimum TLS version: `1.2` or `1.3` | `1.2` |
-| `tls.acme_staging` | Use Let's Encrypt staging server | `false` |
+| Setting | Environment Variable | Description | Default |
+|---------|---------------------|-------------|---------|
+| `tls.enabled` | `APIGATE_TLS_ENABLED` | Enable TLS/HTTPS | `false` |
+| `tls.mode` | `APIGATE_TLS_MODE` | Certificate mode: `acme`, `manual`, or `none` | `none` |
+| `tls.domain` | `APIGATE_TLS_DOMAIN` | Domain for ACME certificates | - |
+| `tls.acme_email` | `APIGATE_TLS_EMAIL` | Contact email for ACME | - |
+| `tls.cert_path` | `APIGATE_TLS_CERT` | Certificate file path (manual mode) | - |
+| `tls.key_path` | `APIGATE_TLS_KEY` | Private key file path (manual mode) | - |
+| `tls.http_redirect` | `APIGATE_TLS_HTTP_REDIRECT` | Redirect HTTP to HTTPS | `true` |
+| `tls.min_version` | `APIGATE_TLS_MIN_VERSION` | Minimum TLS version: `1.2` or `1.3` | `1.2` |
+| `tls.acme_staging` | `APIGATE_TLS_ACME_STAGING` | Use Let's Encrypt staging server | `false` |
 
 ### SNI Support
 

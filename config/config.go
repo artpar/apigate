@@ -27,6 +27,7 @@ type Config struct {
 	OpenAPI   OpenAPIConfig    `yaml:"openapi"`
 	Portal    PortalConfig     `yaml:"portal"`
 	Email     EmailConfig      `yaml:"email"`
+	TLS       TLSConfig        `yaml:"tls"`
 }
 
 // ServerConfig configures the HTTP server.
@@ -157,6 +158,20 @@ type SMTPConfig struct {
 	Timeout     time.Duration `yaml:"timeout"`
 }
 
+// TLSConfig configures TLS/HTTPS for the server.
+// TLS can be configured via ACME (Let's Encrypt) or manual certificate files.
+type TLSConfig struct {
+	Enabled      bool   `yaml:"enabled"`       // Enable TLS/HTTPS
+	Mode         string `yaml:"mode"`          // "acme", "manual", or "none"
+	Domain       string `yaml:"domain"`        // Domain(s) for ACME (comma-separated)
+	Email        string `yaml:"email"`         // Contact email for ACME
+	CertPath     string `yaml:"cert_path"`     // Certificate file path (manual mode)
+	KeyPath      string `yaml:"key_path"`      // Private key file path (manual mode)
+	HTTPRedirect bool   `yaml:"http_redirect"` // Redirect HTTP to HTTPS
+	MinVersion   string `yaml:"min_version"`   // Minimum TLS version: "1.2" or "1.3"
+	ACMEStaging  bool   `yaml:"acme_staging"`  // Use Let's Encrypt staging server
+}
+
 // Load reads configuration from a YAML file.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
@@ -189,18 +204,27 @@ func Load(path string) (*Config, error) {
 //
 // Environment variables:
 //
-//	APIGATE_UPSTREAM_URL      - Upstream API URL (required)
-//	APIGATE_DATABASE_DSN      - Database path (default: apigate.db)
-//	APIGATE_SERVER_HOST       - Server host (default: 0.0.0.0)
-//	APIGATE_SERVER_PORT       - Server port (default: 8080)
-//	APIGATE_AUTH_MODE         - Auth mode: local or remote (default: local)
-//	APIGATE_AUTH_KEY_PREFIX   - API key prefix (default: ak_)
-//	APIGATE_RATELIMIT_ENABLED - Enable rate limiting (default: true)
-//	APIGATE_LOG_LEVEL         - Log level: debug, info, warn, error (default: info)
-//	APIGATE_LOG_FORMAT        - Log format: json or console (default: json)
-//	APIGATE_METRICS_ENABLED   - Enable /metrics endpoint (default: true)
-//	APIGATE_OPENAPI_ENABLED   - Enable OpenAPI/Swagger (default: true)
-//	APIGATE_ADMIN_EMAIL       - Admin email for first-run bootstrap
+//	APIGATE_UPSTREAM_URL       - Upstream API URL (required)
+//	APIGATE_DATABASE_DSN       - Database path (default: apigate.db)
+//	APIGATE_SERVER_HOST        - Server host (default: 0.0.0.0)
+//	APIGATE_SERVER_PORT        - Server port (default: 8080)
+//	APIGATE_AUTH_MODE          - Auth mode: local or remote (default: local)
+//	APIGATE_AUTH_KEY_PREFIX    - API key prefix (default: ak_)
+//	APIGATE_RATELIMIT_ENABLED  - Enable rate limiting (default: true)
+//	APIGATE_LOG_LEVEL          - Log level: debug, info, warn, error (default: info)
+//	APIGATE_LOG_FORMAT         - Log format: json or console (default: json)
+//	APIGATE_METRICS_ENABLED    - Enable /metrics endpoint (default: true)
+//	APIGATE_OPENAPI_ENABLED    - Enable OpenAPI/Swagger (default: true)
+//	APIGATE_ADMIN_EMAIL        - Admin email for first-run bootstrap
+//	APIGATE_TLS_ENABLED        - Enable TLS/HTTPS (default: false)
+//	APIGATE_TLS_MODE           - TLS mode: none, acme, manual (default: none)
+//	APIGATE_TLS_DOMAIN         - Domain(s) for ACME (comma-separated)
+//	APIGATE_TLS_EMAIL          - Contact email for ACME
+//	APIGATE_TLS_CERT           - Certificate file path (manual mode)
+//	APIGATE_TLS_KEY            - Private key file path (manual mode)
+//	APIGATE_TLS_HTTP_REDIRECT  - Redirect HTTP to HTTPS (default: true when TLS enabled)
+//	APIGATE_TLS_MIN_VERSION    - Minimum TLS version: 1.2, 1.3 (default: 1.2)
+//	APIGATE_TLS_ACME_STAGING   - Use Let's Encrypt staging (default: false)
 func LoadFromEnv() (*Config, error) {
 	var cfg Config
 
@@ -380,6 +404,35 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("APIGATE_SMTP_USE_TLS"); v != "" {
 		cfg.Email.SMTP.UseTLS = parseBool(v)
 	}
+
+	// TLS configuration
+	if v := os.Getenv("APIGATE_TLS_ENABLED"); v != "" {
+		cfg.TLS.Enabled = parseBool(v)
+	}
+	if v := os.Getenv("APIGATE_TLS_MODE"); v != "" {
+		cfg.TLS.Mode = v
+	}
+	if v := os.Getenv("APIGATE_TLS_DOMAIN"); v != "" {
+		cfg.TLS.Domain = v
+	}
+	if v := os.Getenv("APIGATE_TLS_EMAIL"); v != "" {
+		cfg.TLS.Email = v
+	}
+	if v := os.Getenv("APIGATE_TLS_CERT"); v != "" {
+		cfg.TLS.CertPath = v
+	}
+	if v := os.Getenv("APIGATE_TLS_KEY"); v != "" {
+		cfg.TLS.KeyPath = v
+	}
+	if v := os.Getenv("APIGATE_TLS_HTTP_REDIRECT"); v != "" {
+		cfg.TLS.HTTPRedirect = parseBool(v)
+	}
+	if v := os.Getenv("APIGATE_TLS_MIN_VERSION"); v != "" {
+		cfg.TLS.MinVersion = v
+	}
+	if v := os.Getenv("APIGATE_TLS_ACME_STAGING"); v != "" {
+		cfg.TLS.ACMEStaging = parseBool(v)
+	}
 }
 
 // parseBool parses a boolean from common string values.
@@ -474,6 +527,18 @@ func setDefaults(cfg *Config) {
 	if cfg.Email.SMTP.FromName == "" {
 		cfg.Email.SMTP.FromName = cfg.Portal.AppName
 	}
+
+	// TLS defaults
+	if cfg.TLS.Mode == "" {
+		cfg.TLS.Mode = "none"
+	}
+	if cfg.TLS.MinVersion == "" {
+		cfg.TLS.MinVersion = "1.2"
+	}
+	// HTTPRedirect defaults to true when TLS is enabled
+	if cfg.TLS.Enabled && !cfg.TLS.HTTPRedirect {
+		cfg.TLS.HTTPRedirect = true
+	}
 }
 
 func validate(cfg *Config) error {
@@ -511,6 +576,30 @@ func validate(cfg *Config) error {
 		if plan.ID == "" {
 			return fmt.Errorf("plans[%d].id is required", i)
 		}
+	}
+
+	// TLS validation
+	validTLSModes := map[string]bool{"none": true, "acme": true, "manual": true}
+	if !validTLSModes[cfg.TLS.Mode] {
+		return fmt.Errorf("tls.mode must be 'none', 'acme', or 'manual', got %q", cfg.TLS.Mode)
+	}
+	if cfg.TLS.Enabled {
+		switch cfg.TLS.Mode {
+		case "acme":
+			if cfg.TLS.Domain == "" {
+				return fmt.Errorf("tls.domain is required when tls.mode is 'acme'")
+			}
+		case "manual":
+			if cfg.TLS.CertPath == "" || cfg.TLS.KeyPath == "" {
+				return fmt.Errorf("tls.cert_path and tls.key_path are required when tls.mode is 'manual'")
+			}
+		case "none":
+			return fmt.Errorf("tls.enabled is true but tls.mode is 'none'; set tls.mode to 'acme' or 'manual'")
+		}
+	}
+	validTLSVersions := map[string]bool{"1.2": true, "1.3": true}
+	if !validTLSVersions[cfg.TLS.MinVersion] {
+		return fmt.Errorf("tls.min_version must be '1.2' or '1.3', got %q", cfg.TLS.MinVersion)
 	}
 
 	return nil
