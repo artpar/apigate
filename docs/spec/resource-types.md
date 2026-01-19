@@ -268,6 +268,8 @@ Keys in list don't include the full key:
 | Attribute | Type | Description | Mutable |
 |-----------|------|-------------|---------|
 | `name` | string | Route name | Yes |
+| `host_pattern` | string | Host/domain pattern to match | Yes |
+| `host_match_type` | enum | How to match host | Yes |
 | `path_pattern` | string | URL pattern to match | Yes |
 | `match_type` | enum | Pattern match type | Yes |
 | `methods` | []string | HTTP methods | Yes |
@@ -285,6 +287,15 @@ Keys in list don't include the full key:
 | `response_transform` | object | Response transformation | Yes |
 | `created_at` | timestamp | Creation time | No |
 | `updated_at` | timestamp | Last update time | No |
+
+### Host Match Types
+
+| Value | Description |
+|-------|-------------|
+| (empty) | Match any host (default, backward compatible) |
+| `exact` | Exact host match (case-insensitive) |
+| `wildcard` | Wildcard match (`*.example.com` matches one subdomain level) |
+| `regex` | Regular expression match |
 
 ### Match Types
 
@@ -321,6 +332,8 @@ Keys in list don't include the full key:
     "id": "rt_abc123",
     "attributes": {
       "name": "API v2",
+      "host_pattern": "api.example.com",
+      "host_match_type": "exact",
       "path_pattern": "/v2/*",
       "match_type": "prefix",
       "methods": ["GET", "POST", "PUT", "DELETE"],

@@ -1,6 +1,7 @@
 package route
 
 import (
+	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -20,26 +21,40 @@ type Matcher struct {
 }
 
 type compiledPattern struct {
-	routeIdx int
-	regex    *regexp.Regexp   // For regex and prefix patterns
-	exact    string           // For exact patterns
+	routeIdx   int
+	regex      *regexp.Regexp // For regex and prefix patterns
+	exact      string         // For exact patterns
 	paramNames []string       // Names of path parameters
+
+	// Host matching
+	hostRegex    *regexp.Regexp // For regex host patterns
+	hostExact    string         // For exact host patterns (lowercase)
+	hostWildcard string         // For wildcard host patterns (suffix after *)
 }
 
 // NewMatcher creates a new Matcher from a list of routes.
 // Routes are sorted by priority (highest first) and patterns are compiled.
 func NewMatcher(routes []Route) (*Matcher, error) {
 	// Sort routes by priority descending, then by specificity
+	// Order: priority > host specificity > path match type > pattern length
 	sorted := make([]Route, len(routes))
 	copy(sorted, routes)
 	sort.Slice(sorted, func(i, j int) bool {
+		// 1. Priority (higher first)
 		if sorted[i].Priority != sorted[j].Priority {
 			return sorted[i].Priority > sorted[j].Priority
 		}
-		// More specific patterns first (longer path, exact before prefix)
+		// 2. Host specificity (exact > wildcard > regex > none)
+		hostPrioI := hostMatchTypePriority(sorted[i].HostMatchType)
+		hostPrioJ := hostMatchTypePriority(sorted[j].HostMatchType)
+		if hostPrioI != hostPrioJ {
+			return hostPrioI > hostPrioJ
+		}
+		// 3. Path match type specificity (exact > prefix > regex)
 		if sorted[i].MatchType != sorted[j].MatchType {
 			return matchTypePriority(sorted[i].MatchType) > matchTypePriority(sorted[j].MatchType)
 		}
+		// 4. Pattern length (longer first)
 		return len(sorted[i].PathPattern) > len(sorted[j].PathPattern)
 	})
 
@@ -49,7 +64,7 @@ func NewMatcher(routes []Route) (*Matcher, error) {
 			continue
 		}
 
-		cp, err := compilePattern(r.PathPattern, r.MatchType, i)
+		cp, err := compilePattern(r, i)
 		if err != nil {
 			return nil, err
 		}
@@ -75,10 +90,34 @@ func matchTypePriority(mt MatchType) int {
 	}
 }
 
-func compilePattern(pattern string, matchType MatchType, routeIdx int) (compiledPattern, error) {
+func hostMatchTypePriority(hmt HostMatchType) int {
+	switch hmt {
+	case HostMatchExact:
+		return 4
+	case HostMatchWildcard:
+		return 3
+	case HostMatchRegex:
+		return 2
+	case HostMatchNone:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func compilePattern(r Route, routeIdx int) (compiledPattern, error) {
 	cp := compiledPattern{
 		routeIdx: routeIdx,
 	}
+
+	// Compile host pattern
+	if err := compileHostPattern(&cp, r.HostPattern, r.HostMatchType); err != nil {
+		return cp, err
+	}
+
+	// Compile path pattern
+	pattern := r.PathPattern
+	matchType := r.MatchType
 
 	switch matchType {
 	case MatchExact:
@@ -127,24 +166,64 @@ func compilePattern(pattern string, matchType MatchType, routeIdx int) (compiled
 	return cp, nil
 }
 
+// compileHostPattern compiles the host pattern into the compiledPattern struct.
+func compileHostPattern(cp *compiledPattern, hostPattern string, hostMatchType HostMatchType) error {
+	if hostPattern == "" || hostMatchType == HostMatchNone {
+		return nil // No host matching
+	}
+
+	switch hostMatchType {
+	case HostMatchExact:
+		// Store lowercase for case-insensitive comparison
+		cp.hostExact = strings.ToLower(hostPattern)
+
+	case HostMatchWildcard:
+		// *.example.com -> store ".example.com" as suffix
+		// Must start with *. for wildcard matching
+		if !strings.HasPrefix(hostPattern, "*.") {
+			return fmt.Errorf("invalid wildcard pattern %q: must start with *.", hostPattern)
+		}
+		cp.hostWildcard = strings.ToLower(hostPattern[1:]) // Store ".example.com"
+
+	case HostMatchRegex:
+		// Compile regex pattern
+		regex, err := regexp.Compile("(?i)" + hostPattern) // Case-insensitive
+		if err != nil {
+			return err
+		}
+		cp.hostRegex = regex
+	}
+
+	return nil
+}
+
 // Match finds the first matching route for the given request.
 // Returns nil if no route matches.
+// Matching order: host -> method -> path -> headers
 func (m *Matcher) Match(method, path string, headers map[string]string) *MatchResult {
+	// Extract and normalize host from headers
+	host := normalizeHost(headers["Host"])
+
 	for _, cp := range m.patterns {
 		route := &m.routes[cp.routeIdx]
 
-		// Check method match
+		// 1. Check host match (first for multi-tenant routing)
+		if !matchHost(cp, host) {
+			continue
+		}
+
+		// 2. Check method match
 		if !matchMethod(route.Methods, method) {
 			continue
 		}
 
-		// Check path match
+		// 3. Check path match
 		pathParams := matchPath(cp, path)
 		if pathParams == nil {
 			continue
 		}
 
-		// Check header conditions
+		// 4. Check header conditions
 		if !matchHeaders(route.Headers, headers) {
 			continue
 		}
@@ -156,6 +235,62 @@ func (m *Matcher) Match(method, path string, headers map[string]string) *MatchRe
 	}
 
 	return nil
+}
+
+// normalizeHost normalizes the host header value.
+// Removes port, trailing dots, and converts to lowercase.
+func normalizeHost(host string) string {
+	if host == "" {
+		return ""
+	}
+
+	// Remove port if present (e.g., "api.example.com:8080" -> "api.example.com")
+	if colonIdx := strings.LastIndex(host, ":"); colonIdx != -1 {
+		// Check if this is an IPv6 address (has brackets)
+		if !strings.Contains(host, "]") || colonIdx > strings.Index(host, "]") {
+			host = host[:colonIdx]
+		}
+	}
+
+	// Remove trailing dot (e.g., "api.example.com." -> "api.example.com")
+	host = strings.TrimSuffix(host, ".")
+
+	// Convert to lowercase for case-insensitive matching
+	return strings.ToLower(host)
+}
+
+// matchHost checks if the host matches the compiled host pattern.
+// Returns true if: no host pattern is configured (matches any host),
+// or the host matches the pattern.
+func matchHost(cp compiledPattern, host string) bool {
+	// No host matching configured - matches any host (backward compatible)
+	if cp.hostExact == "" && cp.hostWildcard == "" && cp.hostRegex == nil {
+		return true
+	}
+
+	// Exact match
+	if cp.hostExact != "" {
+		return host == cp.hostExact
+	}
+
+	// Wildcard match (*.example.com)
+	if cp.hostWildcard != "" {
+		// Host must have exactly one more segment than the wildcard suffix
+		// e.g., "api.example.com" matches "*.example.com" but "a.b.example.com" does not
+		if !strings.HasSuffix(host, cp.hostWildcard) {
+			return false
+		}
+		// Check there's exactly one segment before the suffix
+		prefix := host[:len(host)-len(cp.hostWildcard)]
+		return prefix != "" && !strings.Contains(prefix, ".")
+	}
+
+	// Regex match
+	if cp.hostRegex != nil {
+		return cp.hostRegex.MatchString(host)
+	}
+
+	return false
 }
 
 // matchMethod checks if the request method matches the route's allowed methods.

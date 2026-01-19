@@ -7,7 +7,7 @@ A **route** defines how incoming requests are matched and forwarded to upstreams
 ## Overview
 
 Routes are the traffic rules of APIGate. Each route specifies:
-- **What to match**: Path pattern, HTTP methods, headers
+- **What to match**: Host, path pattern, HTTP methods, headers
 - **Where to send**: Which upstream to forward to
 - **How to transform**: Modify request/response
 
@@ -36,6 +36,8 @@ Request: GET /api/v1/users/123
 | `id` | string | Unique identifier |
 | `name` | string | Human-readable name (required) |
 | `description` | string | Route purpose |
+| `host_pattern` | string | Host/domain pattern to match |
+| `host_match_type` | enum | How to match host: exact, wildcard, regex |
 | `path_pattern` | string | URL pattern to match (required) |
 | `match_type` | enum | How to match: exact, prefix, regex |
 | `methods` | []string | HTTP methods (empty = all) |
@@ -170,6 +172,181 @@ headers:
 ```
 
 All specified headers must match for the route to match.
+
+---
+
+## Host-Based Routing
+
+Route requests by hostname for multi-tenant or subdomain-based APIs.
+
+### Matching Order
+
+When a request arrives, routes are matched in this order:
+
+```
+host → method → path → headers
+```
+
+Host matching is checked first for optimal multi-tenant routing performance.
+
+### Host Match Types
+
+| Type | Pattern | Matches | Does Not Match |
+|------|---------|---------|----------------|
+| `exact` | `api.example.com` | `api.example.com` | `www.example.com`, `API.example.com` |
+| `wildcard` | `*.example.com` | `api.example.com`, `www.example.com` | `a.b.example.com` (multiple levels) |
+| `regex` | `^v[0-9]+\.api\.example\.com$` | `v1.api.example.com`, `v2.api.example.com` | `api.example.com` |
+| (empty) | - | Any host | - |
+
+**Notes:**
+- All host matching is **case-insensitive**
+- Port numbers are stripped (`api.example.com:8080` matches `api.example.com`)
+- Trailing dots are removed (`api.example.com.` matches `api.example.com`)
+- Wildcard (`*`) matches exactly **one** subdomain level
+
+### Usage Scenarios
+
+#### Multi-Tenant SaaS
+
+Route different customers to their dedicated backends:
+
+```yaml
+# Customer 1
+host_pattern: api.customer1.example.com
+host_match_type: exact
+path_pattern: /v1/*
+upstream_id: customer1-backend
+
+# Customer 2
+host_pattern: api.customer2.example.com
+host_match_type: exact
+path_pattern: /v1/*
+upstream_id: customer2-backend
+```
+
+#### Subdomain-Based Versioning
+
+```yaml
+# Legacy API
+host_pattern: v1.api.example.com
+host_match_type: exact
+path_pattern: /*
+upstream_id: legacy-api
+
+# Modern API
+host_pattern: v2.api.example.com
+host_match_type: exact
+path_pattern: /*
+upstream_id: modern-api
+```
+
+#### Regional Routing
+
+```yaml
+# EU region
+host_pattern: eu.api.example.com
+host_match_type: exact
+upstream_id: eu-cluster
+
+# US region
+host_pattern: us.api.example.com
+host_match_type: exact
+upstream_id: us-cluster
+```
+
+#### Dynamic Tenant Routing
+
+Use wildcard for dynamic subdomain routing:
+
+```yaml
+host_pattern: "*.api.example.com"
+host_match_type: wildcard
+path_pattern: /*
+upstream_id: tenant-router
+```
+
+This matches `tenant1.api.example.com`, `tenant2.api.example.com`, etc.
+
+### Creating Host-Based Routes
+
+#### CLI
+
+```bash
+# Exact host match
+apigate routes create \
+  --name "customer1-api" \
+  --host-pattern "api.customer1.example.com" \
+  --host-match-type exact \
+  --path "/v1/*" \
+  --upstream customer1-backend
+
+# Wildcard subdomain
+apigate routes create \
+  --name "tenant-apis" \
+  --host-pattern "*.api.example.com" \
+  --host-match-type wildcard \
+  --path "/*" \
+  --upstream tenant-router
+```
+
+#### REST API
+
+```bash
+# Create host-based route
+curl -X POST http://localhost:8080/admin/routes \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "customer1-api",
+    "host_pattern": "api.customer1.example.com",
+    "host_match_type": "exact",
+    "path_pattern": "/v1/*",
+    "match_type": "prefix",
+    "upstream_id": "customer1-backend-id",
+    "enabled": true
+  }'
+```
+
+### Priority with Host Matching
+
+Routes with host patterns take precedence over routes without:
+
+```
+1. Priority (higher = first)
+2. Host specificity (exact > wildcard > regex > none)
+3. Path match type (exact > prefix > regex)
+4. Pattern length (longer = first)
+```
+
+Example:
+
+```yaml
+# Route 1: Catches all traffic to api.example.com (priority 100)
+host_pattern: api.example.com
+host_match_type: exact
+path_pattern: /*
+priority: 100
+
+# Route 2: Specific path on same host (priority 100, but exact path wins)
+host_pattern: api.example.com
+host_match_type: exact
+path_pattern: /admin
+match_type: exact
+priority: 100
+
+# Route 3: Wildcard catch-all (lower host specificity)
+host_pattern: "*.example.com"
+host_match_type: wildcard
+path_pattern: /*
+priority: 100
+```
+
+Request to `api.example.com/admin` matches Route 2 (exact path wins).
+Request to `api.example.com/users` matches Route 1.
+Request to `other.example.com/anything` matches Route 3.
+
+### Backward Compatibility
+
+Routes without `host_pattern` (or with empty `host_pattern`) match **any host**. This ensures existing routes continue to work unchanged.
 
 ---
 

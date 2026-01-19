@@ -15,6 +15,16 @@ const (
 	MatchRegex  MatchType = "regex"  // /api/users/[0-9]+ matches /api/users/123
 )
 
+// HostMatchType defines how a route pattern matches hostnames.
+type HostMatchType string
+
+const (
+	HostMatchNone     HostMatchType = ""         // No host matching (matches any host, default)
+	HostMatchExact    HostMatchType = "exact"    // api.example.com matches only api.example.com
+	HostMatchWildcard HostMatchType = "wildcard" // *.example.com matches api.example.com, www.example.com
+	HostMatchRegex    HostMatchType = "regex"    // ^[a-z]+\.api\.example\.com$ for complex patterns
+)
+
 // Protocol defines the communication protocol for the route.
 type Protocol string
 
@@ -46,7 +56,11 @@ type Route struct {
 	ExampleRequest  string // Sample request body (JSON) shown in docs
 	ExampleResponse string // Sample response body (JSON) shown in docs
 
-	// Matching criteria
+	// Host matching (for multi-tenant/subdomain routing)
+	HostPattern   string        // Pattern: "api.example.com", "*.example.com", regex
+	HostMatchType HostMatchType // How to interpret host pattern; empty = match any host
+
+	// Path matching criteria
 	PathPattern string    // Pattern to match: "/api/v1/*", "/users/{id}", regex
 	MatchType   MatchType // How to interpret pattern
 	Methods     []string  // HTTP methods to match; empty = all methods
@@ -127,19 +141,21 @@ type Upstream struct {
 // NewRoute creates a new Route with sensible defaults.
 func NewRoute(id, name, pathPattern string, upstreamID string) Route {
 	return Route{
-		ID:           id,
-		Name:         name,
-		PathPattern:  pathPattern,
-		MatchType:    MatchPrefix,
-		UpstreamID:   upstreamID,
-		MeteringExpr: "1", // Default: count requests
-		MeteringMode: "request",
-		MeteringUnit: "requests", // Display unit for UI
-		Protocol:     ProtocolHTTP,
-		Priority:     0,
-		Enabled:      true,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+		ID:            id,
+		Name:          name,
+		HostPattern:   "",            // Default: match any host
+		HostMatchType: HostMatchNone, // Default: no host matching
+		PathPattern:   pathPattern,
+		MatchType:     MatchPrefix,
+		UpstreamID:    upstreamID,
+		MeteringExpr:  "1", // Default: count requests
+		MeteringMode:  "request",
+		MeteringUnit:  "requests", // Display unit for UI
+		Protocol:      ProtocolHTTP,
+		Priority:      0,
+		Enabled:       true,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
 	}
 }
 
@@ -157,6 +173,14 @@ func NewUpstream(id, name, baseURL string) Upstream {
 		CreatedAt:       time.Now(),
 		UpdatedAt:       time.Now(),
 	}
+}
+
+// WithHost returns a copy of the route with host-based matching configured.
+func (r Route) WithHost(pattern string, matchType HostMatchType) Route {
+	r.HostPattern = pattern
+	r.HostMatchType = matchType
+	r.UpdatedAt = time.Now()
+	return r
 }
 
 // WithRequestTransform returns a copy of the route with the given request transform.

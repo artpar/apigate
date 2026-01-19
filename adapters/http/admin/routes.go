@@ -88,6 +88,8 @@ type RouteResponse struct {
 	ID                string           `json:"id"`
 	Name              string           `json:"name"`
 	Description       string           `json:"description,omitempty"`
+	HostPattern       string           `json:"host_pattern,omitempty"`
+	HostMatchType     string           `json:"host_match_type,omitempty"`
 	PathPattern       string           `json:"path_pattern"`
 	MatchType         string           `json:"match_type"`
 	Methods           []string         `json:"methods,omitempty"`
@@ -127,6 +129,8 @@ type TransformDTO struct {
 type CreateRouteRequest struct {
 	Name              string           `json:"name"`
 	Description       string           `json:"description,omitempty"`
+	HostPattern       string           `json:"host_pattern,omitempty"`
+	HostMatchType     string           `json:"host_match_type,omitempty"`
 	PathPattern       string           `json:"path_pattern"`
 	MatchType         string           `json:"match_type,omitempty"`
 	Methods           []string         `json:"methods,omitempty"`
@@ -147,6 +151,8 @@ type CreateRouteRequest struct {
 type UpdateRouteRequest struct {
 	Name              *string          `json:"name,omitempty"`
 	Description       *string          `json:"description,omitempty"`
+	HostPattern       *string          `json:"host_pattern,omitempty"`
+	HostMatchType     *string          `json:"host_match_type,omitempty"`
 	PathPattern       *string          `json:"path_pattern,omitempty"`
 	MatchType         *string          `json:"match_type,omitempty"`
 	Methods           []string         `json:"methods,omitempty"`
@@ -228,6 +234,8 @@ func (h *RoutesHandler) CreateRoute(w http.ResponseWriter, r *http.Request) {
 		ID:             generateRouteID(),
 		Name:           req.Name,
 		Description:    req.Description,
+		HostPattern:    req.HostPattern,
+		HostMatchType:  route.HostMatchType(req.HostMatchType),
 		PathPattern:    req.PathPattern,
 		MatchType:      route.MatchType(req.MatchType),
 		Methods:        req.Methods,
@@ -334,6 +342,12 @@ func (h *RoutesHandler) UpdateRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Description != nil {
 		rt.Description = *req.Description
+	}
+	if req.HostPattern != nil {
+		rt.HostPattern = *req.HostPattern
+	}
+	if req.HostMatchType != nil {
+		rt.HostMatchType = route.HostMatchType(*req.HostMatchType)
 	}
 	if req.PathPattern != nil {
 		rt.PathPattern = *req.PathPattern
@@ -700,6 +714,8 @@ func routeToResource(rt route.Route) jsonapi.Resource {
 	rb := jsonapi.NewResource(TypeRoute, rt.ID).
 		Attr("name", rt.Name).
 		Attr("description", rt.Description).
+		Attr("host_pattern", rt.HostPattern).
+		Attr("host_match_type", string(rt.HostMatchType)).
 		Attr("path_pattern", rt.PathPattern).
 		Attr("match_type", string(rt.MatchType)).
 		Attr("methods", rt.Methods).
@@ -749,6 +765,8 @@ func routeToResponse(rt route.Route) RouteResponse {
 		ID:             rt.ID,
 		Name:           rt.Name,
 		Description:    rt.Description,
+		HostPattern:    rt.HostPattern,
+		HostMatchType:  string(rt.HostMatchType),
 		PathPattern:    rt.PathPattern,
 		MatchType:      string(rt.MatchType),
 		Methods:        rt.Methods,

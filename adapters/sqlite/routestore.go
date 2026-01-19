@@ -25,6 +25,7 @@ func NewRouteStore(db *DB) *RouteStore {
 func (s *RouteStore) Get(ctx context.Context, id string) (route.Route, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, name, description, example_request, example_response,
+		       host_pattern, host_match_type,
 		       path_pattern, match_type, methods, headers,
 		       upstream_id, path_rewrite, method_override,
 		       request_transform, response_transform,
@@ -40,6 +41,7 @@ func (s *RouteStore) Get(ctx context.Context, id string) (route.Route, error) {
 func (s *RouteStore) List(ctx context.Context) ([]route.Route, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, description, example_request, example_response,
+		       host_pattern, host_match_type,
 		       path_pattern, match_type, methods, headers,
 		       upstream_id, path_rewrite, method_override,
 		       request_transform, response_transform,
@@ -68,6 +70,7 @@ func (s *RouteStore) List(ctx context.Context) ([]route.Route, error) {
 func (s *RouteStore) ListEnabled(ctx context.Context) ([]route.Route, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, description, example_request, example_response,
+		       host_pattern, host_match_type,
 		       path_pattern, match_type, methods, headers,
 		       upstream_id, path_rewrite, method_override,
 		       request_transform, response_transform,
@@ -126,14 +129,16 @@ func (s *RouteStore) Create(ctx context.Context, r route.Route) error {
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO routes (
 			id, name, description, example_request, example_response,
+			host_pattern, host_match_type,
 			path_pattern, match_type, methods, headers,
 			upstream_id, path_rewrite, method_override,
 			request_transform, response_transform,
 			metering_expr, metering_mode, metering_unit, protocol,
 			priority, enabled, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		r.ID, r.Name, r.Description, r.ExampleRequest, r.ExampleResponse,
+		r.HostPattern, string(r.HostMatchType),
 		r.PathPattern, string(r.MatchType),
 		methodsJSON, headersJSON,
 		r.UpstreamID, nullString(r.PathRewrite), nullString(r.MethodOverride),
@@ -175,6 +180,7 @@ func (s *RouteStore) Update(ctx context.Context, r route.Route) error {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE routes
 		SET name = ?, description = ?, example_request = ?, example_response = ?,
+		    host_pattern = ?, host_match_type = ?,
 		    path_pattern = ?, match_type = ?,
 		    methods = ?, headers = ?,
 		    upstream_id = ?, path_rewrite = ?, method_override = ?,
@@ -184,6 +190,7 @@ func (s *RouteStore) Update(ctx context.Context, r route.Route) error {
 		WHERE id = ?
 	`,
 		r.Name, r.Description, r.ExampleRequest, r.ExampleResponse,
+		r.HostPattern, string(r.HostMatchType),
 		r.PathPattern, string(r.MatchType),
 		methodsJSON, headersJSON,
 		r.UpstreamID, nullString(r.PathRewrite), nullString(r.MethodOverride),
@@ -223,7 +230,7 @@ func (s *RouteStore) Delete(ctx context.Context, id string) error {
 
 func scanRoute(row *sql.Row) (route.Route, error) {
 	var r route.Route
-	var matchType, protocol string
+	var hostMatchType, matchType, protocol string
 	var methodsJSON, headersJSON sql.NullString
 	var pathRewrite, methodOverride sql.NullString
 	var reqTransformJSON, respTransformJSON sql.NullString
@@ -231,6 +238,7 @@ func scanRoute(row *sql.Row) (route.Route, error) {
 
 	err := row.Scan(
 		&r.ID, &r.Name, &r.Description, &r.ExampleRequest, &r.ExampleResponse,
+		&r.HostPattern, &hostMatchType,
 		&r.PathPattern, &matchType,
 		&methodsJSON, &headersJSON,
 		&r.UpstreamID, &pathRewrite, &methodOverride,
@@ -245,6 +253,7 @@ func scanRoute(row *sql.Row) (route.Route, error) {
 		return route.Route{}, err
 	}
 
+	r.HostMatchType = route.HostMatchType(hostMatchType)
 	r.MatchType = route.MatchType(matchType)
 	r.Protocol = route.Protocol(protocol)
 	r.Enabled = enabled == 1
@@ -289,7 +298,7 @@ func scanRoute(row *sql.Row) (route.Route, error) {
 
 func scanRouteRows(rows *sql.Rows) (route.Route, error) {
 	var r route.Route
-	var matchType, protocol string
+	var hostMatchType, matchType, protocol string
 	var methodsJSON, headersJSON sql.NullString
 	var pathRewrite, methodOverride sql.NullString
 	var reqTransformJSON, respTransformJSON sql.NullString
@@ -297,6 +306,7 @@ func scanRouteRows(rows *sql.Rows) (route.Route, error) {
 
 	err := rows.Scan(
 		&r.ID, &r.Name, &r.Description, &r.ExampleRequest, &r.ExampleResponse,
+		&r.HostPattern, &hostMatchType,
 		&r.PathPattern, &matchType,
 		&methodsJSON, &headersJSON,
 		&r.UpstreamID, &pathRewrite, &methodOverride,
@@ -308,6 +318,7 @@ func scanRouteRows(rows *sql.Rows) (route.Route, error) {
 		return route.Route{}, err
 	}
 
+	r.HostMatchType = route.HostMatchType(hostMatchType)
 	r.MatchType = route.MatchType(matchType)
 	r.Protocol = route.Protocol(protocol)
 	r.Enabled = enabled == 1

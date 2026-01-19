@@ -1172,3 +1172,504 @@ func TestMatcher_LowerCaseMethodInRoute(t *testing.T) {
 		t.Error("expected uppercase 'POST' to match lowercase 'post' in route")
 	}
 }
+
+// ====================
+// Host Matching Tests
+// ====================
+
+func TestMatcher_HostExactMatch(t *testing.T) {
+	routes := []route.Route{
+		{
+			ID:            "r1",
+			Name:          "api-host",
+			HostPattern:   "api.example.com",
+			HostMatchType: route.HostMatchExact,
+			PathPattern:   "/v1/*",
+			MatchType:     route.MatchPrefix,
+			UpstreamID:    "up1",
+			Enabled:       true,
+		},
+		{
+			ID:            "r2",
+			Name:          "www-host",
+			HostPattern:   "www.example.com",
+			HostMatchType: route.HostMatchExact,
+			PathPattern:   "/v1/*",
+			MatchType:     route.MatchPrefix,
+			UpstreamID:    "up2",
+			Enabled:       true,
+		},
+	}
+
+	matcher, err := route.NewMatcher(routes)
+	if err != nil {
+		t.Fatalf("NewMatcher failed: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		host    string
+		path    string
+		wantID  string
+		wantNil bool
+	}{
+		{"exact match api.example.com", "api.example.com", "/v1/users", "r1", false},
+		{"exact match www.example.com", "www.example.com", "/v1/users", "r2", false},
+		{"case insensitive API.EXAMPLE.COM", "API.EXAMPLE.COM", "/v1/users", "r1", false},
+		{"case insensitive mixed", "Api.Example.Com", "/v1/users", "r1", false},
+		{"different host no match", "other.example.com", "/v1/users", "", true},
+		{"subdomain no match", "sub.api.example.com", "/v1/users", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			headers := map[string]string{"Host": tt.host}
+			result := matcher.Match("GET", tt.path, headers)
+			if tt.wantNil {
+				if result != nil {
+					t.Errorf("expected nil, got route %s", result.Route.ID)
+				}
+				return
+			}
+			if result == nil {
+				t.Fatalf("expected match, got nil")
+			}
+			if result.Route.ID != tt.wantID {
+				t.Errorf("route ID = %s, want %s", result.Route.ID, tt.wantID)
+			}
+		})
+	}
+}
+
+func TestMatcher_HostWildcardMatch(t *testing.T) {
+	routes := []route.Route{
+		{
+			ID:            "r1",
+			Name:          "wildcard-api",
+			HostPattern:   "*.example.com",
+			HostMatchType: route.HostMatchWildcard,
+			PathPattern:   "/v1/*",
+			MatchType:     route.MatchPrefix,
+			UpstreamID:    "up1",
+			Enabled:       true,
+		},
+	}
+
+	matcher, err := route.NewMatcher(routes)
+	if err != nil {
+		t.Fatalf("NewMatcher failed: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		host    string
+		wantNil bool
+	}{
+		{"single subdomain api", "api.example.com", false},
+		{"single subdomain www", "www.example.com", false},
+		{"single subdomain tenant1", "tenant1.example.com", false},
+		{"case insensitive", "API.EXAMPLE.COM", false},
+		{"multiple subdomains rejected", "a.b.example.com", true},
+		{"deep subdomain rejected", "deep.sub.example.com", true},
+		{"bare domain rejected", "example.com", true},
+		{"different domain", "api.other.com", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			headers := map[string]string{"Host": tt.host}
+			result := matcher.Match("GET", "/v1/users", headers)
+			if tt.wantNil {
+				if result != nil {
+					t.Errorf("expected nil, got route %s", result.Route.ID)
+				}
+				return
+			}
+			if result == nil {
+				t.Fatal("expected match, got nil")
+			}
+		})
+	}
+}
+
+func TestMatcher_HostRegexMatch(t *testing.T) {
+	routes := []route.Route{
+		{
+			ID:            "r1",
+			Name:          "versioned-api",
+			HostPattern:   `^v[0-9]+\.api\.example\.com$`,
+			HostMatchType: route.HostMatchRegex,
+			PathPattern:   "/*",
+			MatchType:     route.MatchPrefix,
+			UpstreamID:    "up1",
+			Enabled:       true,
+		},
+	}
+
+	matcher, err := route.NewMatcher(routes)
+	if err != nil {
+		t.Fatalf("NewMatcher failed: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		host    string
+		wantNil bool
+	}{
+		{"v1 matches", "v1.api.example.com", false},
+		{"v2 matches", "v2.api.example.com", false},
+		{"v123 matches", "v123.api.example.com", false},
+		{"case insensitive", "V1.API.EXAMPLE.COM", false},
+		{"no version number", "vx.api.example.com", true},
+		{"missing v prefix", "1.api.example.com", true},
+		{"different domain", "v1.api.other.com", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			headers := map[string]string{"Host": tt.host}
+			result := matcher.Match("GET", "/users", headers)
+			if tt.wantNil {
+				if result != nil {
+					t.Errorf("expected nil, got route %s", result.Route.ID)
+				}
+				return
+			}
+			if result == nil {
+				t.Fatal("expected match, got nil")
+			}
+		})
+	}
+}
+
+func TestMatcher_HostMatchNone_BackwardCompatible(t *testing.T) {
+	routes := []route.Route{
+		{
+			ID:          "r1",
+			Name:        "no-host-pattern",
+			PathPattern: "/api/*",
+			MatchType:   route.MatchPrefix,
+			UpstreamID:  "up1",
+			Enabled:     true,
+			// No HostPattern/HostMatchType = matches any host
+		},
+	}
+
+	matcher, err := route.NewMatcher(routes)
+	if err != nil {
+		t.Fatalf("NewMatcher failed: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		host string
+	}{
+		{"any host", "api.example.com"},
+		{"different host", "www.other.com"},
+		{"localhost", "localhost"},
+		{"empty host", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var headers map[string]string
+			if tt.host != "" {
+				headers = map[string]string{"Host": tt.host}
+			}
+			result := matcher.Match("GET", "/api/users", headers)
+			if result == nil {
+				t.Fatal("expected match with any host")
+			}
+			if result.Route.ID != "r1" {
+				t.Errorf("route ID = %s, want r1", result.Route.ID)
+			}
+		})
+	}
+}
+
+func TestMatcher_HostPriority(t *testing.T) {
+	routes := []route.Route{
+		{
+			ID:            "r1",
+			Name:          "exact-host",
+			HostPattern:   "api.example.com",
+			HostMatchType: route.HostMatchExact,
+			PathPattern:   "/v1/*",
+			MatchType:     route.MatchPrefix,
+			UpstreamID:    "up1",
+			Enabled:       true,
+			Priority:      0,
+		},
+		{
+			ID:            "r2",
+			Name:          "wildcard-host",
+			HostPattern:   "*.example.com",
+			HostMatchType: route.HostMatchWildcard,
+			PathPattern:   "/v1/*",
+			MatchType:     route.MatchPrefix,
+			UpstreamID:    "up2",
+			Enabled:       true,
+			Priority:      0,
+		},
+		{
+			ID:            "r3",
+			Name:          "no-host",
+			PathPattern:   "/v1/*",
+			MatchType:     route.MatchPrefix,
+			UpstreamID:    "up3",
+			Enabled:       true,
+			Priority:      0,
+		},
+	}
+
+	matcher, err := route.NewMatcher(routes)
+	if err != nil {
+		t.Fatalf("NewMatcher failed: %v", err)
+	}
+
+	tests := []struct {
+		name   string
+		host   string
+		wantID string
+	}{
+		// Exact host should match r1 (highest host specificity)
+		{"exact host matches r1", "api.example.com", "r1"},
+		// Other subdomains should match r2 (wildcard)
+		{"wildcard matches r2", "www.example.com", "r2"},
+		{"wildcard matches r2 tenant", "tenant1.example.com", "r2"},
+		// Different domain should match r3 (no host pattern = any host)
+		{"no pattern matches r3", "other.domain.com", "r3"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			headers := map[string]string{"Host": tt.host}
+			result := matcher.Match("GET", "/v1/users", headers)
+			if result == nil {
+				t.Fatalf("expected match, got nil")
+			}
+			if result.Route.ID != tt.wantID {
+				t.Errorf("route ID = %s, want %s", result.Route.ID, tt.wantID)
+			}
+		})
+	}
+}
+
+func TestMatcher_HostWithPort(t *testing.T) {
+	routes := []route.Route{
+		{
+			ID:            "r1",
+			Name:          "api-host",
+			HostPattern:   "api.example.com",
+			HostMatchType: route.HostMatchExact,
+			PathPattern:   "/v1/*",
+			MatchType:     route.MatchPrefix,
+			UpstreamID:    "up1",
+			Enabled:       true,
+		},
+	}
+
+	matcher, err := route.NewMatcher(routes)
+	if err != nil {
+		t.Fatalf("NewMatcher failed: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		host string
+	}{
+		{"without port", "api.example.com"},
+		{"with port 80", "api.example.com:80"},
+		{"with port 8080", "api.example.com:8080"},
+		{"with port 443", "api.example.com:443"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			headers := map[string]string{"Host": tt.host}
+			result := matcher.Match("GET", "/v1/users", headers)
+			if result == nil {
+				t.Fatalf("expected match for host %s", tt.host)
+			}
+			if result.Route.ID != "r1" {
+				t.Errorf("route ID = %s, want r1", result.Route.ID)
+			}
+		})
+	}
+}
+
+func TestMatcher_HostWithTrailingDot(t *testing.T) {
+	routes := []route.Route{
+		{
+			ID:            "r1",
+			Name:          "api-host",
+			HostPattern:   "api.example.com",
+			HostMatchType: route.HostMatchExact,
+			PathPattern:   "/v1/*",
+			MatchType:     route.MatchPrefix,
+			UpstreamID:    "up1",
+			Enabled:       true,
+		},
+	}
+
+	matcher, err := route.NewMatcher(routes)
+	if err != nil {
+		t.Fatalf("NewMatcher failed: %v", err)
+	}
+
+	// Trailing dot should be normalized
+	headers := map[string]string{"Host": "api.example.com."}
+	result := matcher.Match("GET", "/v1/users", headers)
+	if result == nil {
+		t.Fatal("expected match with trailing dot")
+	}
+	if result.Route.ID != "r1" {
+		t.Errorf("route ID = %s, want r1", result.Route.ID)
+	}
+}
+
+func TestMatcher_HostAndPathCombined(t *testing.T) {
+	routes := []route.Route{
+		{
+			ID:            "r1",
+			Name:          "api-users",
+			HostPattern:   "api.example.com",
+			HostMatchType: route.HostMatchExact,
+			PathPattern:   "/users/*",
+			MatchType:     route.MatchPrefix,
+			UpstreamID:    "up1",
+			Enabled:       true,
+		},
+		{
+			ID:            "r2",
+			Name:          "api-orders",
+			HostPattern:   "api.example.com",
+			HostMatchType: route.HostMatchExact,
+			PathPattern:   "/orders/*",
+			MatchType:     route.MatchPrefix,
+			UpstreamID:    "up2",
+			Enabled:       true,
+		},
+		{
+			ID:            "r3",
+			Name:          "admin-users",
+			HostPattern:   "admin.example.com",
+			HostMatchType: route.HostMatchExact,
+			PathPattern:   "/users/*",
+			MatchType:     route.MatchPrefix,
+			UpstreamID:    "up3",
+			Enabled:       true,
+		},
+	}
+
+	matcher, err := route.NewMatcher(routes)
+	if err != nil {
+		t.Fatalf("NewMatcher failed: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		host    string
+		path    string
+		wantID  string
+		wantNil bool
+	}{
+		{"api users", "api.example.com", "/users/123", "r1", false},
+		{"api orders", "api.example.com", "/orders/456", "r2", false},
+		{"admin users", "admin.example.com", "/users/789", "r3", false},
+		{"api wrong path", "api.example.com", "/other/path", "", true},
+		{"admin wrong path", "admin.example.com", "/orders/456", "", true},
+		{"wrong host", "other.example.com", "/users/123", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			headers := map[string]string{"Host": tt.host}
+			result := matcher.Match("GET", tt.path, headers)
+			if tt.wantNil {
+				if result != nil {
+					t.Errorf("expected nil, got route %s", result.Route.ID)
+				}
+				return
+			}
+			if result == nil {
+				t.Fatalf("expected match, got nil")
+			}
+			if result.Route.ID != tt.wantID {
+				t.Errorf("route ID = %s, want %s", result.Route.ID, tt.wantID)
+			}
+		})
+	}
+}
+
+func TestMatcher_InvalidWildcardPattern(t *testing.T) {
+	routes := []route.Route{
+		{
+			ID:            "r1",
+			Name:          "invalid-wildcard",
+			HostPattern:   "api.*.example.com", // Invalid: * must be at start
+			HostMatchType: route.HostMatchWildcard,
+			PathPattern:   "/v1/*",
+			MatchType:     route.MatchPrefix,
+			UpstreamID:    "up1",
+			Enabled:       true,
+		},
+	}
+
+	_, err := route.NewMatcher(routes)
+	if err == nil {
+		t.Error("expected error for invalid wildcard pattern")
+	}
+}
+
+func TestMatcher_InvalidHostRegex(t *testing.T) {
+	routes := []route.Route{
+		{
+			ID:            "r1",
+			Name:          "invalid-regex",
+			HostPattern:   "[invalid(regex",
+			HostMatchType: route.HostMatchRegex,
+			PathPattern:   "/v1/*",
+			MatchType:     route.MatchPrefix,
+			UpstreamID:    "up1",
+			Enabled:       true,
+		},
+	}
+
+	_, err := route.NewMatcher(routes)
+	if err == nil {
+		t.Error("expected error for invalid host regex pattern")
+	}
+}
+
+func TestRoute_WithHost(t *testing.T) {
+	r := route.NewRoute("id1", "test-route", "/api/*", "upstream1")
+	originalUpdatedAt := r.UpdatedAt
+
+	r2 := r.WithHost("api.example.com", route.HostMatchExact)
+
+	if r2.HostPattern != "api.example.com" {
+		t.Errorf("HostPattern = %s, want api.example.com", r2.HostPattern)
+	}
+	if r2.HostMatchType != route.HostMatchExact {
+		t.Errorf("HostMatchType = %s, want exact", r2.HostMatchType)
+	}
+	if r2.UpdatedAt.Before(originalUpdatedAt) {
+		t.Error("UpdatedAt should be updated")
+	}
+	// Original should be unchanged
+	if r.HostPattern != "" {
+		t.Error("Original route should not be modified")
+	}
+
+	// Test other host match types
+	r3 := r.WithHost("*.example.com", route.HostMatchWildcard)
+	if r3.HostMatchType != route.HostMatchWildcard {
+		t.Errorf("HostMatchType = %s, want wildcard", r3.HostMatchType)
+	}
+
+	r4 := r.WithHost(`^v[0-9]+\.api\.example\.com$`, route.HostMatchRegex)
+	if r4.HostMatchType != route.HostMatchRegex {
+		t.Errorf("HostMatchType = %s, want regex", r4.HostMatchType)
+	}
+}
