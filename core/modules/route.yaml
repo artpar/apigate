@@ -12,6 +12,10 @@ schema:
   methods:        { type: json, description: "HTTP methods to match (empty array matches all methods)" }
   headers:        { type: json, description: "Header conditions that must match for this route" }
 
+  # Host matching (for multi-tenant/subdomain routing)
+  host_pattern:   { type: string, default: "", description: "Host pattern for matching (e.g., api.example.com, *.apps.localhost)" }
+  host_match_type: { type: enum, values: ["", exact, wildcard, regex], default: "", description: "How host_pattern is matched: exact, wildcard, or regex (empty = no host matching)" }
+
   # Target configuration
   upstream_id:    { type: ref, to: upstream, required: true, description: "Backend service to forward matching requests to" }
   path_rewrite:   { type: string, description: "Expression to transform the request path before forwarding" }
@@ -77,6 +81,8 @@ channels:
             - { param: upstream_id, name: upstream, short: u, required: true }
             - { param: match_type, name: match, default: prefix }
             - { param: methods, description: "Comma-separated list of methods" }
+            - { param: host_pattern, name: host, short: H, description: "Host pattern (e.g., *.apps.localhost)" }
+            - { param: host_match_type, name: host-match, description: "Host match type: exact, wildcard, regex" }
             - { param: protocol, default: http }
             - { param: priority, type: int, default: "0" }
         - action: update
@@ -86,6 +92,8 @@ channels:
             - { param: name }
             - { param: path_pattern, name: path }
             - { param: upstream_id, name: upstream }
+            - { param: host_pattern, name: host, short: H, description: "Host pattern (e.g., *.apps.localhost)" }
+            - { param: host_match_type, name: host-match, description: "Host match type: exact, wildcard, regex" }
             - { param: priority, type: int }
         - action: delete
           args:

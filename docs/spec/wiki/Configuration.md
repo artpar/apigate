@@ -129,9 +129,9 @@ apigate serve --help
 
 | Flag | Environment Variable | Description |
 |------|---------------------|-------------|
-| `--host` | `APIGATE_HOST` | Listen address |
-| `--port` | `APIGATE_PORT` | Listen port |
-| `--database` | `APIGATE_DATABASE_PATH` | Database path |
+| `--host` | `APIGATE_SERVER_HOST` | Listen address |
+| `--port` | `APIGATE_SERVER_PORT` | Listen port |
+| `--database` | `APIGATE_DATABASE_DSN` | Database path |
 | `--log-level` | `APIGATE_LOG_LEVEL` | Logging level |
 | `--config` | - | Config file path |
 
