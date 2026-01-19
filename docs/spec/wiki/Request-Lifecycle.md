@@ -322,8 +322,8 @@ Errors can occur at various stages:
 | Verify Hash | `invalid_api_key` | 401 |
 | Validate Key | `key_expired` / `key_revoked` | 401 |
 | Check User | `user_suspended` | 403 |
-| Check Quota | `quota_exceeded` | 429 |
-| Check Rate | `rate_limited` | 429 |
+| Check Quota | `quota_exceeded` | 402 |
+| Check Rate | `rate_limit_exceeded` | 429 |
 | Transform | `transform_error` | 500 |
 | Forward | `upstream_error` | 502 |
 

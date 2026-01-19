@@ -10,6 +10,7 @@ Standard request/response pattern:
 
 ```bash
 apigate routes create \
+  --name "api-v1" \
   --path "/api/v1/*" \
   --upstream backend \
   --protocol http
@@ -26,7 +27,11 @@ apigate routes create \
 Streaming responses without buffering:
 
 ```bash
-apigate routes update <id> --protocol http_stream
+apigate routes create \
+  --name "downloads" \
+  --path "/downloads/*" \
+  --upstream backend \
+  --protocol http_stream
 ```
 
 - Response streamed to client
@@ -40,7 +45,11 @@ apigate routes update <id> --protocol http_stream
 For event streams:
 
 ```bash
-apigate routes update <id> --protocol sse
+apigate routes create \
+  --name "events" \
+  --path "/events/*" \
+  --upstream backend \
+  --protocol sse
 ```
 
 - Long-lived connections
@@ -61,7 +70,11 @@ metering_expr: "responseBytes"  # Count bytes
 Bidirectional communication:
 
 ```bash
-apigate routes update <id> --protocol websocket
+apigate routes create \
+  --name "websocket" \
+  --path "/ws/*" \
+  --upstream backend \
+  --protocol websocket
 ```
 
 - Full duplex messaging

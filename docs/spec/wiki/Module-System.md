@@ -340,6 +340,7 @@ meta:
 | `certificate.yaml` | TLS certificates |
 | `oauth_identity.yaml` | OAuth identities |
 | `oauth_state.yaml` | OAuth CSRF tokens |
+| `usage_event.yaml` | Usage event records |
 
 ---
 

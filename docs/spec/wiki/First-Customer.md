@@ -44,7 +44,7 @@ apigate users create \
 ### Via CLI
 
 ```bash
-apigate api-keys create \
+apigate keys create \
   --user <user-id> \
   --name "Production Key"
 ```
@@ -80,11 +80,11 @@ curl -H "X-API-Key: ak_xxx" https://api.example.com/v1/resource
 After customer makes requests:
 
 ```bash
-# Check usage
-apigate usage get --user <user-id>
+# Check usage summary
+apigate usage summary --user <user-id>
 
 # View recent requests
-apigate logs --filter user:<user-id>
+apigate usage recent --user <user-id> --limit 20
 ```
 
 ---

@@ -14,24 +14,25 @@ See [[Tutorial-Production]] for a step-by-step deployment guide.
 
 ### Infrastructure
 
-- [ ] PostgreSQL for database (not SQLite)
-- [ ] Redis for rate limiting and caching
+- [ ] SQLite database file on persistent storage (backed up)
 - [ ] HTTPS enabled (ACME or manual certs)
-- [ ] Load balancer for multiple instances
+- [ ] Reverse proxy (nginx/caddy) for SSL termination (optional)
 - [ ] CDN for static assets (optional)
+
+> **Note**: APIGate uses SQLite for simplicity and portability. For high-traffic deployments, ensure SQLite is on fast storage (SSD) and consider running multiple read replicas behind a load balancer.
 
 ### Security
 
-- [ ] Strong database password
+- [ ] Database file permissions restricted
 - [ ] Secure admin access
 - [ ] Firewall configured
-- [ ] Secrets in environment variables
-- [ ] Regular backups
+- [ ] Secrets stored via settings with `--encrypted`
+- [ ] Regular backups of SQLite database
 
 ### Monitoring
 
-- [ ] Health checks configured
-- [ ] Prometheus metrics enabled
+- [ ] Health checks configured (`/health` endpoint)
+- [ ] Prometheus metrics enabled (`/metrics` endpoint)
 - [ ] Log aggregation
 - [ ] Alerting for errors
 
@@ -42,18 +43,32 @@ See [[Tutorial-Production]] for a step-by-step deployment guide.
 Key production settings:
 
 ```bash
-# Database
-DATABASE_URL=postgres://user:pass@db:5432/apigate
+# Server
+APIGATE_SERVER_HOST=0.0.0.0
+APIGATE_SERVER_PORT=8080
 
-# Redis
-REDIS_URL=redis://redis:6379
+# Database (SQLite path)
+APIGATE_DATABASE_DSN=/data/apigate.db
 
-# HTTPS
-TLS_ACME_ENABLED=true
-TLS_ACME_EMAIL=admin@example.com
+# Upstream
+APIGATE_UPSTREAM_URL=https://api.backend.com
+APIGATE_UPSTREAM_TIMEOUT=30s
 
-# Security
-ADMIN_SECRET=<strong-random-string>
+# Logging
+APIGATE_LOG_LEVEL=info
+APIGATE_LOG_FORMAT=json
+```
+
+### TLS/HTTPS Settings
+
+Configure via settings:
+
+```bash
+# ACME (Let's Encrypt)
+apigate settings set tls.enabled true
+apigate settings set tls.mode acme
+apigate settings set tls.domain "api.example.com"
+apigate settings set tls.acme_email "admin@example.com"
 ```
 
 ---

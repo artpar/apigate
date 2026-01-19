@@ -377,15 +377,15 @@ response_transform:
 ## Configuration via CLI
 
 ```bash
-# Create route with transformations
+# Create route with path rewrite
 apigate routes create \
   --name "api-v1" \
   --path "/api/v1/*" \
   --upstream "backend" \
-  --path-rewrite "/$1" \
-  --add-request-header "X-Source:apigate" \
-  --remove-response-header "Server"
+  --rewrite "/$1"
 ```
+
+> **Note**: Complex transformations (header modifications, body transforms) must be configured via the Admin UI or API. The CLI supports basic route creation with path rewriting only.
 
 ---
 
@@ -470,10 +470,13 @@ response_transform:
       X-Original-Path: "${path}"
 ```
 
-### View Transformation Logs
+### Check Server Logs
+
+View transformation activity in the server logs:
 
 ```bash
-apigate logs --filter "transform" --tail 100
+# If running in foreground, watch server output
+# If using systemd: journalctl -u apigate -f
 ```
 
 ---

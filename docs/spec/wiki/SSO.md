@@ -21,17 +21,17 @@ SSO allows users to sign in using their existing identity provider:
 ### Google
 
 ```bash
-OAUTH_GOOGLE_ENABLED=true
-OAUTH_GOOGLE_CLIENT_ID=xxx.googleusercontent.com
-OAUTH_GOOGLE_CLIENT_SECRET=xxx
+apigate settings set oauth.google.enabled true
+apigate settings set oauth.google.client_id "xxx.googleusercontent.com"
+apigate settings set oauth.google.client_secret "xxx" --encrypted
 ```
 
 ### GitHub
 
 ```bash
-OAUTH_GITHUB_ENABLED=true
-OAUTH_GITHUB_CLIENT_ID=xxx
-OAUTH_GITHUB_CLIENT_SECRET=xxx
+apigate settings set oauth.github.enabled true
+apigate settings set oauth.github.client_id "xxx"
+apigate settings set oauth.github.client_secret "xxx" --encrypted
 ```
 
 ### Generic OIDC
@@ -39,10 +39,10 @@ OAUTH_GITHUB_CLIENT_SECRET=xxx
 For enterprise IdPs (Okta, Azure AD, etc.):
 
 ```bash
-OAUTH_OIDC_ENABLED=true
-OAUTH_OIDC_ISSUER=https://your-idp.com
-OAUTH_OIDC_CLIENT_ID=xxx
-OAUTH_OIDC_CLIENT_SECRET=xxx
+apigate settings set oauth.oidc.enabled true
+apigate settings set oauth.oidc.issuer_url "https://your-idp.com"
+apigate settings set oauth.oidc.client_id "xxx"
+apigate settings set oauth.oidc.client_secret "xxx" --encrypted
 ```
 
 ---

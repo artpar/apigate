@@ -10,33 +10,27 @@ Integrations are organized by capability:
 
 | Capability | Purpose | Providers |
 |------------|---------|-----------|
-| **Payment** | Billing | Stripe, Paddle, LemonSqueezy |
-| **Email** | Sending emails | SMTP, SendGrid |
-| **Cache** | Caching | Redis, Memory |
-| **Storage** | File storage | S3, Disk |
-| **Queue** | Background jobs | Redis, Memory |
-| **Notification** | Alerts | Slack, Webhook |
+| **Payment** | Billing | Stripe, Paddle, LemonSqueezy, Dummy, None |
+| **Email** | Sending emails | SMTP, Mock, None |
 | **OAuth** | Social login | Google, GitHub, OIDC |
-| **TLS** | Certificates | ACME |
+| **TLS** | Certificates | ACME, Manual |
 
 ---
 
 ## Configuration
 
-Each integration is configured via environment variables:
+Integrations are configured via the settings system:
 
 ```bash
 # Payment
-PAYMENT_PROVIDER=stripe
-STRIPE_API_KEY=sk_xxx
+apigate settings set payment.provider stripe
+apigate settings set payment.stripe.secret_key "sk_xxx" --encrypted
+apigate settings set payment.stripe.public_key "pk_xxx"
 
 # Email
-EMAIL_PROVIDER=smtp
-SMTP_HOST=smtp.example.com
-
-# Cache
-CACHE_PROVIDER=redis
-REDIS_URL=redis://localhost:6379
+apigate settings set email.provider smtp
+apigate settings set email.smtp.host "smtp.example.com"
+apigate settings set email.smtp.port "587"
 ```
 
 ---

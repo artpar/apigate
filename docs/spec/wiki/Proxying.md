@@ -41,7 +41,7 @@ APIGate acts as a reverse proxy, forwarding authenticated requests to upstream s
 Configure a default upstream for simple deployments:
 
 ```bash
-UPSTREAM_URL=https://api.backend.com
+APIGATE_UPSTREAM_URL=https://api.backend.com
 ```
 
 All requests forward to this URL after authentication.
@@ -120,10 +120,9 @@ apigate routes update <id> --protocol sse
 
 ```bash
 # Default timeout
-UPSTREAM_TIMEOUT=30s
+APIGATE_UPSTREAM_TIMEOUT=30s
 
-# Per-upstream timeout
-apigate upstreams update <id> --timeout 60s
+# Per-upstream timeout (via Admin UI or API)
 ```
 
 ---

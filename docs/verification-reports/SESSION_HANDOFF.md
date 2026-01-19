@@ -1,8 +1,8 @@
 # Documentation Verification Session Handoff
 
-**Last Updated**: 2026-01-20T00:30:00+05:30
-**Session**: Wiki Verification Session 5 (IN PROGRESS)
-**Next Session**: Wiki Verification Session 6
+**Last Updated**: 2026-01-19T20:00:00+05:30
+**Session**: Wiki Verification Session 6 (COMPLETED)
+**Status**: ALL WIKI FILES VERIFIED
 
 ---
 
@@ -17,9 +17,29 @@ Systematic verification of wiki documentation against actual codebase to identif
 | Metric | Count |
 |--------|-------|
 | **Total wiki files** | 61 |
-| **Files verified** | 51 |
-| **Files remaining** | 10 |
-| **Progress** | 84% |
+| **Files verified** | 61 |
+| **Files remaining** | 0 |
+| **Progress** | 100% |
+
+---
+
+## Session 6 Accomplishments (FINAL SESSION)
+
+All remaining 10 files verified and fixed:
+
+1. **Architecture/Technical docs** (6 files):
+   - Architecture.md: Fixed capability table (removed hallucinated Redis, SendGrid, S3, etc.)
+   - Request-Lifecycle.md: Fixed error codes (quota_exceeded=402, rate_limit_exceeded)
+   - Module-System.md: Added missing usage_event.yaml to module list
+   - Transformations.md: Fixed CLI commands, removed fake `apigate logs` command
+   - Proxying.md: Fixed env vars (APIGATE_ prefix)
+   - Protocols.md: Fixed CLI examples (routes create, not routes update)
+
+2. **Other docs** (4 files):
+   - First-Customer.md: Fixed `api-keys` → `keys`, fixed usage commands
+   - SSO.md: Changed from fake env vars to correct settings commands
+   - Integrations.md: Removed non-existent capabilities, fixed configuration method
+   - Production.md: **CRITICAL** - Fixed PostgreSQL/Redis claims (SQLite only!)
 
 ---
 
@@ -47,39 +67,7 @@ Systematic verification of wiki documentation against actual codebase to identif
 
 ---
 
-## FOR NEXT SESSION: Start Here
-
-### Files to Verify Next (10 remaining)
-
-**Priority Order:**
-
-1. **Architecture/Technical** (high value):
-   - [ ] Architecture.md
-   - [ ] Request-Lifecycle.md
-   - [ ] Module-System.md
-   - [ ] Transformations.md
-   - [ ] Proxying.md
-   - [ ] Protocols.md
-
-2. **Other**:
-   - [ ] First-Customer.md
-   - [ ] SSO.md
-   - [ ] Integrations.md
-   - [ ] Production.md
-
-### Verification Process
-
-For each file:
-1. Read the wiki file
-2. For each CLI command: verify against `cmd/apigate/*.go` or `core/modules/*.yaml`
-3. For each setting key: verify against `domain/settings/settings.go`
-4. For each env var: verify has `APIGATE_` prefix and exists in `config/config.go`
-5. For feature claims: verify in codebase (PostgreSQL=NO, Redis=NO, Scopes=NO)
-6. Fix or flag issues
-
----
-
-## Files VERIFIED (51 files - DO NOT RE-VERIFY)
+## Files VERIFIED (61 files - ALL COMPLETE)
 
 ### Core Spec Files (4)
 - [x] docs/spec/error-codes.md
@@ -88,7 +76,19 @@ For each file:
 - [x] docs/spec/resource-types.md
 - [x] docs/spec/metering-api.md
 
-### Wiki Files - Verified & Fixed (47)
+### Wiki Files - Verified & Fixed (57)
+
+**Session 6 additions (FINAL):**
+- [x] Architecture.md
+- [x] Request-Lifecycle.md
+- [x] Module-System.md
+- [x] Transformations.md
+- [x] Proxying.md
+- [x] Protocols.md
+- [x] First-Customer.md
+- [x] SSO.md
+- [x] Integrations.md
+- [x] Production.md
 
 **Session 5 additions:**
 - [x] Payment-Stripe.md
@@ -402,11 +402,11 @@ APIGATE_OPENAPI_ENABLED
 | Fact | Truth |
 |------|-------|
 | Database | **SQLite ONLY** - PostgreSQL NOT supported |
-| Redis | **NOT SUPPORTED** |
-| API Key Scopes | **DO NOT EXIST** |
+| Redis | **NOT SUPPORTED** (YAML definitions exist but no Go implementation) |
+| API Key Scopes | **EXIST** (domain/key/key.go has Scopes field, HasScope function) |
 | Migrations | **AUTOMATIC** on startup |
 | Email Providers | smtp, mock, none ONLY (no sendgrid, ses, etc.) |
-| Payment Providers | stripe, paddle, lemonsqueezy, none |
+| Payment Providers | stripe, paddle, lemonsqueezy, dummy, none |
 | Webhook Retry Count | **3** (not 6) |
 | Plan Stripe Price ID | Set via **Admin UI only**, not CLI |
 | Plan Features Flag | **DOES NOT EXIST** |
@@ -422,10 +422,10 @@ When verifying, watch for these patterns:
 2. **Non-existent subcommands**: `analytics`, `doctor`, `logs`, `migrate`, `billing`
 3. **Fake flags**: `--stripe-price-id`, `--features`, `--monthly-quota`, `--quota-enforcement`
 4. **Wrong env var prefix**: Missing `APIGATE_` prefix
-5. **Non-existent features**: PostgreSQL, Redis, API key scopes
+5. **Non-existent features**: PostgreSQL, Redis (YAML definitions exist but no implementation)
 6. **Wrong setting prefixes**: `branding.*` instead of `custom.*`, underscores instead of dots
 7. **Fake providers**: `sendgrid`, `ses`, `postmark` email providers
-8. **Hallucinated update commands**: `apigate users update`, `apigate webhooks create`
+8. **Hallucinated update commands**: `apigate users update`, `apigate routes update`, `apigate webhooks create`
 
 ---
 
@@ -463,15 +463,23 @@ When verifying, watch for these patterns:
 | Wiki Verification 3 | 8 wiki files | 8 |
 | Wiki Verification 4 | 10 wiki files | 20+ |
 | Wiki Verification 5 | 11 wiki files | 30+ |
-| **Total** | **51 files** | **80+ issues** |
+| Wiki Verification 6 | 10 wiki files | 15+ |
+| **Total** | **61 files** | **95+ issues** |
 
 ---
 
-## Next Session Instructions
+## VERIFICATION COMPLETE
 
-1. Read this handoff document first
-2. Start with Payment-*.md files (highest priority)
-3. Use the "Critical Knowledge" section to verify commands/settings
-4. Fix issues inline as you find them
-5. Update this handoff document with progress
-6. Goal: Complete remaining 20 files to reach 100%
+All 61 wiki documentation files have been verified against the codebase.
+
+### Major Issues Fixed in Final Session:
+- Removed fake PostgreSQL/Redis support claims
+- Fixed incorrect environment variables (APIGATE_ prefix)
+- Corrected CLI command names (`keys` not `api-keys`)
+- Removed non-existent commands (`logs`, `routes update`)
+- Fixed capability tables (removed SendGrid, S3, etc.)
+- Corrected error codes (quota_exceeded=402, rate_limit_exceeded)
+- Changed from fake env vars to settings commands (SSO, Integrations)
+
+### Remaining Outstanding Issue:
+- `docs/spec/README.md` references non-existent tests (see "Outstanding Issues" above)

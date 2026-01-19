@@ -256,12 +256,11 @@ Pluggable implementations for external integrations:
 
 | Capability | Providers |
 |------------|-----------|
-| **payment** | Stripe, Paddle, LemonSqueezy, Dummy |
-| **email** | SMTP, SendGrid, Log |
-| **cache** | Redis, Memory |
-| **storage** | S3, Disk, Memory |
-| **queue** | Redis, Memory |
-| **notification** | Slack, Webhook, Log |
+| **payment** | Stripe, Paddle, LemonSqueezy, Dummy, None |
+| **email** | SMTP, Mock, None |
+| **oauth** | Google, GitHub, OIDC |
+
+> **Note**: Module YAML definitions exist for Redis cache and SendGrid email as future capabilities, but these are not yet implemented in Go. APIGate currently uses SQLite for persistence and in-memory stores for rate limiting.
 
 ---
 
