@@ -7,6 +7,8 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,7 +20,8 @@ import (
 // DBCertCache implements autocert.Cache using database storage.
 // This enables horizontal scaling - all instances share the same certificates.
 type DBCertCache struct {
-	store ports.CertificateStore
+	store  ports.CertificateStore
+	logger *slog.Logger
 
 	// In-memory cache for performance
 	mu    sync.RWMutex
@@ -29,34 +32,56 @@ type DBCertCache struct {
 // NewDBCertCache creates a new database-backed certificate cache.
 func NewDBCertCache(store ports.CertificateStore) *DBCertCache {
 	return &DBCertCache{
-		store: store,
-		cache: make(map[string][]byte),
-		ttl:   5 * time.Minute, // Cache certificates for 5 minutes
+		store:  store,
+		logger: slog.Default(),
+		cache:  make(map[string][]byte),
+		ttl:    5 * time.Minute, // Cache certificates for 5 minutes
 	}
+}
+
+// SetLogger sets a custom logger for the certificate cache.
+func (c *DBCertCache) SetLogger(logger *slog.Logger) {
+	c.logger = logger
 }
 
 // Get retrieves a certificate data from cache.
 // Implements autocert.Cache interface.
 func (c *DBCertCache) Get(ctx context.Context, key string) ([]byte, error) {
+	isAccountKey := strings.Contains(key, "acme_account") || strings.HasPrefix(key, "+")
+
 	// Check in-memory cache first
 	c.mu.RLock()
 	if data, ok := c.cache[key]; ok {
 		c.mu.RUnlock()
+		if isAccountKey {
+			c.logger.Debug("ACME account key retrieved from memory cache", "key_prefix", key[:min(20, len(key))])
+		} else {
+			c.logger.Debug("certificate retrieved from memory cache", "domain", key)
+		}
 		return data, nil
 	}
 	c.mu.RUnlock()
+
+	// Account keys are only stored in memory, so if not found there, it's a miss
+	if isAccountKey {
+		c.logger.Debug("ACME account key not in memory cache (will create new)", "key_prefix", key[:min(20, len(key))])
+		return nil, autocert.ErrCacheMiss
+	}
 
 	// Key format: domain name
 	cert, err := c.store.GetByDomain(ctx, key)
 	if err != nil {
 		if errors.Is(err, ports.ErrNotFound) {
+			c.logger.Debug("certificate not in database (will obtain via ACME)", "domain", key)
 			return nil, autocert.ErrCacheMiss
 		}
+		c.logger.Error("failed to get certificate from database", "domain", key, "error", err)
 		return nil, fmt.Errorf("get certificate from database: %w", err)
 	}
 
 	// Check if certificate is still valid
 	if !cert.IsActive() {
+		c.logger.Debug("certificate found but not active", "domain", key, "status", cert.Status)
 		return nil, autocert.ErrCacheMiss
 	}
 
@@ -68,6 +93,7 @@ func (c *DBCertCache) Get(ctx context.Context, key string) ([]byte, error) {
 	c.cache[key] = data
 	c.mu.Unlock()
 
+	c.logger.Debug("certificate retrieved from database", "domain", key, "expires", cert.ExpiresAt)
 	return data, nil
 }
 
@@ -84,6 +110,7 @@ func (c *DBCertCache) Put(ctx context.Context, key string, data []byte) error {
 		c.mu.Lock()
 		c.cache[key] = data
 		c.mu.Unlock()
+		c.logger.Debug("ACME account key stored in memory cache", "key_prefix", key[:min(20, len(key))], "data_len", len(data))
 		return nil
 	}
 
@@ -115,8 +142,10 @@ func (c *DBCertCache) Put(ctx context.Context, key string, data []byte) error {
 		existing.UpdatedAt = now
 
 		if err := c.store.Update(ctx, existing); err != nil {
+			c.logger.Error("failed to update certificate in database", "domain", key, "error", err)
 			return fmt.Errorf("update certificate in database: %w", err)
 		}
+		c.logger.Info("certificate renewed and stored", "domain", key, "issuer", parsedCert.Issuer.CommonName, "expires", parsedCert.NotAfter)
 	} else {
 		// Create new certificate
 		cert := domaintls.Certificate{
@@ -135,8 +164,10 @@ func (c *DBCertCache) Put(ctx context.Context, key string, data []byte) error {
 		}
 
 		if err := c.store.Create(ctx, cert); err != nil {
+			c.logger.Error("failed to store certificate in database", "domain", key, "error", err)
 			return fmt.Errorf("store certificate in database: %w", err)
 		}
+		c.logger.Info("new certificate obtained and stored", "domain", key, "issuer", parsedCert.Issuer.CommonName, "expires", parsedCert.NotAfter)
 	}
 
 	// Update in-memory cache
