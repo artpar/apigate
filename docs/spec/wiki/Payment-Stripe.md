@@ -16,14 +16,14 @@ Stripe is the recommended payment provider for production deployments.
 
 ```bash
 # Environment variables
-PAYMENT_PROVIDER=stripe
-STRIPE_API_KEY=sk_live_xxx
-STRIPE_WEBHOOK_SECRET=whsec_xxx
+APIGATE_BILLING_MODE=stripe
+APIGATE_BILLING_STRIPE_KEY=sk_live_xxx
 
-# Or via CLI
+# Or via CLI settings
 apigate settings set payment.provider stripe
-apigate settings set payment.stripe.api_key "sk_live_xxx"
-apigate settings set payment.stripe.webhook_secret "whsec_xxx"
+apigate settings set payment.stripe.secret_key "sk_live_xxx" --encrypted
+apigate settings set payment.stripe.public_key "pk_live_xxx"
+apigate settings set payment.stripe.webhook_secret "whsec_xxx" --encrypted
 ```
 
 ### 3. Set Up Webhooks
@@ -38,23 +38,33 @@ In Stripe Dashboard > Developers > Webhooks:
    - `customer.subscription.deleted`
    - `invoice.paid`
    - `invoice.payment_failed`
-4. Copy the signing secret to `STRIPE_WEBHOOK_SECRET`
+4. Copy the signing secret to webhook_secret setting
 
 ---
 
-## Plan Synchronization
+## Plan Configuration
 
-### Create Plans in Stripe
+### 1. Create Plans in APIGate
 
 ```bash
-# Create a Stripe price, then link to APIGate plan
 apigate plans create \
   --name "Pro" \
-  --rate-limit 1000 \
+  --rate-limit-per-minute 1000 \
   --requests-per-month 100000 \
   --price-monthly 2900 \
-  --stripe-price-id "price_xxx"
+  --trial-days 14
 ```
+
+### 2. Link to Stripe Price
+
+After creating the plan in APIGate:
+
+1. Create a corresponding price in Stripe Dashboard
+2. In APIGate Admin UI, go to **Plans** and edit the plan
+3. Enter the Stripe price ID (e.g., `price_xxx`) in the Stripe Price ID field
+4. Save the plan
+
+> **Note**: Stripe price IDs must be linked via the Admin UI, not CLI.
 
 ### Automatic Sync
 
@@ -73,12 +83,7 @@ Stripe's Customer Portal allows users to:
 - View invoices
 - Cancel subscriptions
 
-```bash
-# Enable portal redirect
-apigate settings set payment.stripe.portal_enabled true
-```
-
-Users access via: `/portal/billing`
+Users access the portal via: `/portal/billing`
 
 ---
 
@@ -91,11 +96,12 @@ For metered billing:
 apigate plans create \
   --name "Pay As You Go" \
   --price-monthly 0 \
-  --overage-price 1 \
-  --stripe-price-id "price_metered_xxx"
+  --overage-price 1
 ```
 
-APIGate reports usage to Stripe automatically at the end of each billing period.
+Link to a Stripe metered price via Admin UI. APIGate reports usage to Stripe automatically at the end of each billing period.
+
+External services can also report usage via the [[Metering-API]].
 
 ---
 
@@ -104,7 +110,7 @@ APIGate reports usage to Stripe automatically at the end of each billing period.
 Use Stripe test mode:
 
 ```bash
-STRIPE_API_KEY=sk_test_xxx
+apigate settings set payment.stripe.secret_key "sk_test_xxx" --encrypted
 ```
 
 Test card numbers:
@@ -132,23 +138,22 @@ Test card numbers:
 
 **Error**: `Webhook signature verification failed`
 
-**Solution**: Ensure `STRIPE_WEBHOOK_SECRET` matches the endpoint's signing secret.
+**Solution**: Ensure webhook secret matches the endpoint's signing secret:
+```bash
+apigate settings set payment.stripe.webhook_secret "whsec_xxx" --encrypted
+```
 
 ### Customer Not Found
 
 **Error**: `No such customer: cus_xxx`
 
-**Solution**: The user's Stripe customer was deleted. Clear the mapping:
-```bash
-apigate provider-mappings delete stripe user <user-id>
-```
+**Solution**: The user's Stripe customer mapping may be stale. Check the user record in Admin UI and verify the Stripe customer ID.
 
 ### Subscription Sync Issues
 
-```bash
-# Force sync from Stripe
-apigate stripe sync --user <user-id>
-```
+1. Check webhook logs in Stripe Dashboard
+2. Verify webhook endpoint is receiving events
+3. Check APIGate logs for processing errors
 
 ---
 
@@ -157,4 +162,5 @@ apigate stripe sync --user <user-id>
 - [[Plans]] - Plan configuration
 - [[Providers]] - Provider overview
 - [[Webhooks]] - Webhook handling
+- [[Metering-API]] - External usage events
 - [[Tutorial-Stripe]] - Step-by-step tutorial

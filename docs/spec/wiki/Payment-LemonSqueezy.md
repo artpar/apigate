@@ -15,16 +15,11 @@ LemonSqueezy is a simple payment solution ideal for indie developers and small t
 ### 2. Configure APIGate
 
 ```bash
-# Environment variables
-PAYMENT_PROVIDER=lemonsqueezy
-LEMON_API_KEY=xxx
-LEMON_STORE_ID=xxx
-LEMON_WEBHOOK_SECRET=xxx
-
-# Or via CLI
+# Via CLI settings
 apigate settings set payment.provider lemonsqueezy
-apigate settings set payment.lemon.api_key "xxx"
-apigate settings set payment.lemon.store_id "xxx"
+apigate settings set payment.lemonsqueezy.api_key "xxx" --encrypted
+apigate settings set payment.lemonsqueezy.store_id "xxx"
+apigate settings set payment.lemonsqueezy.webhook_secret "xxx" --encrypted
 ```
 
 ### 3. Set Up Webhooks
@@ -42,21 +37,28 @@ In LemonSqueezy Dashboard > Settings > Webhooks:
 
 ---
 
-## Plan Synchronization
+## Plan Configuration
 
-### Create Products in LemonSqueezy
-
-1. Create products with variants in LemonSqueezy
-2. Link variants to APIGate plans:
+### 1. Create Plans in APIGate
 
 ```bash
 apigate plans create \
   --name "Pro" \
-  --rate-limit 1000 \
+  --rate-limit-per-minute 1000 \
   --requests-per-month 100000 \
-  --price-monthly 2900 \
-  --lemon-variant-id "xxx"
+  --price-monthly 2900
 ```
+
+### 2. Link to LemonSqueezy Variant
+
+After creating the plan:
+
+1. Create a product with variants in LemonSqueezy Dashboard
+2. In APIGate Admin UI, go to **Plans** and edit the plan
+3. Enter the LemonSqueezy variant ID in the LemonSqueezy Variant ID field
+4. Save the plan
+
+> **Note**: LemonSqueezy variant IDs must be linked via the Admin UI, not CLI.
 
 ---
 
@@ -95,11 +97,7 @@ LemonSqueezy uses hosted checkout:
 
 ## Testing
 
-Use LemonSqueezy test mode:
-
-```bash
-LEMON_TEST_MODE=true
-```
+Use LemonSqueezy test mode in the dashboard to test checkout flows with test payments.
 
 ---
 
@@ -108,3 +106,4 @@ LEMON_TEST_MODE=true
 - [[Plans]] - Plan configuration
 - [[Providers]] - Provider overview
 - [[Webhooks]] - Webhook handling
+- [[Metering-API]] - External usage events

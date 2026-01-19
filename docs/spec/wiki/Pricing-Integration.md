@@ -26,37 +26,32 @@ APIGate plans map to payment provider prices:
 
 ## Linking Plans to Prices
 
-### Stripe
+Payment provider price IDs must be linked via the **Admin UI**, not CLI.
 
-```bash
-apigate plans update <id> --stripe-price-id "price_xxx"
-```
+### Steps
 
-### Paddle
+1. Create your plan in APIGate via CLI:
 
-```bash
-apigate plans update <id> --paddle-price-id "pri_xxx"
-```
+   ```bash
+   apigate plans create \
+     --name "Pro" \
+     --rate-limit-per-minute 1000 \
+     --requests-per-month 100000 \
+     --price-monthly 2900
+   ```
 
-### LemonSqueezy
+2. Create the corresponding price in your payment provider's dashboard
 
-```bash
-apigate plans update <id> --lemon-variant-id "xxx"
-```
+3. In APIGate Admin UI:
+   - Go to **Plans**
+   - Click on the plan to edit
+   - Enter the price ID in the appropriate field:
+     - **Stripe Price ID** (e.g., `price_xxx`)
+     - **Paddle Price ID** (e.g., `pri_xxx`)
+     - **LemonSqueezy Variant ID** (e.g., `xxx`)
+   - Save the plan
 
----
-
-## Creating Linked Plans
-
-```bash
-# Create plan with Stripe price
-apigate plans create \
-  --name "Pro" \
-  --rate-limit 1000 \
-  --requests-per-month 100000 \
-  --price-monthly 2900 \
-  --stripe-price-id "price_xxx"
-```
+> **Note**: There are no CLI flags like `--stripe-price-id` - price linking must be done via Admin UI.
 
 ---
 

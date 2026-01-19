@@ -15,16 +15,12 @@ Paddle handles payments, tax compliance, and merchant of record responsibilities
 ### 2. Configure APIGate
 
 ```bash
-# Environment variables
-PAYMENT_PROVIDER=paddle
-PADDLE_VENDOR_ID=123456
-PADDLE_API_KEY=xxx
-PADDLE_WEBHOOK_SECRET=xxx
-
-# Or via CLI
+# Via CLI settings
 apigate settings set payment.provider paddle
 apigate settings set payment.paddle.vendor_id "123456"
-apigate settings set payment.paddle.api_key "xxx"
+apigate settings set payment.paddle.api_key "xxx" --encrypted
+apigate settings set payment.paddle.public_key "xxx"
+apigate settings set payment.paddle.webhook_secret "xxx" --encrypted
 ```
 
 ### 3. Set Up Webhooks
@@ -41,21 +37,28 @@ In Paddle Dashboard > Developer Tools > Notifications:
 
 ---
 
-## Plan Synchronization
+## Plan Configuration
 
-### Create Plans in Paddle
-
-1. Create products in Paddle Dashboard
-2. Link to APIGate plans:
+### 1. Create Plans in APIGate
 
 ```bash
 apigate plans create \
   --name "Pro" \
-  --rate-limit 1000 \
+  --rate-limit-per-minute 1000 \
   --requests-per-month 100000 \
-  --price-monthly 2900 \
-  --paddle-price-id "pri_xxx"
+  --price-monthly 2900
 ```
+
+### 2. Link to Paddle Price
+
+After creating the plan:
+
+1. Create a product with price in Paddle Dashboard
+2. In APIGate Admin UI, go to **Plans** and edit the plan
+3. Enter the Paddle price ID in the Paddle Price ID field
+4. Save the plan
+
+> **Note**: Paddle price IDs must be linked via the Admin UI, not CLI.
 
 ---
 
@@ -93,12 +96,7 @@ Paddle uses overlay checkout:
 
 ## Testing
 
-Use Paddle sandbox:
-
-```bash
-PADDLE_ENVIRONMENT=sandbox
-PADDLE_VENDOR_ID=sandbox_vendor_id
-```
+Use Paddle sandbox environment and configure with sandbox credentials in the Paddle Dashboard.
 
 ---
 
@@ -107,3 +105,4 @@ PADDLE_VENDOR_ID=sandbox_vendor_id
 - [[Plans]] - Plan configuration
 - [[Providers]] - Provider overview
 - [[Webhooks]] - Webhook handling
+- [[Metering-API]] - External usage events

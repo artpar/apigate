@@ -89,9 +89,8 @@ Real-time usage metrics:
 Integrated documentation viewer:
 
 - **API Reference**: All available endpoints
-- **Try It**: Interactive API testing
-- **Code Examples**: Copy-paste snippets
 - **Authentication**: How to use API keys
+- **Code Examples**: Copy-paste snippets
 
 ### Billing & Subscription
 
@@ -109,58 +108,47 @@ If payment integration enabled:
 ### Enable/Disable Portal
 
 ```bash
-# Enable portal (default)
-apigate settings set portal_enabled true
+# Enable portal (default is true)
+apigate settings set portal.enabled true
 
 # Disable portal
-apigate settings set portal_enabled false
+apigate settings set portal.enabled false
 ```
 
-### Customize Portal URL
+### Set App Name
 
 ```bash
-apigate settings set portal_base_path "/developer"
-# Now at: https://your-domain.com/developer
+apigate settings set portal.app_name "Acme API"
+```
+
+### Set Portal Base URL
+
+```bash
+apigate settings set portal.base_url "https://api.example.com"
+```
+
+---
+
+## Customization
+
+### Welcome Message
+
+```bash
+apigate settings set custom.portal_welcome_html "<h2>Welcome to Acme API!</h2><p>Get started by creating an API key.</p>"
+```
+
+### Custom CSS
+
+```bash
+apigate settings set custom.portal_css ".header { background: #3B82F6; }"
 ```
 
 ### Branding
 
-```bash
-# Company name
-apigate settings set portal_company_name "Acme API"
-
-# Logo URL
-apigate settings set portal_logo_url "https://example.com/logo.png"
-
-# Primary color
-apigate settings set portal_primary_color "#3B82F6"
-
-# Custom CSS
-apigate settings set portal_custom_css_url "https://example.com/custom.css"
-```
-
-### Registration Settings
-
-```bash
-# Allow self-registration
-apigate settings set portal_registration_enabled true
-
-# Require email verification
-apigate settings set require_email_verification true
-
-# Default plan for new users
-apigate plans update <plan-id> --default true
-```
-
-### Feature Toggles
-
-```bash
-# Enable/disable portal sections
-apigate settings set portal_show_usage true
-apigate settings set portal_show_docs true
-apigate settings set portal_show_billing true
-apigate settings set portal_allow_key_creation true
-```
+See [[Branding]] for full customization options including:
+- Logo URL (`custom.logo_url`)
+- Primary color (`custom.primary_color`)
+- Support email (`custom.support_email`)
 
 ---
 
@@ -185,21 +173,18 @@ Overview with:
 - Monthly usage chart
 - Daily breakdown
 - Per-endpoint breakdown
-- Export usage data (CSV)
 
 ### Documentation (`/portal/docs`)
 
 - API reference
 - Authentication guide
 - Code examples
-- Changelog
 
 ### Settings (`/portal/settings`)
 
 - Profile (name, email)
 - Password change
 - Notification preferences
-- Delete account
 
 ### Billing (`/portal/billing`)
 
@@ -210,77 +195,19 @@ Overview with:
 
 ---
 
-## Customizing Portal Content
-
-### Welcome Message
-
-```bash
-apigate settings set portal_welcome_message "Welcome to Acme API! Get started by creating an API key."
-```
-
-### Documentation Content
-
-Place custom documentation in:
-```
-/data/docs/
-├── getting-started.md
-├── authentication.md
-├── endpoints/
-│   ├── users.md
-│   └── orders.md
-└── examples/
-    ├── curl.md
-    └── python.md
-```
-
-### Custom Pages
-
-Add custom portal pages:
-
-```bash
-apigate portal pages create \
-  --slug "changelog" \
-  --title "Changelog" \
-  --content-file ./changelog.md
-```
-
----
-
 ## Portal Security
 
 ### Session Management
 
-```bash
-# Session duration (default: 24 hours)
-apigate settings set session_duration_hours 24
-
-# Session cookie settings
-apigate settings set session_secure_cookie true
-apigate settings set session_same_site "strict"
-```
-
-### Rate Limiting (Portal)
-
-Portal has separate rate limits:
-
-```bash
-# Login attempts
-apigate settings set portal_login_rate_limit 5  # per minute
-
-# Password reset requests
-apigate settings set portal_reset_rate_limit 3  # per hour
-```
+Portal uses secure session cookies with automatic expiration.
 
 ### CSRF Protection
 
 Automatically enabled for all portal forms.
 
-### Two-Factor Authentication
+### Rate Limiting
 
-```bash
-# Enable 2FA option for customers
-apigate settings set portal_2fa_enabled true
-```
+The portal is protected by the same rate limiting that applies to API requests.
 
 ---
 
@@ -294,30 +221,16 @@ apigate settings set portal_2fa_enabled true
 
 ### Single Sign-On (SSO)
 
-Integrate with your existing auth:
+Integrate with your existing auth using OAuth providers:
 
 ```bash
-# Configure SSO provider
-apigate settings set sso_provider "oauth2"
-apigate settings set sso_client_id "your-client-id"
-apigate settings set sso_client_secret "your-secret"
-apigate settings set sso_authorize_url "https://auth.example.com/authorize"
-apigate settings set sso_token_url "https://auth.example.com/token"
+apigate settings set oauth.enabled true
+apigate settings set oauth.google.enabled true
+apigate settings set oauth.google.client_id "your-client-id"
+apigate settings set oauth.google.client_secret "your-secret" --encrypted
 ```
 
-### API-Only (Headless)
-
-Build custom portal using API:
-
-```bash
-# All portal actions available via API
-GET  /api/portal/profile
-GET  /api/portal/keys
-POST /api/portal/keys
-DELETE /api/portal/keys/:id
-GET  /api/portal/usage
-GET  /api/portal/billing
-```
+See [[OAuth]] for full SSO configuration.
 
 ---
 
@@ -336,51 +249,28 @@ Customers receive emails for:
 | Plan changed | Confirmation |
 | Password reset | Reset link |
 
-### In-Portal Notifications
-
-Alerts shown in portal:
-- Quota warnings
-- Plan expiration
-- New features
-
----
-
-## Analytics
-
-Track portal usage:
-
-```bash
-# Portal analytics
-apigate analytics portal
-
-# Output:
-# - Active users (DAU/MAU)
-# - Key creation rate
-# - Docs views
-# - Upgrade conversions
-```
-
 ---
 
 ## Troubleshooting
 
 ### "Portal Not Loading"
 
-1. Check `portal_enabled` setting
+1. Check `portal.enabled` setting:
+   ```bash
+   apigate settings get portal.enabled
+   ```
 2. Verify web server is running
 3. Check browser console for errors
 
 ### "Can't Create API Key"
 
-1. Check `portal_allow_key_creation` setting
-2. Verify user has active plan
-3. Check if key limit reached (if configured)
+1. Verify user has active plan
+2. Check if key limit reached (if configured)
 
 ### "Usage Not Updating"
 
-1. Usage updates every minute
-2. Check usage tracking is enabled
-3. Verify database connection
+1. Usage updates periodically
+2. Check database connection
 
 ---
 
@@ -389,4 +279,4 @@ apigate analytics portal
 - [[API-Keys]] - API key management
 - [[Users]] - User management
 - [[Branding]] - Customization options
-- [[SSO]] - Single sign-on setup
+- [[OAuth]] - OAuth/SSO setup
