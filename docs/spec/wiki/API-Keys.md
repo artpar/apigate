@@ -56,18 +56,14 @@ Example: ak_a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef12345678
 |----------|------|-------------|
 | `id` | string | Unique identifier |
 | `name` | string | Human-readable name |
-| `prefix` | string | First chars for identification (immutable) |
-| `hash` | string | Bcrypt hash of key (internal, never exposed) |
+| `prefix` | string | First 12 chars for identification (immutable) |
 | `user_id` | string | Owner user |
-| `group_id` | string | Owner group (for team keys) |
-| `created_by` | string | User who created the key |
-| `scopes` | JSON | Allowed endpoints/operations |
 | `expires_at` | timestamp | Expiration time (optional) |
-| `last_used` | timestamp | Last usage time (internal) |
-| `revoked_at` | timestamp | Revocation time (internal) |
+| `last_used` | timestamp | Last usage time |
+| `revoked_at` | timestamp | Revocation time |
 | `created_at` | timestamp | Creation time |
 
-> **Note**: Keys can belong to either a user OR a group, enabling team-based API access. See [[Groups]].
+> **Note**: The bcrypt hash of the key is stored internally but never exposed via API.
 
 ---
 
@@ -80,7 +76,6 @@ Example: ak_a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef12345678
 3. Select:
    - **User**: Key owner
    - **Name**: Descriptive name
-   - **Scopes**: Optional restrictions
    - **Expires**: Optional expiration
 4. Click **Save**
 5. **Copy the key immediately** - it's only shown once!
@@ -98,12 +93,6 @@ apigate keys create \
   --user "user-id-here" \
   --name "Temp Key" \
   --expires "2025-12-31T23:59:59Z"
-
-# With scopes
-apigate keys create \
-  --user "user-id-here" \
-  --name "Read-Only Key" \
-  --scopes "read"
 ```
 
 ### REST API
@@ -114,24 +103,30 @@ curl -X POST http://localhost:8080/admin/keys \
   -d '{
     "user_id": "user-id-here",
     "name": "Production Key",
-    "scopes": ["read", "write"],
     "expires_at": "2025-12-31T23:59:59Z"
   }'
 ```
 
-**Response** (key shown only once):
+**Response** (key shown only once in `meta`):
 
 ```json
 {
   "data": {
     "type": "api_keys",
-    "id": "key-id",
+    "id": "key_abc123",
     "attributes": {
       "name": "Production Key",
       "prefix": "ak_abc123def4",
-      "key": "ak_abc123def456789...",
-      "user_id": "user-id",
       "created_at": "2025-01-19T10:00:00Z"
+    },
+    "relationships": {
+      "user": {
+        "data": { "type": "users", "id": "user-id" }
+      }
+    },
+    "meta": {
+      "key": "ak_abc123def456789...",
+      "note": "Save this key securely. It will not be shown again."
     }
   }
 }
@@ -154,30 +149,6 @@ curl -H "X-API-Key: ak_your_key_here" \
 curl -H "Authorization: Bearer ak_your_key_here" \
   https://api.example.com/v1/users
 ```
-
----
-
-## Key Scopes
-
-Restrict what a key can access:
-
-```bash
-# Read-only key
-apigate keys create --scopes "read"
-
-# Specific endpoints
-apigate keys create --scopes "users:read,orders:write"
-```
-
-### Scope Patterns
-
-| Scope | Allows |
-|-------|--------|
-| `read` | All GET requests |
-| `write` | All POST/PUT/PATCH/DELETE |
-| `users:read` | GET /api/users/* |
-| `users:write` | POST/PUT/DELETE /api/users/* |
-| `*` | Everything (default) |
 
 ---
 
@@ -249,17 +220,7 @@ apigate keys create --name "Partner Integration"
 apigate keys create --name "My Key"
 ```
 
-### 2. Use Scopes
-
-```bash
-# Good - minimal permissions
-apigate keys create --name "Analytics" --scopes "read"
-
-# Risky - full access
-apigate keys create --name "Analytics"
-```
-
-### 3. Set Expiration for Temporary Access
+### 2. Set Expiration for Temporary Access
 
 ```bash
 # Good - expires
@@ -269,7 +230,7 @@ apigate keys create --name "Contractor" --expires "2025-03-01"
 apigate keys create --name "Contractor"
 ```
 
-### 4. Rotate Keys Regularly
+### 3. Rotate Keys Regularly
 
 ```bash
 # 1. Create new key
@@ -281,7 +242,7 @@ apigate keys create --user "user-id" --name "Production v2"
 apigate keys revoke <old-key-id>
 ```
 
-### 5. Never Log Full Keys
+### 4. Never Log Full Keys
 
 The full key is only shown at creation. APIGate stores only:
 - Prefix (for identification)
@@ -344,14 +305,14 @@ Multiple keys for the same user share quota but have separate rate limit buckets
     "status": "403",
     "code": "forbidden",
     "title": "Forbidden",
-    "detail": "Key scope does not allow this operation"
+    "detail": "Access denied"
   }]
 }
 ```
 
 **Causes**:
-- Key scopes don't include this endpoint
 - User account is suspended
+- User's plan doesn't allow this operation
 
 ---
 

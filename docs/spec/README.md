@@ -44,15 +44,13 @@ When adding a new API feature:
 
 ## Spec-Code Alignment
 
-Run alignment checks:
+Ensure spec and code stay in sync:
 
-```bash
-# Verify all error codes are documented
-go test ./pkg/jsonapi/... -run TestErrorCodesDocumented
+1. **Error codes**: All codes in `pkg/jsonapi/errors.go` must be documented in `error-codes.md`
+2. **Resource types**: All handlers in `adapters/http/admin/` must have corresponding entries in `resource-types.md`
+3. **Pagination**: Pagination behavior in `pkg/jsonapi/pagination.go` must match `pagination.md`
 
-# Verify all resource types are documented
-go test ./adapters/http/... -run TestResourceTypesDocumented
-```
+When adding new features, update both the spec and implementation together.
 
 ## Version History
 

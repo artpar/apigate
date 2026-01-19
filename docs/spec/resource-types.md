@@ -270,14 +270,16 @@ Keys in list don't include the full key:
 | `path_pattern` | string | URL pattern to match | Yes |
 | `match_type` | enum | Pattern match type | Yes |
 | `methods` | []string | HTTP methods | Yes |
+| `headers` | object | Header conditions to match | Yes |
 | `upstream_id` | string | Target upstream | Yes |
 | `path_rewrite` | string | Path transformation | Yes |
+| `method_override` | string | Override HTTP method for upstream | Yes |
 | `priority` | int | Match priority | Yes |
 | `protocol` | enum | Protocol type | Yes |
 | `description` | string | Route description | Yes |
 | `enabled` | bool | Route active state | Yes |
-| `auth_required` | bool | Requires authentication | Yes |
-| `rate_limit_override` | int | Custom rate limit | Yes |
+| `metering_expr` | string | Expression to calculate request cost | Yes |
+| `metering_mode` | enum | How usage is measured | Yes |
 | `request_transform` | object | Request transformation | Yes |
 | `response_transform` | object | Response transformation | Yes |
 | `created_at` | timestamp | Creation time | No |
@@ -300,6 +302,15 @@ Keys in list don't include the full key:
 | `sse` | Server-Sent Events |
 | `websocket` | WebSocket |
 
+### Metering Modes
+
+| Value | Description |
+|-------|-------------|
+| `request` | Count each request as 1 |
+| `response_field` | Extract count from response |
+| `bytes` | Count bytes transferred |
+| `custom` | Use metering_expr for custom calculation |
+
 ### Example
 
 ```json
@@ -318,7 +329,7 @@ Keys in list don't include the full key:
       "protocol": "http",
       "description": "Version 2 API routes",
       "enabled": true,
-      "auth_required": true,
+      "metering_mode": "request",
       "created_at": "2025-01-01T00:00:00Z",
       "updated_at": "2025-01-15T00:00:00Z"
     }
@@ -349,14 +360,14 @@ Keys in list don't include the full key:
 | Attribute | Type | Description | Mutable |
 |-----------|------|-------------|---------|
 | `name` | string | Upstream name | Yes |
+| `description` | string | Upstream description | Yes |
 | `base_url` | string | Upstream base URL | Yes |
-| `timeout_ms` | int | Request timeout | Yes |
-| `max_idle_conns` | int | Connection pool size | Yes |
-| `idle_conn_timeout_ms` | int | Idle connection timeout | Yes |
+| `timeout_ms` | int | Request timeout in ms (default: 30000) | Yes |
+| `max_idle_conns` | int | Connection pool size (default: 100) | Yes |
+| `idle_conn_timeout_ms` | int | Idle connection timeout in ms (default: 90000) | Yes |
 | `auth_type` | enum | Authentication type | Yes |
-| `auth_header` | string | Custom auth header | Yes |
-| `auth_value_encrypted` | string | Encrypted auth value | Yes |
-| `health_check_path` | string | Health check endpoint | Yes |
+| `auth_header` | string | Custom auth header name | Yes |
+| `auth_value_encrypted` | bytes | Encrypted auth credentials | Yes |
 | `enabled` | bool | Upstream active state | Yes |
 | `created_at` | timestamp | Creation time | No |
 | `updated_at` | timestamp | Last update time | No |
@@ -379,13 +390,13 @@ Keys in list don't include the full key:
     "id": "up_xyz789",
     "attributes": {
       "name": "Main API",
+      "description": "Primary backend service",
       "base_url": "https://api.example.com",
       "timeout_ms": 30000,
       "max_idle_conns": 100,
       "idle_conn_timeout_ms": 90000,
       "auth_type": "bearer",
       "auth_header": "Authorization",
-      "health_check_path": "/health",
       "enabled": true,
       "created_at": "2025-01-01T00:00:00Z",
       "updated_at": "2025-01-15T00:00:00Z"

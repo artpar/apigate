@@ -84,7 +84,7 @@ APIGate is a complete API gateway and monetization platform that helps developer
 | Feature | Description |
 |---------|-------------|
 | **API Proxying** | Route requests to any HTTP backend with path rewriting |
-| **Authentication** | API key authentication with scopes and expiration |
+| **Authentication** | API key authentication |
 | **Rate Limiting** | Token bucket algorithm, per-key limits |
 | **Quota Management** | Monthly request/byte quotas with grace periods |
 | **Usage Tracking** | Detailed metrics for every API call |
@@ -112,7 +112,7 @@ APIGate follows a clean architecture with clear separation of concerns:
 │  User │ Key │ Plan │ Route │ Upstream │ Usage │ Quota │ Settings│
 ├─────────────────────────────────────────────────────────────────┤
 │                   INFRASTRUCTURE LAYER                           │
-│  SQLite │ HTTP Client │ Stripe │ SMTP │ Redis (optional)        │
+│  SQLite │ HTTP Client │ Stripe │ Paddle │ SMTP                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 

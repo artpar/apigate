@@ -27,7 +27,7 @@ Users are the core entity for API access management:
 │    │   Plan   │       │ API Keys │       │  Usage   │           │
 │    │          │       │          │       │  Events  │           │
 │    │ • limits │       │ • prefix │       │ • method │           │
-│    │ • price  │       │ • scopes │       │ • path   │           │
+│    │ • price  │       │ • name   │       │ • path   │           │
 │    └──────────┘       └──────────┘       └──────────┘           │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
@@ -42,14 +42,12 @@ Users are the core entity for API access management:
 | `id` | string | Unique identifier |
 | `email` | string | Email address (required, unique) |
 | `name` | string | Display name |
-| `password_hash` | string | Hashed password (internal, never exposed) |
 | `plan_id` | string | Assigned plan (defaults to "free") |
 | `status` | enum | active, pending, suspended, cancelled |
-| `stripe_id` | string | Stripe customer ID (internal) |
 | `created_at` | timestamp | Registration time |
 | `updated_at` | timestamp | Last update time |
 
-> **Note**: Admin access is managed through the admin invite system, not a role field on users.
+> **Note**: Admin access is managed through the admin invite system, not a role field on users. Password hash and Stripe customer ID are stored internally but never exposed via API.
 
 ---
 
@@ -93,12 +91,9 @@ apigate users create \
   --email "customer@example.com" \
   --name "Acme Corp" \
   --plan "free"
-
-# Create admin
-apigate users create \
-  --email "admin@company.com" \
-  --role admin
 ```
+
+> **Note**: To create admin users, use the admin invite system. See [[Admin-Invites]].
 
 ### REST API
 
@@ -188,10 +183,12 @@ curl -X PUT http://localhost:8080/admin/users/<id> \
 
 ```bash
 # CLI
-apigate users suspend <id>
+apigate users update <id> --status suspended
 
 # API
-curl -X POST http://localhost:8080/admin/users/<id>/suspend
+curl -X PUT http://localhost:8080/admin/users/<id> \
+  -H "Content-Type: application/json" \
+  -d '{"status": "suspended"}'
 ```
 
 All API keys immediately stop working.
@@ -200,10 +197,12 @@ All API keys immediately stop working.
 
 ```bash
 # CLI
-apigate users activate <id>
+apigate users update <id> --status active
 
 # API
-curl -X POST http://localhost:8080/admin/users/<id>/activate
+curl -X PUT http://localhost:8080/admin/users/<id> \
+  -H "Content-Type: application/json" \
+  -d '{"status": "active"}'
 ```
 
 ### Delete User

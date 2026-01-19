@@ -52,75 +52,88 @@ TLS certificates enable HTTPS for your API gateway:
 
 ---
 
-## ACME (Let's Encrypt)
+## TLS Configuration
 
-### Enable ACME
+TLS is configured through settings, not environment variables.
 
-```bash
-# Environment variables
-TLS_ACME_ENABLED=true
-TLS_ACME_EMAIL=admin@example.com
-TLS_ACME_DIRECTORY=https://acme-v02.api.letsencrypt.org/directory
-
-# For testing, use staging
-TLS_ACME_DIRECTORY=https://acme-staging-v02.api.letsencrypt.org/directory
-```
-
-Or via CLI:
+### Enable ACME (Let's Encrypt)
 
 ```bash
-apigate settings set tls.acme.enabled true
-apigate settings set tls.acme.email "admin@example.com"
+# Enable TLS with ACME
+apigate settings set tls.enabled true
+apigate settings set tls.mode acme
+apigate settings set tls.domain "api.example.com"
+apigate settings set tls.acme_email "admin@example.com"
+
+# For testing, use staging server
+apigate settings set tls.acme_staging true
 ```
 
 ### Automatic Certificate Issuance
 
-When ACME is enabled, APIGate automatically:
+When ACME mode is enabled, APIGate automatically:
 
 1. Issues certificates for configured domains
 2. Handles HTTP-01 challenges at `/.well-known/acme-challenge/`
 3. Renews certificates 30 days before expiration
 4. Stores certificates in the database
 
-### Configure Domains
-
-```bash
-# Add domain for automatic certificate
-apigate certificates obtain --domain "api.example.com"
-```
+**Note**: ACME certificates are obtained automatically when TLS is enabled. There is no separate CLI command to "obtain" a certificate - the system handles this on startup.
 
 ---
 
 ## Manual Certificates
 
-### Upload Certificate
+### Configure Manual TLS
 
 ```bash
-# CLI
+# Enable TLS with manual certificates
+apigate settings set tls.enabled true
+apigate settings set tls.mode manual
+apigate settings set tls.cert_path "/path/to/cert.pem"
+apigate settings set tls.key_path "/path/to/key.pem"
+```
+
+### Upload Certificate to Database
+
+For database-backed certificate storage:
+
+#### Via Admin UI
+
+1. Go to **Certificates** in the sidebar
+2. Click **Add Certificate**
+3. Enter the domain and upload certificate files
+4. Click **Save**
+
+#### Via CLI
+
+```bash
 apigate certificates create \
   --domain "api.example.com" \
   --cert-pem /path/to/cert.pem \
   --key-pem /path/to/key.pem \
-  --chain-pem /path/to/chain.pem
-
-# API
-curl -X POST http://localhost:8080/admin/certificates \
-  -H "Content-Type: application/json" \
-  -d '{
-    "domain": "api.example.com",
-    "cert_pem": "-----BEGIN CERTIFICATE-----...",
-    "key_pem": "-----BEGIN PRIVATE KEY-----...",
-    "chain_pem": "-----BEGIN CERTIFICATE-----...",
-    "expires_at": "2026-01-19T00:00:00Z"
-  }'
+  --chain-pem /path/to/chain.pem \
+  --expires-at "2026-01-19T00:00:00Z"
 ```
 
-### Update Certificate
+#### Via API
 
 ```bash
-apigate certificates renew <id> \
-  --cert-pem /path/to/new-cert.pem \
-  --key-pem /path/to/new-key.pem
+curl -X POST http://localhost:8080/api/certificates \
+  -H "Content-Type: application/vnd.api+json" \
+  -H "Cookie: session=YOUR_SESSION" \
+  -d '{
+    "data": {
+      "type": "certificates",
+      "attributes": {
+        "domain": "api.example.com",
+        "cert_pem": "-----BEGIN CERTIFICATE-----...",
+        "key_pem": "-----BEGIN PRIVATE KEY-----...",
+        "chain_pem": "-----BEGIN CERTIFICATE-----...",
+        "expires_at": "2026-01-19T00:00:00Z"
+      }
+    }
+  }'
 ```
 
 ---
@@ -134,7 +147,8 @@ apigate certificates renew <id> \
 apigate certificates list
 
 # API
-curl http://localhost:8080/admin/certificates
+curl http://localhost:8080/api/certificates \
+  -H "Cookie: session=YOUR_SESSION"
 ```
 
 ### Get Certificate by Domain
@@ -144,7 +158,8 @@ curl http://localhost:8080/admin/certificates
 apigate certificates get-domain "api.example.com"
 
 # API
-curl http://localhost:8080/admin/certificates/domain/api.example.com
+curl http://localhost:8080/api/certificates/domain/api.example.com \
+  -H "Cookie: session=YOUR_SESSION"
 ```
 
 ### Check Expiring Certificates
@@ -154,16 +169,19 @@ curl http://localhost:8080/admin/certificates/domain/api.example.com
 apigate certificates expiring --days 30
 
 # API
-curl http://localhost:8080/admin/certificates/expiring?days=30
+curl http://localhost:8080/api/certificates/expiring?days=30 \
+  -H "Cookie: session=YOUR_SESSION"
 ```
 
 ### List Expired Certificates
 
 ```bash
+# CLI
 apigate certificates expired
 
 # API
-curl http://localhost:8080/admin/certificates/expired
+curl http://localhost:8080/api/certificates/expired \
+  -H "Cookie: session=YOUR_SESSION"
 ```
 
 ### Revoke Certificate
@@ -173,8 +191,9 @@ curl http://localhost:8080/admin/certificates/expired
 apigate certificates revoke <id> --reason "Key compromised"
 
 # API
-curl -X POST http://localhost:8080/admin/certificates/<id>/revoke \
-  -H "Content-Type: application/json" \
+curl -X POST http://localhost:8080/api/certificates/<id>/revoke \
+  -H "Content-Type: application/vnd.api+json" \
+  -H "Cookie: session=YOUR_SESSION" \
   -d '{"reason": "Key compromised"}'
 ```
 
@@ -185,7 +204,8 @@ curl -X POST http://localhost:8080/admin/certificates/<id>/revoke \
 apigate certificates delete <id>
 
 # API
-curl -X DELETE http://localhost:8080/admin/certificates/<id>
+curl -X DELETE http://localhost:8080/api/certificates/<id> \
+  -H "Cookie: session=YOUR_SESSION"
 ```
 
 ---
@@ -195,51 +215,30 @@ curl -X DELETE http://localhost:8080/admin/certificates/<id>
 When using ACME, certificates are automatically renewed:
 
 1. **30 days before expiration**: Renewal attempt
-2. **If renewal fails**: Retry daily
-3. **7 days before expiration**: Alert notification
-4. **On expiration**: Service continues with expired cert (warning logged)
+2. **If renewal fails**: Retry on next startup
+3. **On expiration**: Service continues with expired cert (warning logged)
 
-### Manual Renewal
-
-```bash
-# Trigger renewal for a domain
-apigate certificates renew --domain "api.example.com"
-```
+**Note**: ACME renewal is automatic. There is no CLI command to manually trigger renewal - the system handles this automatically.
 
 ---
 
-## TLS Configuration
+## TLS Settings Reference
 
-### HTTPS Listener
-
-```bash
-# Enable HTTPS
-HTTPS_ENABLED=true
-HTTPS_PORT=443
-
-# Certificate source
-TLS_CERT_SOURCE=database  # Use database-stored certs
-# TLS_CERT_SOURCE=file    # Use file-based certs
-```
-
-### File-Based Certificates
-
-For simple deployments without ACME:
-
-```bash
-TLS_CERT_SOURCE=file
-TLS_CERT_FILE=/path/to/cert.pem
-TLS_KEY_FILE=/path/to/key.pem
-```
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `tls.enabled` | Enable TLS/HTTPS | `false` |
+| `tls.mode` | Certificate mode: `acme`, `manual`, or `none` | `none` |
+| `tls.domain` | Domain for ACME certificates | - |
+| `tls.acme_email` | Contact email for ACME | - |
+| `tls.cert_path` | Certificate file path (manual mode) | - |
+| `tls.key_path` | Private key file path (manual mode) | - |
+| `tls.http_redirect` | Redirect HTTP to HTTPS | `true` |
+| `tls.min_version` | Minimum TLS version: `1.2` or `1.3` | `1.2` |
+| `tls.acme_staging` | Use Let's Encrypt staging server | `false` |
 
 ### SNI Support
 
-APIGate supports Server Name Indication (SNI) for multiple domains:
-
-```
-api.example.com     → Certificate A
-staging.example.com → Certificate B
-```
+APIGate supports Server Name Indication (SNI) for multiple domains when using database-stored certificates.
 
 ---
 
@@ -252,7 +251,6 @@ Webhooks are triggered for certificate events:
 | `certificate.created` | New certificate added |
 | `certificate.renewed` | Certificate successfully renewed |
 | `certificate.revoked` | Certificate revoked |
-| `certificate.expiring` | Certificate expires within 7 days |
 
 ### Example Webhook Payload
 
@@ -262,8 +260,7 @@ Webhooks are triggered for certificate events:
   "data": {
     "domain": "api.example.com",
     "issuer": "Let's Encrypt",
-    "expires_at": "2026-04-19T00:00:00Z",
-    "previous_expires_at": "2026-01-19T00:00:00Z"
+    "expires_at": "2026-04-19T00:00:00Z"
   }
 }
 ```
@@ -277,44 +274,37 @@ Webhooks are triggered for certificate events:
 Let's Encrypt provides free, automated certificates:
 
 ```bash
-TLS_ACME_ENABLED=true
-TLS_ACME_DIRECTORY=https://acme-v02.api.letsencrypt.org/directory
+apigate settings set tls.enabled true
+apigate settings set tls.mode acme
+apigate settings set tls.domain "api.example.com"
+apigate settings set tls.acme_email "admin@example.com"
 ```
 
 ### 2. Monitor Expiration
 
-Set up alerts for expiring certificates:
+Set up alerts for expiring certificates via the Admin UI or by checking periodically:
 
 ```bash
-# List certificates expiring in 14 days
 apigate certificates expiring --days 14
 ```
 
 ### 3. Use Staging for Testing
 
-Test certificate issuance with Let's Encrypt staging:
+Test certificate issuance with Let's Encrypt staging to avoid rate limits:
 
 ```bash
-TLS_ACME_DIRECTORY=https://acme-staging-v02.api.letsencrypt.org/directory
+apigate settings set tls.acme_staging true
 ```
 
-### 4. Backup Private Keys
-
-While keys are stored encrypted in the database, maintain backups:
-
-```bash
-# Export certificate (for backup)
-apigate certificates export <id> --output /backup/cert-backup.json
-```
-
-### 5. Revoke Compromised Certificates
+### 4. Revoke Compromised Certificates
 
 If a private key is compromised:
 
 ```bash
 apigate certificates revoke <id> --reason "Key compromised"
-apigate certificates obtain --domain "api.example.com"  # Get new cert
 ```
+
+Then obtain a new certificate by restarting with ACME enabled, or upload a new manual certificate.
 
 ---
 
@@ -343,18 +333,8 @@ apigate certificates obtain --domain "api.example.com"  # Get new cert
 # Check if certificate exists
 apigate certificates get-domain "api.example.com"
 
-# Obtain new certificate
-apigate certificates obtain --domain "api.example.com"
-```
-
-### Expired Certificate
-
-**Error**: `certificate has expired`
-
-**Solution**:
-```bash
-# Force renewal
-apigate certificates renew --domain "api.example.com" --force
+# For ACME mode, ensure domain is configured
+apigate settings get tls.domain
 ```
 
 ### Rate Limit Hit
@@ -365,8 +345,7 @@ apigate certificates renew --domain "api.example.com" --force
 
 **Solution**:
 - Wait for rate limit reset
-- Use staging for testing
-- Request rate limit increase (for high volume)
+- Use staging for testing: `apigate settings set tls.acme_staging true`
 
 ---
 
@@ -382,15 +361,13 @@ apigate certificates get <id>
 # Get certificate by domain
 apigate certificates get-domain <domain>
 
-# Create/upload certificate
-apigate certificates create --domain <domain> --cert-pem <path> --key-pem <path>
-
-# Obtain certificate via ACME
-apigate certificates obtain --domain <domain>
-
-# Renew certificate
-apigate certificates renew <id>
-apigate certificates renew --domain <domain>
+# Create/upload certificate (manual)
+apigate certificates create \
+  --domain <domain> \
+  --cert-pem <path> \
+  --key-pem <path> \
+  --chain-pem <path> \
+  --expires-at <datetime>
 
 # List expiring certificates
 apigate certificates expiring --days 30
@@ -411,4 +388,4 @@ apigate certificates delete <id>
 
 - [[Configuration]] - TLS settings
 - [[Webhooks]] - Certificate event notifications
-- [[Architecture]] - How TLS termination works
+- [[Security]] - Security best practices

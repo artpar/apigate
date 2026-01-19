@@ -18,99 +18,96 @@ Configure APIGate via environment variables, command-line flags, or runtime sett
 
 ## Environment Variables
 
+> **Implementation**: `config/config.go:241-383`
+
 ### Server Configuration
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `APIGATE_HOST` | `0.0.0.0` | Listen address |
-| `APIGATE_PORT` | `8080` | Listen port |
-| `APIGATE_BASE_URL` | `http://localhost:8080` | Public URL |
-| `APIGATE_TLS_CERT` | - | TLS certificate path |
-| `APIGATE_TLS_KEY` | - | TLS private key path |
+| `APIGATE_SERVER_HOST` | `0.0.0.0` | Listen address |
+| `APIGATE_SERVER_PORT` | `8080` | Listen port |
+| `APIGATE_SERVER_READ_TIMEOUT` | `30s` | HTTP read timeout (duration) |
+| `APIGATE_SERVER_WRITE_TIMEOUT` | `60s` | HTTP write timeout (duration) |
+
+### Upstream Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `APIGATE_UPSTREAM_URL` | **(required)** | Upstream API URL to proxy |
+| `APIGATE_UPSTREAM_TIMEOUT` | - | Request timeout (duration, e.g., `30s`) |
 
 ### Database
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `APIGATE_DATABASE_PATH` | `./data/apigate.db` | SQLite database path |
+| `APIGATE_DATABASE_DRIVER` | `sqlite` | Database driver (sqlite, postgres) |
+| `APIGATE_DATABASE_DSN` | `apigate.db` | Database connection string |
 
-### Security
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `APIGATE_SECRET_KEY` | (generated) | Encryption key for secrets |
-| `APIGATE_SESSION_SECRET` | (generated) | Session signing key |
-| `APIGATE_SESSION_DURATION` | `24h` | Session expiration |
-| `APIGATE_CORS_ORIGINS` | `*` | Allowed CORS origins |
-
-### Admin
+### Authentication
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `APIGATE_ADMIN_EMAIL` | - | Initial admin email |
-| `APIGATE_ADMIN_PASSWORD` | - | Initial admin password |
-| `APIGATE_REQUIRE_SETUP` | `true` | Require setup wizard |
-
-### Proxy
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `APIGATE_DEFAULT_TIMEOUT` | `30000` | Default upstream timeout (ms) |
-| `APIGATE_MAX_IDLE_CONNS` | `100` | Max idle connections per upstream |
-| `APIGATE_IDLE_CONN_TIMEOUT` | `90000` | Idle connection timeout (ms) |
+| `APIGATE_AUTH_MODE` | `local` | Auth mode: `local` or `remote` |
+| `APIGATE_AUTH_KEY_PREFIX` | `ak_` | API key prefix |
+| `APIGATE_AUTH_REMOTE_URL` | - | Remote auth service URL (when mode=remote) |
 
 ### Rate Limiting
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `APIGATE_RATE_LIMIT_ENABLED` | `true` | Enable rate limiting |
-| `APIGATE_RATE_LIMIT_PER_USER` | `false` | Share bucket across user's keys |
+| `APIGATE_RATELIMIT_ENABLED` | `true` | Enable rate limiting |
+| `APIGATE_RATELIMIT_BURST` | `5` | Burst token count |
+| `APIGATE_RATELIMIT_WINDOW` | `60` | Rate limit window in seconds |
 
-### Quotas
+### Usage Tracking
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `APIGATE_QUOTA_ENABLED` | `true` | Enable quota tracking |
-| `APIGATE_QUOTA_WARNING_THRESHOLDS` | `80,95,100` | Warning percentages |
+| `APIGATE_USAGE_MODE` | `local` | Usage mode: `local` or `remote` |
+| `APIGATE_USAGE_REMOTE_URL` | - | Remote usage service URL |
+
+### Billing
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `APIGATE_BILLING_MODE` | `none` | Billing mode: `none`, `stripe`, `paddle`, `lemonsqueezy`, `remote` |
+| `APIGATE_BILLING_STRIPE_KEY` | - | Stripe secret key |
 
 ### Email
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `APIGATE_EMAIL_PROVIDER` | `log` | Email provider (smtp, sendgrid, log) |
+| `APIGATE_EMAIL_PROVIDER` | `none` | Email provider: `smtp`, `mock`, `none` |
 | `APIGATE_SMTP_HOST` | - | SMTP server host |
 | `APIGATE_SMTP_PORT` | `587` | SMTP server port |
-| `APIGATE_SMTP_USER` | - | SMTP username |
+| `APIGATE_SMTP_USERNAME` | - | SMTP username |
 | `APIGATE_SMTP_PASSWORD` | - | SMTP password |
 | `APIGATE_SMTP_FROM` | - | From email address |
-| `APIGATE_SENDGRID_API_KEY` | - | SendGrid API key |
-
-### Payment
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `APIGATE_PAYMENT_PROVIDER` | `dummy` | Payment provider |
-| `APIGATE_STRIPE_SECRET_KEY` | - | Stripe secret key |
-| `APIGATE_STRIPE_WEBHOOK_SECRET` | - | Stripe webhook secret |
-| `APIGATE_PADDLE_VENDOR_ID` | - | Paddle vendor ID |
-| `APIGATE_PADDLE_API_KEY` | - | Paddle API key |
-| `APIGATE_LEMONSQUEEZY_API_KEY` | - | LemonSqueezy API key |
+| `APIGATE_SMTP_FROM_NAME` | (app name) | Sender display name |
+| `APIGATE_SMTP_USE_TLS` | `false` | Enable TLS |
 
 ### Portal
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `APIGATE_PORTAL_ENABLED` | `true` | Enable customer portal |
-| `APIGATE_PORTAL_REGISTRATION` | `true` | Allow self-registration |
-| `APIGATE_PORTAL_COMPANY_NAME` | `APIGate` | Company name in portal |
+| `APIGATE_PORTAL_ENABLED` | `false` | Enable customer portal |
+| `APIGATE_PORTAL_BASE_URL` | - | Base URL for email links |
+| `APIGATE_PORTAL_APP_NAME` | `APIGate` | Application name in portal |
 
 ### Logging
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `APIGATE_LOG_LEVEL` | `info` | Log level (debug, info, warn, error) |
-| `APIGATE_LOG_FORMAT` | `text` | Log format (text, json) |
-| `APIGATE_LOG_FILE` | - | Log file path (stdout if empty) |
+| `APIGATE_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
+| `APIGATE_LOG_FORMAT` | `json` | Log format: `json` or `console` |
+
+### Metrics & OpenAPI
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `APIGATE_METRICS_ENABLED` | `true` | Enable /metrics endpoint |
+| `APIGATE_METRICS_PATH` | `/metrics` | Metrics endpoint path |
+| `APIGATE_OPENAPI_ENABLED` | `true` | Enable OpenAPI/Swagger |
 
 ---
 
@@ -142,60 +139,85 @@ apigate serve --help
 
 ## Configuration File
 
+> **Implementation**: `config/config.go:14-30`
+
 Create `apigate.yaml`:
 
 ```yaml
 server:
   host: 0.0.0.0
   port: 8080
-  base_url: https://api.example.com
+  read_timeout: 30s
+  write_timeout: 60s
 
-database:
-  path: ./data/apigate.db
-
-security:
-  secret_key: your-secret-key-here
-  session_duration: 24h
-  cors_origins:
-    - https://app.example.com
-    - https://admin.example.com
-
-proxy:
-  default_timeout_ms: 30000
+upstream:
+  url: https://api.backend.com
+  timeout: 30s
   max_idle_conns: 100
+  idle_conn_timeout: 90s
+
+auth:
+  mode: local  # "local" or "remote"
+  key_prefix: "ak_"
+  # For remote auth:
+  # remote:
+  #   url: https://auth.example.com/validate
 
 rate_limit:
   enabled: true
-  per_user: false
+  burst_tokens: 5
+  window_secs: 60
 
-quota:
-  enabled: true
-  warning_thresholds: [80, 95, 100]
+usage:
+  mode: local  # "local" or "remote"
+  batch_size: 100
+  flush_interval: 10s
+
+billing:
+  mode: stripe  # "none", "stripe", "paddle", "lemonsqueezy", "remote"
+  stripe_key: ${STRIPE_SECRET_KEY}
+
+database:
+  driver: sqlite
+  dsn: ./data/apigate.db
 
 email:
-  provider: smtp
+  provider: smtp  # "smtp", "mock", "none"
   smtp:
     host: smtp.example.com
     port: 587
-    user: apigate@example.com
+    username: apigate@example.com
     password: ${SMTP_PASSWORD}
     from: noreply@example.com
-
-payment:
-  provider: stripe
-  stripe:
-    secret_key: ${STRIPE_SECRET_KEY}
-    webhook_secret: ${STRIPE_WEBHOOK_SECRET}
+    from_name: "Acme API"
+    use_tls: true
 
 portal:
   enabled: true
-  registration: true
-  company_name: "Acme API"
+  base_url: https://api.example.com
+  app_name: "Acme API"
 
 logging:
   level: info
   format: json
-  file: /var/log/apigate/apigate.log
+
+metrics:
+  enabled: true
+  path: /metrics
+
+openapi:
+  enabled: true
+
+plans:
+  - id: free
+    name: Free
+    rate_limit_per_minute: 60
+    requests_per_month: 1000
+  - id: pro
+    name: Pro
+    rate_limit_per_minute: 600
+    requests_per_month: 100000
+    price_monthly: 2900  # cents
 ```
 
 ### Load Config File
@@ -256,10 +278,10 @@ curl -X PUT http://localhost:8080/admin/settings/portal_enabled \
 Create `.env`:
 
 ```bash
-APIGATE_PORT=8080
-APIGATE_DATABASE_PATH=/data/apigate.db
-APIGATE_SECRET_KEY=your-secret-key
-APIGATE_STRIPE_SECRET_KEY=sk_live_xxx
+APIGATE_UPSTREAM_URL=https://api.backend.com
+APIGATE_SERVER_PORT=8080
+APIGATE_DATABASE_DSN=/data/apigate.db
+APIGATE_BILLING_STRIPE_KEY=sk_live_xxx
 ```
 
 ### Docker Compose
@@ -274,9 +296,10 @@ services:
     volumes:
       - ./data:/data
     environment:
-      - APIGATE_DATABASE_PATH=/data/apigate.db
-      - APIGATE_SECRET_KEY=${APIGATE_SECRET_KEY}
-      - APIGATE_STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - APIGATE_UPSTREAM_URL=https://api.backend.com
+      - APIGATE_DATABASE_DSN=/data/apigate.db
+      - APIGATE_BILLING_STRIPE_KEY=${STRIPE_SECRET_KEY}
+      - APIGATE_LOG_LEVEL=info
     env_file:
       - .env
 ```
@@ -293,10 +316,11 @@ kind: ConfigMap
 metadata:
   name: apigate-config
 data:
-  APIGATE_PORT: "8080"
+  APIGATE_SERVER_PORT: "8080"
   APIGATE_LOG_LEVEL: "info"
   APIGATE_LOG_FORMAT: "json"
   APIGATE_PORTAL_ENABLED: "true"
+  APIGATE_METRICS_ENABLED: "true"
 ```
 
 ### Secret
@@ -308,9 +332,9 @@ metadata:
   name: apigate-secrets
 type: Opaque
 stringData:
-  APIGATE_SECRET_KEY: "your-secret-key"
-  APIGATE_STRIPE_SECRET_KEY: "sk_live_xxx"
-  APIGATE_DATABASE_PATH: "/data/apigate.db"
+  APIGATE_UPSTREAM_URL: "https://api.backend.com"
+  APIGATE_BILLING_STRIPE_KEY: "sk_live_xxx"
+  APIGATE_DATABASE_DSN: "/data/apigate.db"
 ```
 
 ### Deployment
@@ -345,10 +369,10 @@ spec:
 
 ```bash
 # Bad: Secrets in plain text
-APIGATE_STRIPE_SECRET_KEY=sk_live_xxx
+APIGATE_BILLING_STRIPE_KEY=sk_live_xxx
 
 # Good: Use secret manager
-APIGATE_STRIPE_SECRET_KEY=${vault:secret/apigate/stripe_key}
+APIGATE_BILLING_STRIPE_KEY=${vault:secret/apigate/stripe_key}
 ```
 
 ### 2. Rotate Secrets Regularly
@@ -361,21 +385,21 @@ apigate secrets rotate --type session
 apigate secrets rotate --type encryption
 ```
 
-### 3. Limit CORS Origins
+### 3. Use a Reverse Proxy for TLS
 
-```bash
-# Bad: Allow all origins
-APIGATE_CORS_ORIGINS=*
+APIGate does not handle TLS directly. Use a reverse proxy like nginx or Caddy:
 
-# Good: Specific origins
-APIGATE_CORS_ORIGINS=https://app.example.com,https://admin.example.com
-```
+```nginx
+# nginx example
+server {
+    listen 443 ssl;
+    ssl_certificate /etc/ssl/certs/apigate.crt;
+    ssl_certificate_key /etc/ssl/private/apigate.key;
 
-### 4. Use TLS in Production
-
-```bash
-APIGATE_TLS_CERT=/etc/ssl/certs/apigate.crt
-APIGATE_TLS_KEY=/etc/ssl/private/apigate.key
+    location / {
+        proxy_pass http://localhost:8080;
+    }
+}
 ```
 
 ---
@@ -429,10 +453,10 @@ apigate secrets generate
 
 ```bash
 # Check path exists and is writable
-ls -la $(dirname $APIGATE_DATABASE_PATH)
+ls -la $(dirname $APIGATE_DATABASE_DSN)
 
 # Check permissions
-touch $APIGATE_DATABASE_PATH
+touch $APIGATE_DATABASE_DSN
 ```
 
 ---

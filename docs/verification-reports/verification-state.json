@@ -1,0 +1,386 @@
+{
+  "last_updated": "2026-01-19T21:00:00+05:30",
+  "sessions": [
+    {
+      "name": "Initial Alignment - API Spec",
+      "started": "2026-01-19T14:56:57+05:30"
+    },
+    {
+      "name": "Documentation Alignment Session",
+      "started": "2026-01-19T15:11:12+05:30"
+    },
+    {
+      "name": "Wiki Documentation Verification",
+      "started": "2026-01-19T18:30:00+05:30"
+    },
+    {
+      "name": "Wiki Verification Continuation",
+      "started": "2026-01-19T19:00:00+05:30"
+    },
+    {
+      "name": "Wiki Verification Session 3",
+      "started": "2026-01-19T20:00:00+05:30"
+    }
+  ],
+  "verified_files": [
+    {
+      "file": "docs/spec/error-codes.md",
+      "verified_at": "2026-01-19T14:57:30+05:30"
+    },
+    {
+      "file": "docs/spec/json-api.md",
+      "verified_at": "2026-01-19T14:58:13+05:30"
+    },
+    {
+      "file": "docs/spec/pagination.md",
+      "verified_at": "2026-01-19T14:59:35+05:30"
+    },
+    {
+      "file": "docs/spec/resource-types.md",
+      "verified_at": "2026-01-19T15:01:15+05:30"
+    },
+    {
+      "file": "docs/spec/wiki/Configuration.md",
+      "verified_at": "2026-01-19T15:11:27+05:30"
+    },
+    {
+      "file": "docs/spec/wiki/Routes.md",
+      "verified_at": "2026-01-19T15:11:27+05:30"
+    },
+    {
+      "file": "docs/spec/wiki/Upstreams.md",
+      "verified_at": "2026-01-19T15:11:27+05:30"
+    },
+    {
+      "file": "docs/spec/wiki/API-Keys.md",
+      "verified_at": "2026-01-19T15:11:27+05:30"
+    },
+    {
+      "file": "docs/spec/wiki/Authentication.md",
+      "verified_at": "2026-01-19T15:11:27+05:30"
+    },
+    {
+      "file": "docs/spec/wiki/Users.md",
+      "verified_at": "2026-01-19T15:11:27+05:30"
+    },
+    {
+      "file": "docs/spec/wiki/Plans.md",
+      "verified_at": "2026-01-19T15:11:27+05:30"
+    },
+    {
+      "file": "docs/spec/README.md",
+      "verified_at": "2026-01-19T18:35:00+05:30"
+    },
+    {
+      "file": "docs/spec/wiki/Admin-Invites.md",
+      "verified_at": "2026-01-19T18:40:00+05:30"
+    },
+    {
+      "file": "docs/spec/wiki/Analytics.md",
+      "verified_at": "2026-01-19T18:42:00+05:30"
+    },
+    {
+      "file": "docs/spec/wiki/API-Documentation.md",
+      "verified_at": "2026-01-19T18:45:00+05:30"
+    },
+    {
+      "file": "docs/spec/wiki/Branding.md",
+      "verified_at": "2026-01-19T19:05:00+05:30"
+    },
+    {
+      "file": "docs/spec/wiki/Database-Setup.md",
+      "verified_at": "2026-01-19T19:10:00+05:30"
+    },
+    {
+      "file": "docs/spec/wiki/Email-Configuration.md",
+      "verified_at": "2026-01-19T19:15:00+05:30"
+    },
+    {
+      "file": "docs/spec/wiki/Events.md",
+      "verified_at": "2026-01-19T19:18:00+05:30"
+    },
+    {
+      "file": "docs/spec/wiki/Providers.md",
+      "verified_at": "2026-01-19T19:22:00+05:30"
+    },
+    {
+      "file": "docs/spec/wiki/Notifications.md",
+      "verified_at": "2026-01-19T19:25:00+05:30"
+    },
+    {
+      "file": "docs/spec/wiki/Webhooks.md",
+      "verified_at": "2026-01-19T19:28:00+05:30"
+    },
+    {
+      "file": "docs/spec/wiki/Home.md",
+      "verified_at": "2026-01-19T20:05:00+05:30"
+    },
+    {
+      "file": "docs/spec/wiki/Rate-Limiting.md",
+      "verified_at": "2026-01-19T20:15:00+05:30"
+    },
+    {
+      "file": "docs/spec/wiki/Quotas.md",
+      "verified_at": "2026-01-19T20:25:00+05:30"
+    },
+    {
+      "file": "docs/spec/wiki/OAuth.md",
+      "verified_at": "2026-01-19T20:35:00+05:30"
+    },
+    {
+      "file": "docs/spec/wiki/Security.md",
+      "verified_at": "2026-01-19T20:40:00+05:30"
+    },
+    {
+      "file": "docs/spec/wiki/Certificates.md",
+      "verified_at": "2026-01-19T20:50:00+05:30"
+    },
+    {
+      "file": "docs/spec/wiki/Troubleshooting.md",
+      "verified_at": "2026-01-19T20:55:00+05:30"
+    },
+    {
+      "file": "docs/spec/wiki/FAQ.md",
+      "verified_at": "2026-01-19T21:00:00+05:30"
+    }
+  ],
+  "issues": [
+    {
+      "file": "docs/spec/pagination.md",
+      "message": "Endpoint paths wrong: shows /api/ but actual paths are /admin/",
+      "severity": "high",
+      "found_at": "2026-01-19T14:59:09+05:30",
+      "fixed": true
+    },
+    {
+      "file": "docs/spec/resource-types.md",
+      "message": "Hallucinated fields: auth_required, rate_limit_override (routes), health_check_path (upstreams)",
+      "severity": "critical",
+      "found_at": "2026-01-19T15:00:20+05:30",
+      "fixed": true
+    },
+    {
+      "file": "docs/spec/wiki/Configuration.md",
+      "message": "CRITICAL: Most env vars hallucinated. Wrong names throughout.",
+      "severity": "critical",
+      "found_at": "2026-01-19T15:01:55+05:30",
+      "fixed": true
+    },
+    {
+      "file": "docs/spec/wiki/Routes.md",
+      "message": "Fixed hallucinated enable/disable endpoints",
+      "severity": "high",
+      "found_at": "2026-01-19T15:11:39+05:30",
+      "fixed": true
+    },
+    {
+      "file": "docs/spec/wiki/Upstreams.md",
+      "message": "Removed hallucinated health_check_path and Health Checks section",
+      "severity": "critical",
+      "found_at": "2026-01-19T15:11:39+05:30",
+      "fixed": true
+    },
+    {
+      "file": "docs/spec/wiki/API-Keys.md",
+      "message": "Removed hallucinated group_id, created_by, scopes functionality",
+      "severity": "critical",
+      "found_at": "2026-01-19T15:11:39+05:30",
+      "fixed": true
+    },
+    {
+      "file": "docs/spec/wiki/Users.md",
+      "message": "Fixed hallucinated suspend/activate endpoints and admin --role flag",
+      "severity": "high",
+      "found_at": "2026-01-19T15:11:39+05:30",
+      "fixed": true
+    },
+    {
+      "file": "docs/spec/wiki/Plans.md",
+      "message": "Removed hallucinated trial_days, features, quota-grace-percent",
+      "severity": "critical",
+      "found_at": "2026-01-19T15:11:39+05:30",
+      "fixed": true
+    },
+    {
+      "file": "docs/spec/README.md",
+      "message": "References non-existent tests (TestErrorCodesDocumented, TestResourceTypesDocumented)",
+      "severity": "medium",
+      "found_at": "2026-01-19T18:35:00+05:30",
+      "fixed": false
+    },
+    {
+      "file": "docs/spec/wiki/Admin-Invites.md",
+      "message": "CRITICAL: Hallucinated CLI commands (apigate admin invite, apigate admin invites list/revoke/resend), wrong URL pattern, wrong env vars",
+      "severity": "critical",
+      "found_at": "2026-01-19T18:40:00+05:30",
+      "fixed": true
+    },
+    {
+      "file": "docs/spec/wiki/Analytics.md",
+      "message": "CRITICAL: Hallucinated CLI commands (apigate analytics), hallucinated env vars, wrong Prometheus metric names",
+      "severity": "critical",
+      "found_at": "2026-01-19T18:42:00+05:30",
+      "fixed": true
+    },
+    {
+      "file": "docs/spec/wiki/API-Documentation.md",
+      "message": "Hallucinated CLI commands and wrong swagger path",
+      "severity": "high",
+      "found_at": "2026-01-19T18:45:00+05:30",
+      "fixed": true
+    },
+    {
+      "file": "docs/spec/wiki/Branding.md",
+      "message": "CRITICAL: Wrong setting key prefix branding.* should be custom.*, non-existent keys (favicon_url, secondary_color, company_name, website_url, head_html)",
+      "severity": "critical",
+      "found_at": "2026-01-19T19:05:00+05:30",
+      "fixed": true
+    },
+    {
+      "file": "docs/spec/wiki/Database-Setup.md",
+      "message": "CRITICAL: Hallucinated apigate migrate command (migrations are automatic), non-existent PostgreSQL support (SQLite only), wrong env vars",
+      "severity": "critical",
+      "found_at": "2026-01-19T19:10:00+05:30",
+      "fixed": true
+    },
+    {
+      "file": "docs/spec/wiki/Email-Configuration.md",
+      "message": "CRITICAL: Wrong env var prefix, non-existent providers (sendgrid, log), fake CLI commands (apigate email test/preview)",
+      "severity": "critical",
+      "found_at": "2026-01-19T19:15:00+05:30",
+      "fixed": true
+    },
+    {
+      "file": "docs/spec/wiki/Events.md",
+      "message": "CRITICAL: Wrong event names (user.created, auth.login, quota.warning don't exist)",
+      "severity": "critical",
+      "found_at": "2026-01-19T19:18:00+05:30",
+      "fixed": true
+    },
+    {
+      "file": "docs/spec/wiki/Providers.md",
+      "message": "CRITICAL: Hallucinated provider capabilities (cache, storage, queue, notification don't exist), fake CLI commands",
+      "severity": "critical",
+      "found_at": "2026-01-19T19:22:00+05:30",
+      "fixed": true
+    },
+    {
+      "file": "docs/spec/wiki/Notifications.md",
+      "message": "CRITICAL: Hallucinated notification provider system (doesn't exist)",
+      "severity": "critical",
+      "found_at": "2026-01-19T19:25:00+05:30",
+      "fixed": true
+    },
+    {
+      "file": "docs/spec/wiki/Webhooks.md",
+      "message": "Wrong event names, fake CLI commands (apigate webhooks create/list/test), wrong retry count (3 not 6)",
+      "severity": "high",
+      "found_at": "2026-01-19T19:28:00+05:30",
+      "fixed": true
+    },
+    {
+      "file": "docs/spec/wiki/Home.md",
+      "message": "Claimed Redis support and scopes on API keys (neither exist)",
+      "severity": "high",
+      "found_at": "2026-01-19T20:05:00+05:30",
+      "fixed": true
+    },
+    {
+      "file": "docs/spec/wiki/Rate-Limiting.md",
+      "message": "CRITICAL: Hallucinated CLI flags (--rate-limit-burst, per-route --rate-limit), fake settings (rate_limit_per_user), fake commands (apigate keys rate-limit, apigate analytics rate-limits)",
+      "severity": "critical",
+      "found_at": "2026-01-19T20:15:00+05:30",
+      "fixed": true
+    },
+    {
+      "file": "docs/spec/wiki/Quotas.md",
+      "message": "CRITICAL: Hallucinated CLI commands (apigate users quota/reset-quota/adjust-quota, apigate analytics overage), wrong flags (--monthly-quota, --quota-enforcement)",
+      "severity": "critical",
+      "found_at": "2026-01-19T20:25:00+05:30",
+      "fixed": true
+    },
+    {
+      "file": "docs/spec/wiki/OAuth.md",
+      "message": "CRITICAL: Hallucinated CLI commands (apigate oauth-identities, apigate oauth-states), fake settings (oauth.auto_link_by_email, oauth.use_pkce)",
+      "severity": "critical",
+      "found_at": "2026-01-19T20:35:00+05:30",
+      "fixed": true
+    },
+    {
+      "file": "docs/spec/wiki/Security.md",
+      "message": "Hallucinated CLI commands (apigate certificates create, apigate admin invite, apigate logs --filter audit), claimed scopes on API keys",
+      "severity": "high",
+      "found_at": "2026-01-19T20:40:00+05:30",
+      "fixed": true
+    },
+    {
+      "file": "docs/spec/wiki/Certificates.md",
+      "message": "CRITICAL: Hallucinated CLI commands (apigate certificates obtain/renew/export), wrong env vars (TLS_ACME_*), incorrect certificate events (certificate.expiring)",
+      "severity": "critical",
+      "found_at": "2026-01-19T20:50:00+05:30",
+      "fixed": true
+    },
+    {
+      "file": "docs/spec/wiki/Troubleshooting.md",
+      "message": "CRITICAL: Wrong command names (api-keys vs keys), hallucinated commands (upstreams health, logs, migrate, doctor, providers test, webhook-deliveries), PostgreSQL section (SQLite only)",
+      "severity": "critical",
+      "found_at": "2026-01-19T20:55:00+05:30",
+      "fixed": true
+    },
+    {
+      "file": "docs/spec/wiki/FAQ.md",
+      "message": "CRITICAL: False claims (PostgreSQL support, Redis support, scopes on API keys), wrong command names, fake scaling advice",
+      "severity": "critical",
+      "found_at": "2026-01-19T21:00:00+05:30",
+      "fixed": true
+    }
+  ],
+  "current_session": "Wiki Verification Session 3",
+  "statistics": {
+    "total_verified": 30,
+    "total_issues_found": 27,
+    "total_issues_fixed": 26,
+    "remaining_files_estimate": 25
+  },
+  "cli_commands_verified": {
+    "exist": [
+      "apigate init",
+      "apigate serve",
+      "apigate version",
+      "apigate settings set/get/list",
+      "apigate plans list/get/create/delete/enable/disable",
+      "apigate routes list/get/create/update/delete/enable/disable",
+      "apigate users list/get/create/delete/activate/deactivate/set-password",
+      "apigate keys list/create/revoke",
+      "apigate admin create",
+      "apigate mod (generic CRUD)",
+      "apigate usage",
+      "apigate validate",
+      "apigate shell",
+      "apigate upstreams list/get/create/update/delete/enable/disable",
+      "apigate groups list/list-user/get/create/update/delete/suspend/activate",
+      "apigate group-members list/list-user/create",
+      "apigate certificates list/get/get-domain/create/delete/revoke/expiring/expired"
+    ],
+    "do_not_exist": [
+      "apigate migrate",
+      "apigate doctor",
+      "apigate logs",
+      "apigate analytics",
+      "apigate webhooks",
+      "apigate webhook-deliveries",
+      "apigate oauth-identities",
+      "apigate oauth-states",
+      "apigate providers test",
+      "apigate email test/preview",
+      "apigate certificates obtain/renew/export"
+    ]
+  },
+  "key_patterns": {
+    "settings_namespaces": ["custom.*", "email.*", "payment.*", "oauth.*", "ratelimit.*", "tls.*"],
+    "email_providers": ["smtp", "mock", "none"],
+    "payment_providers": ["stripe", "paddle", "lemonsqueezy", "dummy", "none"],
+    "database": "SQLite only (no PostgreSQL)",
+    "env_var_prefix": "APIGATE_*"
+  }
+}

@@ -26,15 +26,17 @@ Upstreams define where your actual API lives. When a request matches a route, AP
 |----------|------|-------------|
 | `id` | string | Unique identifier (auto-generated) |
 | `name` | string | Human-readable name (required) |
+| `description` | string | Upstream description |
 | `base_url` | string | Backend URL (required) |
-| `timeout_ms` | int | Request timeout in milliseconds |
-| `max_idle_conns` | int | Connection pool size |
-| `idle_conn_timeout_ms` | int | Idle connection timeout |
+| `timeout_ms` | int | Request timeout in milliseconds (default: 30000) |
+| `max_idle_conns` | int | Connection pool size (default: 100) |
+| `idle_conn_timeout_ms` | int | Idle connection timeout (default: 90000) |
 | `auth_type` | enum | Authentication type |
 | `auth_header` | string | Custom auth header name |
-| `auth_value_encrypted` | string | Encrypted auth value |
-| `health_check_path` | string | Health check endpoint |
+| `auth_value` | string | Auth value (write-only, set via API but not returned) |
 | `enabled` | bool | Whether upstream is active |
+| `created_at` | timestamp | Creation time |
+| `updated_at` | timestamp | Last update time |
 
 ---
 
@@ -188,21 +190,6 @@ APIGate maintains connection pools to upstreams for efficiency.
 - **High traffic**: Increase `max_idle_conns` to reduce connection overhead
 - **Low traffic**: Decrease `idle_conn_timeout_ms` to free resources
 - **Flaky backend**: Decrease `timeout_ms` to fail fast
-
----
-
-## Health Checks
-
-Configure a health check path to monitor upstream availability:
-
-```bash
-apigate upstreams create \
-  --name "my-api" \
-  --url "https://api.example.com" \
-  --health-check-path "/health"
-```
-
-APIGate will periodically check this endpoint and mark the upstream as unhealthy if it fails.
 
 ---
 

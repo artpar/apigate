@@ -86,18 +86,10 @@ Any OpenID Connect compatible provider.
 4. Configure in APIGate:
 
 ```bash
-# Environment variables
-OAUTH_GOOGLE_ENABLED=true
-OAUTH_GOOGLE_CLIENT_ID=your-client-id.googleusercontent.com
-OAUTH_GOOGLE_CLIENT_SECRET=your-client-secret
-```
-
-Or via CLI:
-
-```bash
+# Via CLI (stored in database)
 apigate settings set oauth.google.enabled true
-apigate settings set oauth.google.client_id "your-client-id"
-apigate settings set oauth.google.client_secret "your-secret"
+apigate settings set oauth.google.client_id "your-client-id.googleusercontent.com"
+apigate settings set oauth.google.client_secret "your-client-secret" --encrypted
 ```
 
 ### GitHub OAuth Setup
@@ -108,18 +100,19 @@ apigate settings set oauth.google.client_secret "your-secret"
 4. Configure in APIGate:
 
 ```bash
-OAUTH_GITHUB_ENABLED=true
-OAUTH_GITHUB_CLIENT_ID=your-client-id
-OAUTH_GITHUB_CLIENT_SECRET=your-client-secret
+apigate settings set oauth.github.enabled true
+apigate settings set oauth.github.client_id "your-client-id"
+apigate settings set oauth.github.client_secret "your-client-secret" --encrypted
 ```
 
 ### Generic OIDC Setup
 
 ```bash
-OAUTH_OIDC_ENABLED=true
-OAUTH_OIDC_ISSUER=https://your-idp.com
-OAUTH_OIDC_CLIENT_ID=your-client-id
-OAUTH_OIDC_CLIENT_SECRET=your-client-secret
+apigate settings set oauth.oidc.enabled true
+apigate settings set oauth.oidc.name "My IdP"
+apigate settings set oauth.oidc.issuer_url "https://your-idp.com"
+apigate settings set oauth.oidc.client_id "your-client-id"
+apigate settings set oauth.oidc.client_secret "your-client-secret" --encrypted
 ```
 
 ---
@@ -156,67 +149,6 @@ Handles the callback from the OAuth provider after authentication.
 
 ---
 
-## OAuth Identity
-
-When a user signs in via OAuth, an OAuth Identity record is created:
-
-### Identity Properties
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `id` | string | Unique identifier |
-| `user_id` | string | Linked APIGate user |
-| `provider` | string | Provider name (google, github, oidc) |
-| `provider_user_id` | string | User ID from the provider |
-| `email` | string | Email from provider |
-| `name` | string | Display name from provider |
-| `avatar_url` | string | Profile picture URL |
-| `access_token` | string | OAuth access token (encrypted) |
-| `refresh_token` | string | OAuth refresh token (encrypted) |
-| `token_expires_at` | timestamp | Token expiration time |
-| `created_at` | timestamp | When identity was linked |
-
-### List User's OAuth Identities
-
-```bash
-# CLI
-apigate oauth-identities list --user "user-id"
-
-# API
-curl http://localhost:8080/admin/oauth/identities/user/<user-id>
-```
-
-### Unlink OAuth Identity
-
-```bash
-# CLI
-apigate oauth-identities unlink <identity-id>
-
-# API
-curl -X DELETE http://localhost:8080/admin/oauth/identities/<id>
-```
-
----
-
-## OAuth State
-
-CSRF protection via state tokens:
-
-### State Properties
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `state` | string | Random CSRF token |
-| `provider` | string | OAuth provider |
-| `redirect_uri` | string | Where to redirect after auth |
-| `code_verifier` | string | PKCE code verifier |
-| `nonce` | string | OIDC nonce for ID token |
-| `expires_at` | timestamp | State expiration (10 min) |
-
-States are automatically cleaned up after use or expiration.
-
----
-
 ## User Linking
 
 ### Auto-Linking by Email
@@ -225,11 +157,6 @@ When a user signs in via OAuth:
 
 1. If email matches existing user: Link identity to existing user
 2. If no match: Create new user with OAuth email
-
-```bash
-# Configure auto-linking
-apigate settings set oauth.auto_link_by_email true
-```
 
 ### Manual Linking
 
@@ -245,15 +172,6 @@ Existing users can link additional OAuth providers:
 
 ## Security Features
 
-### PKCE Support
-
-Proof Key for Code Exchange prevents authorization code interception:
-
-```bash
-# Enable PKCE (recommended)
-apigate settings set oauth.use_pkce true
-```
-
 ### State Validation
 
 All OAuth flows include state parameter validation to prevent CSRF attacks.
@@ -262,9 +180,9 @@ All OAuth flows include state parameter validation to prevent CSRF attacks.
 
 OAuth tokens (access_token, refresh_token) are encrypted at rest using the application secret.
 
-### Token Refresh
+### PKCE Support
 
-When access tokens expire, APIGate automatically uses the refresh token to get new tokens.
+Proof Key for Code Exchange prevents authorization code interception. PKCE is automatically used when supported by the provider.
 
 ---
 
@@ -336,15 +254,7 @@ apigate settings set oauth.google.enabled true
 apigate settings set oauth.github.enabled true
 ```
 
-### 2. Use PKCE
-
-Always enable PKCE for enhanced security:
-
-```bash
-apigate settings set oauth.use_pkce true
-```
-
-### 3. Set Redirect URIs Carefully
+### 2. Set Redirect URIs Carefully
 
 Use exact HTTPS URLs:
 
@@ -353,37 +263,18 @@ Use exact HTTPS URLs:
 https://api.example.com/auth/oauth/google/callback
 
 # Bad
-http://localhost:8080/auth/oauth/google/callback  # HTTP
+http://localhost:8080/auth/oauth/google/callback  # HTTP in production
 https://api.example.com/auth/oauth/google  # Missing /callback
 ```
 
-### 4. Handle Account Linking
+### 3. Handle Account Linking
 
 Allow users to link multiple providers to one account for flexibility.
-
----
-
-## CLI Commands
-
-```bash
-# List OAuth identities
-apigate oauth-identities list
-apigate oauth-identities list --user "user-id"
-
-# Get identity details
-apigate oauth-identities get <id>
-
-# Unlink identity
-apigate oauth-identities unlink <id>
-
-# Cleanup expired states
-apigate oauth-states cleanup
-```
 
 ---
 
 ## See Also
 
 - [[Users]] - User management
-- [[Configuration]] - OAuth settings
+- [[Configuration]] - Full configuration reference
 - [[Customer-Portal]] - Portal login integration

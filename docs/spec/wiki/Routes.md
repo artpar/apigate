@@ -320,15 +320,25 @@ metering_expr: "request.body.batch_size * 0.1"
 ### Via CLI
 
 ```bash
-apigate routes enable <id>
-apigate routes disable <id>
+# Update route to enable
+apigate routes update <id> --enabled true
+
+# Update route to disable
+apigate routes update <id> --enabled false
 ```
 
 ### Via API
 
 ```bash
-curl -X POST http://localhost:8080/admin/routes/<id>/enable
-curl -X POST http://localhost:8080/admin/routes/<id>/disable
+# Enable a route
+curl -X PUT http://localhost:8080/admin/routes/<id> \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": true}'
+
+# Disable a route
+curl -X PUT http://localhost:8080/admin/routes/<id> \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": false}'
 ```
 
 ---

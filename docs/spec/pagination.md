@@ -45,11 +45,11 @@ Paginated responses include both `meta` and `links` sections:
     "pages": 8
   },
   "links": {
-    "self": "/api/users?page[number]=2&page[size]=20",
-    "first": "/api/users?page[number]=1&page[size]=20",
-    "last": "/api/users?page[number]=8&page[size]=20",
-    "prev": "/api/users?page[number]=1&page[size]=20",
-    "next": "/api/users?page[number]=3&page[size]=20"
+    "self": "/admin/users?page[number]=2&page[size]=20",
+    "first": "/admin/users?page[number]=1&page[size]=20",
+    "last": "/admin/users?page[number]=8&page[size]=20",
+    "prev": "/admin/users?page[number]=1&page[size]=20",
+    "next": "/admin/users?page[number]=3&page[size]=20"
   }
 }
 ```
@@ -105,9 +105,9 @@ When a collection has no items:
     "pages": 1
   },
   "links": {
-    "self": "/api/users?page[number]=1&page[size]=20",
-    "first": "/api/users?page[number]=1&page[size]=20",
-    "last": "/api/users?page[number]=1&page[size]=20"
+    "self": "/admin/users?page[number]=1&page[size]=20",
+    "first": "/admin/users?page[number]=1&page[size]=20",
+    "last": "/admin/users?page[number]=1&page[size]=20"
   }
 }
 ```
@@ -157,7 +157,7 @@ func ListUsers(w http.ResponseWriter, r *http.Request) {
 ### First Page (Default)
 
 ```
-GET /api/users
+GET /admin/users
 ```
 
 Response includes:
@@ -168,7 +168,7 @@ Response includes:
 ### Specific Page
 
 ```
-GET /api/users?page[number]=3&page[size]=50
+GET /admin/users?page[number]=3&page[size]=50
 ```
 
 Response includes:
@@ -179,7 +179,7 @@ Response includes:
 ### Last Page
 
 ```
-GET /api/users?page[number]=10&page[size]=20
+GET /admin/users?page[number]=10&page[size]=20
 ```
 
 Response includes:
@@ -191,9 +191,9 @@ Response includes:
 
 | Endpoint | Default per_page |
 |----------|------------------|
-| `GET /api/users` | 20 |
-| `GET /api/keys` | 20 |
-| `GET /api/plans` | 20 |
-| `GET /api/routes` | 20 |
-| `GET /api/upstreams` | 20 |
+| `GET /admin/users` | 20 |
+| `GET /admin/keys` | 20 |
+| `GET /admin/plans` | 20 |
+| `GET /admin/routes` | 20 |
+| `GET /admin/upstreams` | 20 |
 | Module list endpoints | 20 |

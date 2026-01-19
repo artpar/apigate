@@ -35,14 +35,13 @@ Plans are the foundation of API monetization. Each plan specifies:
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `id` | string | Unique identifier |
-| `name` | string | Display name (required, unique) |
+| `id` | string | Unique identifier (required) |
+| `name` | string | Display name (required) |
 | `description` | string | Plan description |
-| `price_monthly` | int | Monthly price in cents |
-| `overage_price` | int | Price per overage unit in cents |
-| `requests_per_month` | int | Monthly quota (0 = unlimited, default: 1000) |
-| `rate_limit_per_minute` | int | Requests per minute (default: 60) |
-| `trial_days` | int | Free trial period in days (default: 0) |
+| `price_monthly` | float | Monthly price in cents |
+| `overage_price` | float | Price per overage unit in cents |
+| `requests_per_month` | int64 | Monthly quota (0 = unlimited) |
+| `rate_limit_per_minute` | int | Requests per minute |
 | `stripe_price_id` | string | Stripe price ID for billing |
 | `paddle_price_id` | string | Paddle price ID for billing |
 | `lemon_variant_id` | string | LemonSqueezy variant ID |
@@ -99,12 +98,12 @@ apigate plans create \
 curl -X POST http://localhost:8080/admin/plans \
   -H "Content-Type: application/json" \
   -d '{
+    "id": "pro",
     "name": "Pro",
     "description": "For growing businesses",
-    "price_cents": 4900,
+    "price_monthly": 4900,
     "requests_per_month": 100000,
     "rate_limit_per_minute": 600,
-    "features": ["advanced_analytics", "webhooks"],
     "enabled": true
   }'
 ```
@@ -296,17 +295,6 @@ apigate plans create \
 
 New users without explicit plan assignment get the default plan.
 
-### Trial Days
-
-Offer a free trial period before billing starts:
-
-```bash
-apigate plans create \
-  --name "Pro" \
-  --price 4900 \
-  --trial-days 14  # 14-day free trial
-```
-
 ---
 
 ## Best Practices
@@ -330,18 +318,7 @@ Each plan should have obvious value increase:
 | Pro | $99 | 100K/mo | 600/min | Production use |
 | Enterprise | Custom | Unlimited | Custom | Scale + support |
 
-### 3. Grace Periods
-
-Always set grace percentage:
-
-```bash
-# Give 20% buffer
-apigate plans create \
-  --monthly-quota 10000 \
-  --quota-grace-percent 20
-```
-
-### 4. Monitor Usage Patterns
+### 3. Monitor Usage Patterns
 
 Use analytics to inform plan limits:
 - P95 usage should fit comfortably in plan

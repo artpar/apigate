@@ -37,7 +37,7 @@ APIGate uses a **token bucket algorithm** for rate limiting:
 1. Each API key has a token bucket
 2. Bucket fills at `rate_limit / 60` tokens per second
 3. Each request consumes 1 token
-4. Bucket has maximum capacity (`rate_limit_burst` or `rate_limit`)
+4. Bucket has maximum capacity (`rate_limit_per_minute`)
 5. Empty bucket = rate limited
 
 ### Example
@@ -54,28 +54,56 @@ Plan with `rate_limit_per_minute: 60`:
 
 ### Per-Plan Rate Limits
 
+Rate limits are configured on plans. All users on a plan share the same rate limit settings.
+
+#### Via Admin UI
+
+1. Go to **Plans** in the sidebar
+2. Click **Add Plan** or edit existing
+3. Set **Rate Limit** (requests per minute)
+4. Click **Save**
+
+#### Via CLI
+
 ```bash
-# Via CLI
+# Create plan with rate limit
 apigate plans create \
+  --id "pro" \
   --name "Pro" \
   --rate-limit 600 \
-  --rate-limit-burst 1000
+  --requests 100000
 
-# Via API
+# List plans with their rate limits
+apigate plans list
+```
+
+#### Via API
+
+```bash
 curl -X POST http://localhost:8080/admin/plans \
+  -H "Content-Type: application/vnd.api+json" \
+  -H "Cookie: session=YOUR_SESSION" \
   -d '{
-    "name": "Pro",
-    "rate_limit_per_minute": 600,
-    "rate_limit_burst": 1000
+    "data": {
+      "type": "plans",
+      "attributes": {
+        "name": "Pro",
+        "rate_limit_per_minute": 600,
+        "requests_per_month": 100000
+      }
+    }
   }'
 ```
 
-### Rate Limit Properties
+### Global Burst Setting
 
-| Property | Default | Description |
-|----------|---------|-------------|
-| `rate_limit_per_minute` | 60 | Sustained request rate |
-| `rate_limit_burst` | same as rate_limit | Maximum burst capacity |
+Burst capacity is configured globally via settings:
+
+```bash
+apigate settings set ratelimit.burst_tokens 10
+```
+
+The default is 5 tokens. This allows brief bursts above the steady rate.
 
 ---
 
@@ -126,26 +154,28 @@ Indicates seconds until requests are allowed again.
 
 ---
 
-## Per-Route Rate Limits
+## Rate Limit Strategies
 
-Override plan limits for specific routes:
+### 1. Tiered Limits
 
-```bash
-apigate routes create \
-  --name "expensive-operation" \
-  --path "/api/export/*" \
-  --rate-limit 10  # Override to 10/min regardless of plan
-```
+Different limits per plan tier:
 
-Route rate limits take precedence over plan limits.
+| Plan | Rate Limit | Use Case |
+|------|------------|----------|
+| Free | 60/min | Evaluation |
+| Starter | 300/min | Small apps |
+| Pro | 1000/min | Production |
+| Enterprise | 10000/min | High scale |
+
+### 2. Plan-Based Limits
+
+Each plan has its own rate limit. Users automatically get the rate limit from their assigned plan.
 
 ---
 
-## Shared vs Separate Buckets
+## Per-Key Buckets
 
-### Default: Per-Key Buckets
-
-Each API key has its own bucket:
+Each API key has its own independent token bucket:
 
 ```
 User with 3 API keys:
@@ -154,112 +184,7 @@ User with 3 API keys:
 └── Key C: 60 tokens
 ```
 
-### Per-User Buckets
-
-Share bucket across all user's keys:
-
-```bash
-apigate settings set rate_limit_per_user true
-```
-
-```
-User with 3 API keys:
-└── Shared bucket: 60 tokens
-    ├── Key A uses from shared
-    ├── Key B uses from shared
-    └── Key C uses from shared
-```
-
----
-
-## Burst Handling
-
-### Allow Bursts
-
-```bash
-apigate plans create \
-  --rate-limit 60 \
-  --rate-limit-burst 120
-```
-
-- Sustained: 60 req/min
-- Burst: Up to 120 requests if bucket is full
-- After burst: Must wait for refill
-
-### No Burst
-
-```bash
-apigate plans create \
-  --rate-limit 60 \
-  --rate-limit-burst 60
-```
-
-Strict 1 req/sec maximum.
-
----
-
-## Rate Limit Strategies
-
-### 1. Tiered Limits
-
-Different limits per plan tier:
-
-| Plan | Rate Limit | Burst | Use Case |
-|------|------------|-------|----------|
-| Free | 60/min | 60 | Evaluation |
-| Starter | 300/min | 500 | Small apps |
-| Pro | 1000/min | 2000 | Production |
-| Enterprise | 10000/min | 20000 | High scale |
-
-### 2. Endpoint-Specific Limits
-
-Protect expensive operations:
-
-```bash
-# Normal endpoints: use plan limit
-apigate routes create --name "users-api" --path "/api/users/*"
-
-# Expensive endpoint: lower limit
-apigate routes create --name "export" --path "/api/export/*" --rate-limit 5
-
-# Critical endpoint: higher limit
-apigate routes create --name "health" --path "/health" --rate-limit 1000
-```
-
-### 3. Time-Based Limits
-
-Different limits by time (requires custom module):
-
-```yaml
-# peak_hours: 9am-6pm → stricter limits
-# off_peak: other times → relaxed limits
-```
-
----
-
-## Monitoring Rate Limits
-
-### View Current State
-
-```bash
-# Check specific key's bucket
-apigate keys rate-limit <key-id>
-
-# Output:
-# Bucket: 45/60 tokens
-# Refill rate: 1/sec
-# Next reset: 15s
-```
-
-### Analytics
-
-```bash
-# Keys hitting rate limits
-apigate analytics rate-limits --period 24h
-
-# Top rate-limited keys
-apigate analytics rate-limits --sort hits --limit 10
-```
+This allows users to distribute requests across multiple keys if needed.
 
 ---
 
@@ -307,8 +232,6 @@ def api_call_with_backoff(max_retries=5):
 ### 3. Queue Requests
 
 ```python
-from queue import Queue
-import threading
 import time
 
 class RateLimitedClient:
@@ -335,14 +258,14 @@ class RateLimitedClient:
 **Symptom**: Getting 429s before expected
 
 **Causes**:
-1. Multiple keys sharing user bucket
-2. Route-specific limit lower than plan
-3. Burst consumed, waiting for refill
+1. Multiple keys consuming from same user's allocation
+2. Burst consumed, waiting for refill
+3. Clock skew between client and server
 
 **Debug**:
 ```bash
-apigate keys rate-limit <key-id>
-apigate routes get <route-id>  # Check for route-level limit
+# Check plan rate limit
+apigate plans get <plan-id>
 ```
 
 ### Rate Limits Not Applying
@@ -352,11 +275,12 @@ apigate routes get <route-id>  # Check for route-level limit
 **Causes**:
 1. Plan has `rate_limit_per_minute: 0` (unlimited)
 2. Request bypassing authentication
-3. Admin role (may bypass limits)
+3. API key not associated with a plan
 
 **Debug**:
 ```bash
-apigate plans get <plan-id>
+apigate plans list
+apigate keys list
 ```
 
 ---
