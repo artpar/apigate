@@ -42,6 +42,9 @@ func init() {
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
+	// Log version info at startup to help diagnose issues with stale builds (#32)
+	fmt.Printf("apigate %s (commit: %s, built: %s)\n", version, commit, buildDate)
+
 	// Create application with root command for module CLI integration
 	app, err := bootstrap.NewWithConfig(bootstrap.Config{
 		RootCmd: rootCmd,
