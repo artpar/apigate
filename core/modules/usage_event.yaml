@@ -1,0 +1,125 @@
+# Usage Event module - tracks API usage for billing
+# Events can originate from the proxy or external services via metering API
+module: usage_event
+
+schema:
+  # Identity and ownership
+  user_id:        { type: ref, to: user, required: true, description: "User to attribute usage to" }
+  key_id:         { type: ref, to: api_key, description: "API key used (for proxy events)" }
+
+  # Event classification
+  event_type:     { type: string, default: "api.request", description: "Event category (e.g., api.request, deployment.started)" }
+  resource_id:    { type: string, description: "Identifier of the resource used" }
+  resource_type:  { type: string, description: "Type of resource (e.g., deployment, storage)" }
+
+  # Usage measurement
+  quantity:       { type: float, default: 1.0, description: "Units consumed (default 1.0)" }
+  cost_multiplier: { type: float, default: 1.0, description: "Cost multiplier for billing" }
+
+  # Request details (for proxy events)
+  method:         { type: string, description: "HTTP method (for proxy events)" }
+  path:           { type: string, description: "Request path (for proxy events)" }
+  status_code:    { type: int, description: "HTTP status code (for proxy events)" }
+  latency_ms:     { type: int, description: "Request latency in milliseconds" }
+  request_bytes:  { type: int, description: "Request body size in bytes" }
+  response_bytes: { type: int, description: "Response body size in bytes" }
+
+  # Source identification
+  source:         { type: enum, values: [proxy, external], default: proxy, description: "Event origin" }
+  source_name:    { type: string, description: "Service name for external events" }
+
+  # Context
+  metadata:       { type: json, description: "Arbitrary context (for external events)" }
+  ip_address:     { type: string, description: "Client IP address" }
+  user_agent:     { type: string, description: "Client user agent" }
+
+  # Idempotency (for external events)
+  idempotency_key: { type: string, lookup: true, description: "Prevents duplicate event processing" }
+
+  # Timestamp
+  event_timestamp: { type: timestamp, description: "When the event occurred" }
+
+actions:
+  # Query events by user
+  list_by_user:
+    input:
+      - { name: user_id, type: ref, to: user, required: true }
+      - { name: start_date, type: timestamp }
+      - { name: end_date, type: timestamp }
+    description: List usage events for a user
+
+  # Query events by type
+  list_by_type:
+    input:
+      - { name: event_type, type: string, required: true }
+      - { name: start_date, type: timestamp }
+      - { name: end_date, type: timestamp }
+    description: List usage events by type
+
+  # Aggregate usage for billing
+  aggregate:
+    input:
+      - { name: user_id, type: ref, to: user, required: true }
+      - { name: start_date, type: timestamp, required: true }
+      - { name: end_date, type: timestamp, required: true }
+    description: Aggregate usage for billing period
+
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /api/v1/meter
+      endpoints:
+        # Metering API - submit external events (requires meter:write scope)
+        - { action: create, method: POST, path: "/", auth: service, scope: "meter:write" }
+        # Query events (admin only)
+        - { action: list, method: GET, path: "/", auth: admin }
+        - { action: list_by_user, method: GET, path: "/user/{user_id}", auth: admin }
+        - { action: get, method: GET, path: "/{id}", auth: admin }
+
+  cli:
+    serve:
+      enabled: true
+      command: meter
+      commands:
+        - action: list
+          columns: [id, user_id, event_type, quantity, source, event_timestamp]
+        - action: list_by_user
+          name: list-user
+          flags:
+            - { param: user_id, name: user, short: u, required: true }
+            - { param: start_date, name: start, description: "Start date (RFC3339)" }
+            - { param: end_date, name: end, description: "End date (RFC3339)" }
+          columns: [id, event_type, resource_type, quantity, event_timestamp]
+        - action: get
+          args:
+            - { name: id, required: true }
+        - action: aggregate
+          flags:
+            - { param: user_id, name: user, short: u, required: true }
+            - { param: start_date, name: start, required: true }
+            - { param: end_date, name: end, required: true }
+
+hooks:
+  before_create:
+    # Validate event type
+    - validate: event_type
+      rule: "IsValidEventType(event_type)"
+      message: "Invalid event type"
+    # Check for duplicate idempotency key
+    - validate: idempotency_key
+      rule: "IsUniqueIdempotencyKey(idempotency_key)"
+      message: "Duplicate event"
+
+  after_create:
+    - emit: usage_event.created
+    # Update quota tracking
+    - call: update_quota
+
+meta:
+  description: Usage events for billing and analytics
+  icon: bar-chart-2
+  display_name: Usage Events
+  plural: Usage Events
+  # Events are immutable - no update or delete
+  immutable: true

@@ -14,6 +14,7 @@ This document defines all JSON:API resource types used in the APIGate API.
 | `TypePlan` | `plans` | `adapters/http/admin/plans.go:14` |
 | `TypeRoute` | `routes` | `adapters/http/admin/routes.go:19` |
 | `TypeUpstream` | `upstreams` | `adapters/http/admin/routes.go:20` |
+| `TypeUsageEvent` | `usage_events` | `adapters/http/admin/meter.go:20` |
 
 ## Users Resource
 
@@ -452,3 +453,99 @@ For a module with `plural: widgets`:
 ```
 
 **Implementation**: `core/channel/http/http.go:236-405`
+
+---
+
+## Usage Events Resource
+
+**Type**: `usage_events`
+
+External usage events submitted via the Metering API.
+
+### Attributes
+
+| Attribute | Type | Description | Mutable |
+|-----------|------|-------------|---------|
+| `user_id` | string | User to attribute usage to | No |
+| `event_type` | string | Event category (e.g., `deployment.started`) | No |
+| `resource_id` | string | Identifier of resource used | No |
+| `resource_type` | string | Type of resource | No |
+| `quantity` | float64 | Units consumed (default: 1.0) | No |
+| `metadata` | object | Arbitrary key-value context | No |
+| `timestamp` | timestamp | When event occurred | No |
+| `source` | string | Service that submitted event | No |
+| `created_at` | timestamp | When event was recorded | No |
+
+### Event Types
+
+| Value | Description |
+|-------|-------------|
+| `api.request` | API request from external service |
+| `deployment.created` | Deployment created |
+| `deployment.started` | Deployment started running |
+| `deployment.stopped` | Deployment stopped |
+| `deployment.deleted` | Deployment removed |
+| `compute.minutes` | Compute time in minutes |
+| `storage.gb_hours` | Storage in GB-hours |
+| `bandwidth.gb` | Data transfer in GB |
+| `custom.*` | Custom event types |
+
+### Example: Submit Events
+
+```json
+{
+  "data": [
+    {
+      "type": "usage_events",
+      "attributes": {
+        "id": "evt_abc123",
+        "user_id": "usr_xyz789",
+        "event_type": "deployment.started",
+        "resource_id": "depl_456",
+        "resource_type": "deployment",
+        "quantity": 1,
+        "metadata": {
+          "template_id": "tmpl_789",
+          "region": "us-east-1"
+        },
+        "timestamp": "2026-01-19T12:00:00Z"
+      }
+    }
+  ]
+}
+```
+
+### Example: Query Response
+
+```json
+{
+  "data": {
+    "type": "usage_events",
+    "id": "evt_abc123",
+    "attributes": {
+      "user_id": "usr_xyz789",
+      "event_type": "deployment.started",
+      "resource_id": "depl_456",
+      "resource_type": "deployment",
+      "quantity": 1,
+      "metadata": {
+        "template_id": "tmpl_789"
+      },
+      "timestamp": "2026-01-19T12:00:00Z",
+      "source": "hoster-service",
+      "created_at": "2026-01-19T12:00:01Z"
+    }
+  }
+}
+```
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/meter` | Submit usage events |
+| GET | `/api/v1/meter` | Query usage events (admin) |
+
+**Implementation**: `adapters/http/admin/meter.go`
+
+See [Metering API Specification](metering-api.md) for full details.

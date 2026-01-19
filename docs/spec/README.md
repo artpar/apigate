@@ -14,6 +14,7 @@
 | [Error Codes](error-codes.md) | All error codes and HTTP statuses | `pkg/jsonapi/errors.go` |
 | [Pagination](pagination.md) | Pagination behavior and parameters | `pkg/jsonapi/pagination.go` |
 | [Resource Types](resource-types.md) | All API resource types and attributes | `adapters/http/admin/` |
+| [Metering API](metering-api.md) | External usage event ingestion | `adapters/http/admin/meter.go` |
 
 ## Compliance
 

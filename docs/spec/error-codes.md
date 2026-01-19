@@ -75,6 +75,17 @@ Points to the location of the error:
 | `validation_error` | 422 | Validation Failed | Request validation failed |
 | `rate_limit_exceeded` | 429 | Too Many Requests | Rate limit exceeded |
 
+### Metering Errors (4xx)
+
+| Code | Status | Title | When Used |
+|------|--------|-------|-----------|
+| `invalid_event_type` | 422 | Invalid Event Type | Unknown event type submitted |
+| `duplicate_event` | 409 | Duplicate Event | Event ID already processed |
+| `user_not_found` | 422 | User Not Found | user_id doesn't exist |
+| `invalid_quantity` | 422 | Invalid Quantity | Quantity <= 0 |
+| `invalid_timestamp` | 422 | Invalid Timestamp | Timestamp in future or too old |
+| `insufficient_scope` | 403 | Insufficient Scope | API key lacks required scope |
+
 ### Server Errors (5xx)
 
 | Code | Status | Title | When Used |

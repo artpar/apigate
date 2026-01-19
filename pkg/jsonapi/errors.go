@@ -201,3 +201,52 @@ func ErrFromError(err error) Error {
 	}
 	return ErrInternal(err.Error())
 }
+
+// -----------------------------------------------------------------------------
+// Metering API Errors
+// -----------------------------------------------------------------------------
+
+// ErrInvalidEventType creates a 422 error for invalid event type.
+func ErrInvalidEventType(eventType string) Error {
+	return NewError(422, "invalid_event_type", "Invalid Event Type").
+		Detailf("Event type '%s' is not recognized", eventType).
+		Build()
+}
+
+// ErrDuplicateEvent creates a 409 error for duplicate event ID.
+func ErrDuplicateEvent(eventID string) Error {
+	return NewError(409, "duplicate_event", "Duplicate Event").
+		Detailf("Event with ID '%s' has already been processed", eventID).
+		Build()
+}
+
+// ErrUserNotFoundForMeter creates a 422 error when user_id doesn't exist.
+func ErrUserNotFoundForMeter(userID string) Error {
+	return NewError(422, "user_not_found", "User Not Found").
+		Detailf("User with ID '%s' does not exist", userID).
+		Pointer("/data/attributes/user_id").
+		Build()
+}
+
+// ErrInvalidQuantity creates a 422 error for invalid quantity.
+func ErrInvalidQuantity(quantity float64) Error {
+	return NewError(422, "invalid_quantity", "Invalid Quantity").
+		Detailf("Quantity must be greater than 0, got %f", quantity).
+		Pointer("/data/attributes/quantity").
+		Build()
+}
+
+// ErrInvalidTimestamp creates a 422 error for invalid timestamp.
+func ErrInvalidTimestamp(reason string) Error {
+	return NewError(422, "invalid_timestamp", "Invalid Timestamp").
+		Detail(reason).
+		Pointer("/data/attributes/timestamp").
+		Build()
+}
+
+// ErrInsufficientScope creates a 403 error for missing API key scope.
+func ErrInsufficientScope(requiredScope string) Error {
+	return NewError(403, "insufficient_scope", "Insufficient Scope").
+		Detailf("API key requires '%s' scope to perform this action", requiredScope).
+		Build()
+}
