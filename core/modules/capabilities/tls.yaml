@@ -1,0 +1,65 @@
+# TLS Capability Interface
+# Any module that implements this capability can provide TLS certificates
+capability: tls
+
+description: |
+  TLS capability handles certificate provisioning and management.
+  Supports automatic certificate issuance via ACME (Let's Encrypt) or manual certificates.
+
+schema:
+  enabled: { type: bool, default: false, description: "Whether this TLS provider is active" }
+
+# Actions that implementing modules MUST provide
+actions:
+  # Get certificate for a domain
+  get_certificate:
+    description: Get TLS certificate for a domain
+    input:
+      - { name: domain, type: string, required: true }
+    output:
+      - { name: cert_pem, type: string, description: "PEM-encoded certificate chain" }
+      - { name: key_pem, type: secret, description: "PEM-encoded private key" }
+      - { name: expires_at, type: datetime }
+      - { name: error, type: string }
+
+  # Check if certificate needs renewal
+  check_renewal:
+    description: Check if certificate needs renewal
+    input:
+      - { name: domain, type: string, required: true }
+      - { name: days_before_expiry, type: int, default: 30 }
+    output:
+      - { name: needs_renewal, type: bool }
+      - { name: expires_at, type: datetime }
+      - { name: error, type: string }
+
+  # Renew/obtain certificate
+  obtain_certificate:
+    description: Obtain or renew a TLS certificate
+    input:
+      - { name: domain, type: string, required: true }
+    output:
+      - { name: cert_pem, type: string }
+      - { name: key_pem, type: secret }
+      - { name: expires_at, type: datetime }
+      - { name: error, type: string }
+
+  # Revoke certificate
+  revoke_certificate:
+    description: Revoke a TLS certificate
+    input:
+      - { name: domain, type: string, required: true }
+    output:
+      - { name: revoked, type: bool }
+      - { name: error, type: string }
+
+  # Test configuration
+  test_connection:
+    description: Verify TLS configuration
+    output:
+      - { name: valid, type: bool }
+      - { name: error, type: string }
+
+meta:
+  icon: lock
+  display_name: TLS Provider

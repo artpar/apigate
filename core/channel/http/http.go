@@ -13,6 +13,7 @@ import (
 	"github.com/artpar/apigate/core/openapi"
 	"github.com/artpar/apigate/core/runtime"
 	"github.com/artpar/apigate/core/schema"
+	"github.com/artpar/apigate/pkg/jsonapi"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -232,14 +233,30 @@ func (c *Channel) doList(ctx context.Context, w http.ResponseWriter, r *http.Req
 
 	result, err := c.runtime.Execute(ctx, mod.Source.Name, "list", input)
 	if err != nil {
-		c.writeError(w, err, http.StatusInternalServerError)
+		jsonapi.WriteInternalError(w, err.Error())
 		return
 	}
 
-	c.writeJSON(w, map[string]any{
-		"data":  result.List,
-		"count": result.Count,
-	})
+	// Convert results to JSON:API resources
+	resources := make([]jsonapi.Resource, 0, len(result.List))
+	for _, item := range result.List {
+		id := ""
+		if idVal, ok := item["id"]; ok {
+			id = fmt.Sprintf("%v", idVal)
+		}
+		rb := jsonapi.NewResource(mod.Plural, id)
+		for k, v := range item {
+			if k != "id" {
+				rb.Attr(k, v)
+			}
+		}
+		resources = append(resources, rb.Build())
+	}
+
+	// Calculate page for pagination
+	page := (offset / limit) + 1
+	pagination := jsonapi.NewPagination(int64(result.Count), page, limit, r.URL.String())
+	jsonapi.WriteCollection(w, http.StatusOK, resources, pagination)
 }
 
 // doGet handles get requests.
@@ -250,20 +267,25 @@ func (c *Channel) doGet(ctx context.Context, w http.ResponseWriter, r *http.Requ
 		RemoteIP: r.RemoteAddr,
 	})
 	if err != nil {
-		c.writeError(w, err, http.StatusNotFound)
+		jsonapi.WriteNotFound(w, mod.Source.Name)
 		return
 	}
 
-	c.writeJSON(w, map[string]any{
-		"data": result.Data,
-	})
+	// Convert to JSON:API resource
+	rb := jsonapi.NewResource(mod.Plural, id)
+	for k, v := range result.Data {
+		if k != "id" {
+			rb.Attr(k, v)
+		}
+	}
+	jsonapi.WriteResource(w, http.StatusOK, rb.Build())
 }
 
 // doCreate handles create requests.
 func (c *Channel) doCreate(ctx context.Context, w http.ResponseWriter, r *http.Request, mod convention.Derived) {
 	var data map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
-		c.writeError(w, fmt.Errorf("invalid JSON: %w", err), http.StatusBadRequest)
+		jsonapi.WriteBadRequest(w, "Invalid JSON body")
 		return
 	}
 
@@ -274,28 +296,29 @@ func (c *Channel) doCreate(ctx context.Context, w http.ResponseWriter, r *http.R
 		RequestBytes: r.ContentLength,
 	})
 	if err != nil {
-		c.writeError(w, err, http.StatusBadRequest)
+		jsonapi.WriteBadRequest(w, err.Error())
 		return
 	}
 
-	w.WriteHeader(http.StatusCreated)
-
-	// Build response with optional meta (e.g., raw_key for API keys)
-	resp := map[string]any{
-		"id":   result.ID,
-		"data": result.Data,
+	// Convert to JSON:API resource
+	rb := jsonapi.NewResource(mod.Plural, result.ID)
+	for k, v := range result.Data {
+		if k != "id" {
+			rb.Attr(k, v)
+		}
 	}
-	if len(result.Meta) > 0 {
-		resp["meta"] = result.Meta
+	// Add meta if present (e.g., raw_key for API keys)
+	for k, v := range result.Meta {
+		rb.Meta(k, v)
 	}
-	c.writeJSON(w, resp)
+	jsonapi.WriteCreated(w, rb.Build(), "/"+mod.Plural+"/"+result.ID)
 }
 
 // doUpdate handles update requests.
 func (c *Channel) doUpdate(ctx context.Context, w http.ResponseWriter, r *http.Request, mod convention.Derived, id string) {
 	var data map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
-		c.writeError(w, fmt.Errorf("invalid JSON: %w", err), http.StatusBadRequest)
+		jsonapi.WriteBadRequest(w, "Invalid JSON body")
 		return
 	}
 
@@ -307,14 +330,18 @@ func (c *Channel) doUpdate(ctx context.Context, w http.ResponseWriter, r *http.R
 		RequestBytes: r.ContentLength,
 	})
 	if err != nil {
-		c.writeError(w, err, http.StatusBadRequest)
+		jsonapi.WriteBadRequest(w, err.Error())
 		return
 	}
 
-	c.writeJSON(w, map[string]any{
-		"id":   result.ID,
-		"data": result.Data,
-	})
+	// Convert to JSON:API resource
+	rb := jsonapi.NewResource(mod.Plural, result.ID)
+	for k, v := range result.Data {
+		if k != "id" {
+			rb.Attr(k, v)
+		}
+	}
+	jsonapi.WriteResource(w, http.StatusOK, rb.Build())
 }
 
 // doDelete handles delete requests.
@@ -325,11 +352,11 @@ func (c *Channel) doDelete(ctx context.Context, w http.ResponseWriter, r *http.R
 		RemoteIP: r.RemoteAddr,
 	})
 	if err != nil {
-		c.writeError(w, err, http.StatusNotFound)
+		jsonapi.WriteNotFound(w, mod.Source.Name)
 		return
 	}
 
-	w.WriteHeader(http.StatusNoContent)
+	jsonapi.WriteNoContent(w)
 }
 
 // doCustomAction handles custom action requests.
@@ -344,14 +371,14 @@ func (c *Channel) doCustomAction(ctx context.Context, w http.ResponseWriter, r *
 	}
 
 	if action == nil {
-		c.writeError(w, fmt.Errorf("action %q not found", actionName), http.StatusNotFound)
+		jsonapi.WriteNotFound(w, "action")
 		return
 	}
 
 	var data map[string]any
 	if r.ContentLength > 0 {
 		if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
-			c.writeError(w, fmt.Errorf("invalid JSON: %w", err), http.StatusBadRequest)
+			jsonapi.WriteBadRequest(w, "Invalid JSON body")
 			return
 		}
 	}
@@ -364,29 +391,18 @@ func (c *Channel) doCustomAction(ctx context.Context, w http.ResponseWriter, r *
 		RequestBytes: r.ContentLength,
 	})
 	if err != nil {
-		c.writeError(w, err, http.StatusBadRequest)
+		jsonapi.WriteBadRequest(w, err.Error())
 		return
 	}
 
-	c.writeJSON(w, map[string]any{
-		"id":   result.ID,
-		"data": result.Data,
-	})
-}
-
-// writeJSON writes a JSON response.
-func (c *Channel) writeJSON(w http.ResponseWriter, data any) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(data)
-}
-
-// writeError writes an error response.
-func (c *Channel) writeError(w http.ResponseWriter, err error, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]string{
-		"error": err.Error(),
-	})
+	// Convert to JSON:API resource
+	rb := jsonapi.NewResource(mod.Plural, result.ID)
+	for k, v := range result.Data {
+		if k != "id" {
+			rb.Attr(k, v)
+		}
+	}
+	jsonapi.WriteResource(w, http.StatusOK, rb.Build())
 }
 
 // handleOpenAPI returns the OpenAPI specification.
@@ -411,7 +427,7 @@ func (c *Channel) handleOpenAPI(w http.ResponseWriter, r *http.Request) {
 
 	data, err := spec.ToJSON()
 	if err != nil {
-		c.writeError(w, err, http.StatusInternalServerError)
+		jsonapi.WriteInternalError(w, err.Error())
 		return
 	}
 

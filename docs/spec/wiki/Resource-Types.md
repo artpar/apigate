@@ -21,13 +21,12 @@ Represents API customers.
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
-| `email` | string | Email address (unique) |
+| `email` | string | Email address (unique, required) |
 | `name` | string | Display name |
-| `status` | enum | active, pending, suspended |
-| `role` | enum | admin, customer |
-| `email_verified_at` | timestamp | Email verification time |
+| `status` | enum | active, pending, suspended, cancelled |
+| `plan_id` | string | Assigned plan ID |
 | `created_at` | timestamp | Creation time |
-| `last_login_at` | timestamp | Last login time |
+| `updated_at` | timestamp | Last update time |
 
 **Relationships**:
 
@@ -35,6 +34,7 @@ Represents API customers.
 |--------------|------|-------------|
 | `plan` | plans | User's subscription plan |
 | `api_keys` | api_keys[] | User's API keys |
+| `groups` | groups[] | Groups user belongs to |
 
 **Example**:
 
@@ -47,7 +47,7 @@ Represents API customers.
       "email": "user@example.com",
       "name": "John Doe",
       "status": "active",
-      "role": "customer",
+      "plan_id": "plan_pro",
       "created_at": "2025-01-19T10:00:00Z"
     },
     "relationships": {
@@ -78,16 +78,18 @@ Represents subscription/pricing plans.
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
-| `name` | string | Plan name |
+| `name` | string | Plan name (required, unique) |
 | `description` | string | Plan description |
-| `price_cents` | int | Monthly price in cents |
+| `price_monthly` | int | Monthly price in cents |
+| `overage_price` | int | Overage price per unit in cents |
 | `requests_per_month` | int | Monthly quota (0 = unlimited) |
-| `rate_limit_per_minute` | int | Rate limit |
-| `rate_limit_burst` | int | Burst allowance |
-| `quota_enforcement` | enum | hard, soft, warn |
-| `features` | []string | Enabled features |
+| `rate_limit_per_minute` | int | Rate limit (default: 60) |
+| `trial_days` | int | Free trial period in days |
+| `stripe_price_id` | string | Stripe price ID |
+| `paddle_price_id` | string | Paddle price ID |
+| `lemon_variant_id` | string | LemonSqueezy variant ID |
+| `is_default` | bool | Default plan for new users |
 | `enabled` | bool | Plan available for selection |
-| `default` | bool | Default plan for new users |
 | `created_at` | timestamp | Creation time |
 
 **Example**:
@@ -100,13 +102,12 @@ Represents subscription/pricing plans.
     "attributes": {
       "name": "Pro",
       "description": "For production workloads",
-      "price_cents": 9900,
+      "price_monthly": 9900,
       "requests_per_month": 100000,
       "rate_limit_per_minute": 600,
-      "quota_enforcement": "soft",
-      "features": ["webhooks", "analytics"],
-      "enabled": true,
-      "default": false
+      "trial_days": 14,
+      "is_default": false,
+      "enabled": true
     }
   }
 }
@@ -131,11 +132,11 @@ Represents authentication tokens for API access.
 | Attribute | Type | Description |
 |-----------|------|-------------|
 | `name` | string | Key name |
-| `prefix` | string | Key prefix for identification |
+| `prefix` | string | Key prefix for identification (immutable) |
 | `key` | string | Full key (only on creation) |
-| `scopes` | []string | Allowed scopes |
+| `scopes` | JSON | Allowed scopes |
 | `expires_at` | timestamp | Expiration time |
-| `last_used_at` | timestamp | Last usage time |
+| `last_used` | timestamp | Last usage time |
 | `revoked_at` | timestamp | Revocation time |
 | `created_at` | timestamp | Creation time |
 
@@ -143,7 +144,9 @@ Represents authentication tokens for API access.
 
 | Relationship | Type | Description |
 |--------------|------|-------------|
-| `user` | users | Key owner |
+| `user` | users | Key owner (if user key) |
+| `group` | groups | Key owner (if group key) |
+| `created_by` | users | User who created the key |
 
 **Example** (on creation):
 

@@ -1,0 +1,72 @@
+# OAuth State module - stores CSRF state tokens for OAuth flows
+# Database-backed for horizontal scaling (stateless servers)
+module: oauth_state
+
+schema:
+  # State token (primary lookup)
+  state:          { type: string, required: true, unique: true, lookup: true, description: "Random state token for CSRF protection" }
+
+  # OAuth flow context
+  provider:       { type: string, required: true, description: "OAuth provider name" }
+  redirect_uri:   { type: string, description: "Redirect URI to return to after auth" }
+
+  # PKCE (Proof Key for Code Exchange)
+  code_verifier:  { type: secret, description: "PKCE code verifier (stored, never sent to provider)" }
+
+  # Nonce for OIDC
+  nonce:          { type: string, description: "Nonce for ID token validation" }
+
+  # Expiration
+  expires_at:     { type: timestamp, required: true, description: "When this state expires (10 min default)" }
+
+actions:
+  # Create state for new OAuth flow
+  create_state:
+    input:
+      - { name: provider, type: string, required: true }
+      - { name: redirect_uri, type: string }
+      - { name: code_verifier, type: secret }
+      - { name: nonce, type: string }
+    description: Create a new OAuth state token
+    internal: true
+
+  # Validate and consume state
+  validate_state:
+    input:
+      - { name: state, type: string, required: true }
+    description: Validate state token and return associated data
+    internal: true
+
+  # Cleanup expired states
+  cleanup_expired:
+    description: Delete expired state tokens
+    internal: true
+
+channels:
+  # No external channels - internal use only
+  http:
+    serve:
+      enabled: false
+
+  cli:
+    serve:
+      enabled: true
+      command: oauth-states
+      commands:
+        - action: list
+          columns: [state, provider, expires_at, created_at]
+          auth: admin
+        - action: cleanup_expired
+          name: cleanup
+
+hooks:
+  # Auto-delete after validation
+  after_validate_state:
+    - call: delete_state
+
+meta:
+  description: OAuth state tokens for CSRF protection (internal)
+  icon: shield
+  display_name: OAuth States
+  plural: OAuth States
+  internal: true

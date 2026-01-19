@@ -1,0 +1,164 @@
+# Generic OIDC Provider Module
+# Implements the oauth capability for any OIDC-compliant provider
+module: oauth_oidc
+
+meta:
+  description: Generic OpenID Connect (OIDC) authentication provider
+  implements: [oauth]
+  icon: key
+  display_name: Generic OIDC
+
+schema:
+  # Instance identification
+  name:           { type: string, required: true, unique: true, lookup: true, description: "Instance name (e.g., oauth_okta)" }
+  description:    { type: string, description: "Description of this instance" }
+  display_name:   { type: string, required: true, description: "Display name shown on login button (e.g., 'Okta', 'Auth0')" }
+
+  # Configuration
+  enabled:        { type: bool, default: false, description: "Whether this OAuth provider is active" }
+  is_default:     { type: bool, default: false, description: "Whether this is the default OIDC provider" }
+
+  # OIDC Configuration
+  issuer_url:     { type: string, required: true, description: "OIDC Issuer URL (e.g., https://accounts.google.com)" }
+  client_id:      { type: string, required: true, description: "OAuth Client ID" }
+  client_secret:  { type: secret, required: true, description: "OAuth Client Secret" }
+
+  # Scopes (space-separated)
+  scopes:         { type: string, default: "openid email profile", description: "OAuth scopes to request" }
+
+  # Optional: Override discovery endpoints (auto-discovered from issuer if not set)
+  auth_url:       { type: string, description: "Authorization endpoint (auto-discovered if empty)" }
+  token_url:      { type: string, description: "Token endpoint (auto-discovered if empty)" }
+  userinfo_url:   { type: string, description: "Userinfo endpoint (auto-discovered if empty)" }
+  jwks_url:       { type: string, description: "JWKS endpoint (auto-discovered if empty)" }
+
+  # Claims mapping (map standard claims to custom claim names)
+  claim_sub:      { type: string, default: "sub", description: "Claim name for user ID" }
+  claim_email:    { type: string, default: "email", description: "Claim name for email" }
+  claim_name:     { type: string, default: "name", description: "Claim name for display name" }
+  claim_picture:  { type: string, default: "picture", description: "Claim name for avatar URL" }
+
+  # Allow signup or login only
+  allow_signup:   { type: bool, default: true, description: "Allow new users to sign up via this provider" }
+
+  # Advanced options
+  pkce_enabled:   { type: bool, default: true, description: "Enable PKCE for enhanced security" }
+  skip_discovery: { type: bool, default: false, description: "Skip OIDC discovery (use manual endpoints)" }
+
+actions:
+  # Test connection verifies the issuer and fetches discovery document
+  test_connection:
+    description: Verify OIDC configuration and fetch discovery document
+    output:
+      - { name: valid, type: bool }
+      - { name: provider_name, type: string }
+      - { name: issuer, type: string }
+      - { name: auth_url, type: string }
+      - { name: token_url, type: string }
+      - { name: userinfo_url, type: string }
+      - { name: error, type: string }
+
+  # Fetch OIDC discovery document
+  discover:
+    description: Fetch and parse OIDC discovery document
+    output:
+      - { name: issuer, type: string }
+      - { name: authorization_endpoint, type: string }
+      - { name: token_endpoint, type: string }
+      - { name: userinfo_endpoint, type: string }
+      - { name: jwks_uri, type: string }
+      - { name: scopes_supported, type: list }
+      - { name: error, type: string }
+
+  # Generate authorization URL
+  get_auth_url:
+    description: Generate OIDC authorization URL
+    input:
+      - { name: redirect_uri, type: string, required: true }
+      - { name: state, type: string, required: true }
+      - { name: code_challenge, type: string }
+      - { name: nonce, type: string, description: "Nonce for ID token validation" }
+    output:
+      - { name: url, type: string }
+
+  # Exchange code for tokens
+  exchange_code:
+    description: Exchange authorization code for tokens
+    input:
+      - { name: code, type: string, required: true }
+      - { name: redirect_uri, type: string, required: true }
+      - { name: code_verifier, type: string }
+    output:
+      - { name: access_token, type: string }
+      - { name: refresh_token, type: string }
+      - { name: id_token, type: string }
+      - { name: expires_at, type: datetime }
+      - { name: token_type, type: string }
+      - { name: error, type: string }
+
+  # Validate and decode ID token
+  validate_id_token:
+    description: Validate and decode an ID token
+    input:
+      - { name: id_token, type: string, required: true }
+      - { name: nonce, type: string, description: "Expected nonce value" }
+    output:
+      - { name: valid, type: bool }
+      - { name: claims, type: map }
+      - { name: error, type: string }
+
+  # Get user profile
+  get_user_profile:
+    description: Get user profile from OIDC provider
+    input:
+      - { name: access_token, type: string, required: true }
+    output:
+      - { name: provider_user_id, type: string }
+      - { name: email, type: email }
+      - { name: email_verified, type: bool }
+      - { name: name, type: string }
+      - { name: avatar_url, type: string }
+      - { name: raw_data, type: map }
+      - { name: error, type: string }
+
+  # Refresh token
+  refresh_token:
+    description: Refresh access token
+    input:
+      - { name: refresh_token, type: string, required: true }
+    output:
+      - { name: access_token, type: string }
+      - { name: refresh_token, type: string }
+      - { name: id_token, type: string }
+      - { name: expires_at, type: datetime }
+      - { name: error, type: string }
+
+  # Revoke token
+  revoke_token:
+    description: Revoke token (if provider supports it)
+    input:
+      - { name: token, type: string, required: true }
+      - { name: token_type, type: enum, values: [access_token, refresh_token], default: access_token }
+    output:
+      - { name: revoked, type: bool }
+      - { name: error, type: string }
+
+channels:
+  cli:
+    serve:
+      enabled: true
+      command: oauth-oidc
+      commands:
+        - action: test_connection
+        - action: discover
+        - action: get_auth_url
+          flags:
+            - { param: redirect_uri, required: true }
+            - { param: state, required: true }
+        - action: validate_id_token
+          flags:
+            - { param: id_token, required: true }
+
+# Implementation notes
+implementation:
+  discovery_path: "/.well-known/openid-configuration"

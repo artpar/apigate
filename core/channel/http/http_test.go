@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/artpar/apigate/core/convention"
 	"github.com/artpar/apigate/core/runtime"
 	"github.com/artpar/apigate/core/schema"
+	"github.com/artpar/apigate/pkg/jsonapi"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -130,51 +132,41 @@ func TestChannel_Register_EnabledHTTP(t *testing.T) {
 	}
 }
 
-func TestChannel_writeJSON(t *testing.T) {
-	c := &Channel{}
+func TestJSONAPIContentType(t *testing.T) {
+	// Test that JSON:API responses use the correct content type
 	w := httptest.NewRecorder()
+	jsonapi.WriteMeta(w, http.StatusOK, jsonapi.Meta{"test": "value"})
 
-	data := map[string]string{"message": "hello"}
-	c.writeJSON(w, data)
-
-	if w.Header().Get("Content-Type") != "application/json" {
-		t.Errorf("Content-Type = %q, want %q", w.Header().Get("Content-Type"), "application/json")
-	}
-
-	var result map[string]string
-	json.NewDecoder(w.Body).Decode(&result)
-	if result["message"] != "hello" {
-		t.Errorf("message = %q, want %q", result["message"], "hello")
+	if w.Header().Get("Content-Type") != "application/vnd.api+json" {
+		t.Errorf("Content-Type = %q, want %q", w.Header().Get("Content-Type"), "application/vnd.api+json")
 	}
 }
 
-func TestChannel_writeError(t *testing.T) {
-	c := &Channel{}
+func TestJSONAPIErrorResponse(t *testing.T) {
 	w := httptest.NewRecorder()
-
-	c.writeError(w, &testError{"test error"}, http.StatusBadRequest)
+	jsonapi.WriteBadRequest(w, "test error")
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
 	}
 
-	if w.Header().Get("Content-Type") != "application/json" {
-		t.Errorf("Content-Type = %q, want %q", w.Header().Get("Content-Type"), "application/json")
+	if w.Header().Get("Content-Type") != "application/vnd.api+json" {
+		t.Errorf("Content-Type = %q, want %q", w.Header().Get("Content-Type"), "application/vnd.api+json")
 	}
 
-	var result map[string]string
+	var result map[string]any
 	json.NewDecoder(w.Body).Decode(&result)
-	if result["error"] != "test error" {
-		t.Errorf("error = %q, want %q", result["error"], "test error")
+	errors, ok := result["errors"].([]any)
+	if !ok || len(errors) == 0 {
+		t.Fatal("expected errors array in response")
 	}
-}
-
-type testError struct {
-	msg string
-}
-
-func (e *testError) Error() string {
-	return e.msg
+	errObj, ok := errors[0].(map[string]any)
+	if !ok {
+		t.Fatal("expected error object")
+	}
+	if errObj["detail"] != "test error" {
+		t.Errorf("error detail = %q, want %q", errObj["detail"], "test error")
+	}
 }
 
 func TestChannel_handleOpenAPI(t *testing.T) {
@@ -314,10 +306,12 @@ func TestChannel_DoCustomAction_ActionNotFound(t *testing.T) {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
 	}
 
-	var result map[string]string
+	// JSON:API error format uses "errors" array
+	var result map[string]any
 	json.NewDecoder(w.Body).Decode(&result)
-	if result["error"] == "" {
-		t.Error("should have error message")
+	errors, ok := result["errors"].([]any)
+	if !ok || len(errors) == 0 {
+		t.Error("should have errors array")
 	}
 }
 
@@ -716,30 +710,28 @@ func TestSchemaHandler_BuildInputs(t *testing.T) {
 	}
 }
 
-func TestWriteJSON(t *testing.T) {
+func TestSchemaJSONAPIResponse(t *testing.T) {
 	w := httptest.NewRecorder()
-	data := map[string]string{"key": "value"}
+	jsonapi.WriteMeta(w, http.StatusOK, jsonapi.Meta{"key": "value"})
 
-	writeJSON(w, data)
-
-	if w.Header().Get("Content-Type") != "application/json" {
-		t.Errorf("Content-Type = %q, want %q", w.Header().Get("Content-Type"), "application/json")
+	if w.Header().Get("Content-Type") != "application/vnd.api+json" {
+		t.Errorf("Content-Type = %q, want %q", w.Header().Get("Content-Type"), "application/vnd.api+json")
 	}
 }
 
-func TestWriteSchemaError(t *testing.T) {
+func TestSchemaNotFoundError(t *testing.T) {
 	w := httptest.NewRecorder()
+	jsonapi.WriteNotFound(w, "module")
 
-	writeSchemaError(w, "test error", http.StatusBadRequest)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
 	}
 
-	var result map[string]string
+	var result map[string]any
 	json.NewDecoder(w.Body).Decode(&result)
-	if result["error"] != "test error" {
-		t.Errorf("error = %q, want %q", result["error"], "test error")
+	errors, ok := result["errors"].([]any)
+	if !ok || len(errors) == 0 {
+		t.Fatal("expected errors array in response")
 	}
 }
 
@@ -773,7 +765,7 @@ func TestAuthWriteJSON(t *testing.T) {
 func TestAuthWriteError(t *testing.T) {
 	w := httptest.NewRecorder()
 
-	authWriteError(w, &testError{"auth error"}, http.StatusUnauthorized)
+	authWriteError(w, errors.New("auth error"), http.StatusUnauthorized)
 
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)

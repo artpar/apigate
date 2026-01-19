@@ -42,15 +42,14 @@ Users are the core entity for API access management:
 | `id` | string | Unique identifier |
 | `email` | string | Email address (required, unique) |
 | `name` | string | Display name |
-| `password_hash` | string | Hashed password (internal) |
-| `plan_id` | string | Assigned plan |
-| `status` | enum | active, suspended, pending |
-| `role` | enum | admin, customer |
-| `metadata` | object | Custom key-value data |
-| `stripe_customer_id` | string | Stripe customer reference |
-| `email_verified_at` | timestamp | Email verification time |
+| `password_hash` | string | Hashed password (internal, never exposed) |
+| `plan_id` | string | Assigned plan (defaults to "free") |
+| `status` | enum | active, pending, suspended, cancelled |
+| `stripe_id` | string | Stripe customer ID (internal) |
 | `created_at` | timestamp | Registration time |
-| `last_login_at` | timestamp | Last login time |
+| `updated_at` | timestamp | Last update time |
+
+> **Note**: Admin access is managed through the admin invite system, not a role field on users.
 
 ---
 
@@ -61,6 +60,7 @@ Users are the core entity for API access management:
 | `active` | Normal state | Full access |
 | `pending` | Awaiting verification | Limited |
 | `suspended` | Account suspended | Blocked |
+| `cancelled` | Account cancelled | Blocked |
 
 ---
 
@@ -115,29 +115,34 @@ curl -X POST http://localhost:8080/admin/users \
 
 ---
 
-## User Roles
+## Admin Access
 
-### Customer (Default)
+APIGate uses an **invite-based admin system** rather than a role field on users.
+
+### Customer (API Users)
 
 - Can access customer portal
 - Can manage own API keys
 - Can view own usage
 - Cannot access admin UI
 
-### Admin
+### Admins (via Invite)
 
-- Full access to admin UI
-- Can manage all users
-- Can configure system
-- Can view all analytics
+Admins are granted access through the admin invite system:
+
+1. Go to **Settings > Invites** in admin UI
+2. Create an admin invite (generates a unique token)
+3. Send invite link to new admin
+4. New admin registers via the invite link
 
 ```bash
-# Promote to admin
-apigate users update <id> --role admin
+# CLI: Create admin invite
+apigate invites create --email "newadmin@example.com"
 
-# Demote to customer
-apigate users update <id> --role customer
+# New admin receives link: /admin/register/<token>
 ```
+
+See [[Admin-Invites]] for more details on the invite system.
 
 ---
 
@@ -242,52 +247,25 @@ apigate users set-password <id> --password "new-password"
 
 ## Email Verification
 
-### Enable Verification
-
-```bash
-apigate settings set require_email_verification true
-```
+Email verification can be configured via the email provider settings.
 
 ### Verification Flow
 
 1. User registers
-2. Verification email sent
-3. User clicks link
-4. `email_verified_at` set
+2. Verification email sent (if email provider configured)
+3. User clicks link with verification token
+4. Account status set to `active`
 5. Full access granted
 
-### Manual Verification
+### Configure Email Provider
+
+Email verification requires an email provider. See [[Configuration]] for setup:
 
 ```bash
-apigate users verify <id>
-```
-
----
-
-## Custom Metadata
-
-Store additional user data:
-
-```bash
-# CLI
-apigate users update <id> --metadata '{"company_size": "10-50", "industry": "fintech"}'
-
-# API
-curl -X PUT http://localhost:8080/admin/users/<id> \
-  -H "Content-Type: application/json" \
-  -d '{
-    "metadata": {
-      "company_size": "10-50",
-      "industry": "fintech",
-      "signup_source": "google_ads"
-    }
-  }'
-```
-
-Metadata is passed to upstream in headers:
-```
-X-User-Meta-Company-Size: 10-50
-X-User-Meta-Industry: fintech
+# SMTP Configuration
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_FROM=noreply@example.com
 ```
 
 ---

@@ -3,6 +3,8 @@ package admin
 import (
 	"net/http"
 	"time"
+
+	"github.com/artpar/apigate/pkg/jsonapi"
 )
 
 // UsageResponse represents usage statistics.
@@ -75,12 +77,12 @@ func (h *Handler) GetUsage(w http.ResponseWriter, r *http.Request) {
 		var err error
 		startDate, err = time.Parse(time.RFC3339, startDateStr)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_date", "Invalid start_date format")
+			jsonapi.WriteValidationError(w, "start_date", "Invalid date format, expected RFC3339")
 			return
 		}
 		endDate, err = time.Parse(time.RFC3339, endDateStr)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_date", "Invalid end_date format")
+			jsonapi.WriteValidationError(w, "end_date", "Invalid date format, expected RFC3339")
 			return
 		}
 	} else {
@@ -182,5 +184,13 @@ func (h *Handler) GetUsage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, response)
+	// Return as JSON:API meta response (usage stats aren't a typical resource)
+	jsonapi.WriteMeta(w, http.StatusOK, jsonapi.Meta{
+		"period":     response.Period,
+		"start_date": response.StartDate,
+		"end_date":   response.EndDate,
+		"summary":    response.Summary,
+		"by_user":    response.ByUser,
+		"by_plan":    response.ByPlan,
+	})
 }

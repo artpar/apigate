@@ -12,9 +12,17 @@ import (
 	"time"
 
 	"github.com/artpar/apigate/domain/key"
+	"github.com/artpar/apigate/pkg/jsonapi"
 	"github.com/artpar/apigate/ports"
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog"
+)
+
+// JSON:API resource type constants
+const (
+	TypeUser    = "users"
+	TypeKey     = "api_keys"
+	TypeSession = "sessions"
 )
 
 // Handler provides admin API endpoints.
@@ -221,14 +229,14 @@ type LoginResponse struct {
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		jsonapi.WriteBadRequest(w, "Invalid JSON body")
 		return
 	}
 
 	// Try API key authentication first
 	if req.APIKey != "" {
 		if err := h.authenticateByAPIKey(r.Context(), req.APIKey); err != nil {
-			writeError(w, http.StatusUnauthorized, "invalid_credentials", "Invalid API key")
+			jsonapi.WriteUnauthorized(w, "Invalid API key")
 			return
 		}
 
@@ -237,75 +245,54 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			// For API key auth without email, create a session for "admin"
 			session := h.sessions.Create("admin", "admin@apigate", 24*time.Hour)
-			writeJSON(w, http.StatusOK, LoginResponse{
-				SessionID: session.ID,
-				ExpiresAt: session.ExpiresAt.Format(time.RFC3339),
-				User: struct {
-					ID    string `json:"id"`
-					Email string `json:"email"`
-				}{ID: "admin", Email: "admin@apigate"},
-			})
+			jsonapi.WriteResource(w, http.StatusOK, sessionToResource(session, "admin", "admin@apigate"))
 			return
 		}
 
 		session := h.sessions.Create(user.ID, user.Email, 24*time.Hour)
-		writeJSON(w, http.StatusOK, LoginResponse{
-			SessionID: session.ID,
-			ExpiresAt: session.ExpiresAt.Format(time.RFC3339),
-			User: struct {
-				ID    string `json:"id"`
-				Email string `json:"email"`
-			}{ID: user.ID, Email: user.Email},
-		})
+		jsonapi.WriteResource(w, http.StatusOK, sessionToResource(session, user.ID, user.Email))
 		return
 	}
 
 	// Email/password authentication
 	if req.Email == "" {
-		writeError(w, http.StatusBadRequest, "missing_credentials", "Email or API key required")
+		jsonapi.WriteValidationError(w, "email", "Email or API key required")
 		return
 	}
 
 	if req.Password == "" {
-		writeError(w, http.StatusBadRequest, "missing_password", "Password is required for email login")
+		jsonapi.WriteValidationError(w, "password", "Password is required for email login")
 		return
 	}
 
 	// Look up user by email
 	user, err := h.users.GetByEmail(r.Context(), req.Email)
 	if err != nil {
-		writeError(w, http.StatusUnauthorized, "invalid_credentials", "Invalid email or password")
+		jsonapi.WriteUnauthorized(w, "Invalid email or password")
 		return
 	}
 
 	// Check if user has password hash set
 	if len(user.PasswordHash) == 0 {
-		writeError(w, http.StatusUnauthorized, "no_password", "User has no password set. Use API key auth.")
+		jsonapi.WriteUnauthorized(w, "User has no password set. Use API key auth.")
 		return
 	}
 
 	// Verify password
 	if !h.hasher.Compare(user.PasswordHash, req.Password) {
-		writeError(w, http.StatusUnauthorized, "invalid_credentials", "Invalid email or password")
+		jsonapi.WriteUnauthorized(w, "Invalid email or password")
 		return
 	}
 
 	// Check user status
 	if user.Status != "active" {
-		writeError(w, http.StatusForbidden, "account_inactive", "Account is not active")
+		jsonapi.WriteForbidden(w, "Account is not active")
 		return
 	}
 
 	// Create session
 	session := h.sessions.Create(user.ID, user.Email, 24*time.Hour)
-	writeJSON(w, http.StatusOK, LoginResponse{
-		SessionID: session.ID,
-		ExpiresAt: session.ExpiresAt.Format(time.RFC3339),
-		User: struct {
-			ID    string `json:"id"`
-			Email string `json:"email"`
-		}{ID: user.ID, Email: user.Email},
-	})
+	jsonapi.WriteResource(w, http.StatusOK, sessionToResource(session, user.ID, user.Email))
 }
 
 func (h *Handler) authenticateByAPIKey(ctx context.Context, apiKey string) error {
@@ -345,7 +332,7 @@ func (h *Handler) authenticateByAPIKey(ctx context.Context, apiKey string) error
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.Context().Value(ctxSessionKey).(string)
 	h.sessions.Delete(sessionID)
-	writeJSON(w, http.StatusOK, map[string]string{"status": "logged_out"})
+	jsonapi.WriteMeta(w, http.StatusOK, jsonapi.Meta{"status": "logged_out"})
 }
 
 // AuthMiddleware validates admin authentication.
@@ -393,7 +380,7 @@ func (h *Handler) AuthMiddleware(next http.Handler) http.Handler {
 			}
 		}
 
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Valid session or API key required")
+		jsonapi.WriteUnauthorized(w, "Valid session or API key required")
 	})
 }
 
@@ -449,27 +436,25 @@ type UpdateUserRequest struct {
 //	@Security		AdminAuth
 //	@Router			/admin/users [get]
 func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
-	limit := parseIntQuery(r, "limit", 100)
-	offset := parseIntQuery(r, "offset", 0)
+	page, perPage := jsonapi.ParsePaginationParams(r.URL.Query(), 20)
+	offset := (page - 1) * perPage
 
-	users, err := h.users.List(r.Context(), limit, offset)
+	users, err := h.users.List(r.Context(), perPage, offset)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("failed to list users")
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list users")
+		jsonapi.WriteInternalError(w, "Failed to list users")
 		return
 	}
 
 	total, _ := h.users.Count(r.Context())
 
-	response := make([]UserResponse, len(users))
+	resources := make([]jsonapi.Resource, len(users))
 	for i, u := range users {
-		response[i] = userToResponse(u)
+		resources[i] = userToResource(u)
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"users": response,
-		"total": total,
-	})
+	pagination := jsonapi.NewPagination(int64(total), page, perPage, r.URL.String())
+	jsonapi.WriteCollection(w, http.StatusOK, resources, pagination)
 }
 
 // CreateUser creates a new user.
@@ -487,18 +472,18 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	var req CreateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		jsonapi.WriteBadRequest(w, "Invalid JSON body")
 		return
 	}
 
 	if req.Email == "" {
-		writeError(w, http.StatusBadRequest, "missing_email", "Email is required")
+		jsonapi.WriteValidationError(w, "email", "Email is required")
 		return
 	}
 
 	// Check if email already exists
 	if _, err := h.users.GetByEmail(r.Context(), req.Email); err == nil {
-		writeError(w, http.StatusConflict, "email_exists", "User with this email already exists")
+		jsonapi.WriteConflict(w, "User with this email already exists")
 		return
 	}
 
@@ -523,7 +508,7 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		hash, err := h.hasher.Hash(req.Password)
 		if err != nil {
 			h.logger.Error().Err(err).Msg("failed to hash password")
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create user")
+			jsonapi.WriteInternalError(w, "Failed to create user")
 			return
 		}
 		user.PasswordHash = hash
@@ -531,12 +516,12 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.users.Create(r.Context(), user); err != nil {
 		h.logger.Error().Err(err).Msg("failed to create user")
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create user")
+		jsonapi.WriteInternalError(w, "Failed to create user")
 		return
 	}
 
 	h.logger.Info().Str("user_id", user.ID).Str("email", user.Email).Msg("user created via admin api")
-	writeJSON(w, http.StatusCreated, userToResponse(user))
+	jsonapi.WriteCreated(w, userToResource(user), "/admin/users/"+user.ID)
 }
 
 // GetUser returns a single user.
@@ -555,11 +540,11 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.users.Get(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "User not found")
+		jsonapi.WriteNotFound(w, "user")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, userToResponse(user))
+	jsonapi.WriteResource(w, http.StatusOK, userToResource(user))
 }
 
 // UpdateUser updates a user.
@@ -580,13 +565,13 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.users.Get(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "User not found")
+		jsonapi.WriteNotFound(w, "user")
 		return
 	}
 
 	var req UpdateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		jsonapi.WriteBadRequest(w, "Invalid JSON body")
 		return
 	}
 
@@ -606,7 +591,7 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		hash, err := h.hasher.Hash(req.Password)
 		if err != nil {
 			h.logger.Error().Err(err).Msg("failed to hash password")
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update user")
+			jsonapi.WriteInternalError(w, "Failed to update user")
 			return
 		}
 		user.PasswordHash = hash
@@ -615,12 +600,12 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.users.Update(r.Context(), user); err != nil {
 		h.logger.Error().Err(err).Msg("failed to update user")
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update user")
+		jsonapi.WriteInternalError(w, "Failed to update user")
 		return
 	}
 
 	h.logger.Info().Str("user_id", user.ID).Msg("user updated via admin api")
-	writeJSON(w, http.StatusOK, userToResponse(user))
+	jsonapi.WriteResource(w, http.StatusOK, userToResource(user))
 }
 
 // DeleteUser deletes a user.
@@ -630,7 +615,7 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 //	@Tags			Admin - Users
 //	@Produce		json
 //	@Param			id	path		string				true	"User ID"
-//	@Success		200	{object}	map[string]string	"Deleted"
+//	@Success		204	"No content - successfully deleted"
 //	@Failure		404	{object}	ErrorResponse		"User not found"
 //	@Security		AdminAuth
 //	@Router			/admin/users/{id} [delete]
@@ -638,7 +623,7 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	if _, err := h.users.Get(r.Context(), id); err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "User not found")
+		jsonapi.WriteNotFound(w, "user")
 		return
 	}
 
@@ -649,24 +634,24 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.users.Update(r.Context(), user); err != nil {
 		h.logger.Error().Err(err).Msg("failed to delete user")
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete user")
+		jsonapi.WriteInternalError(w, "Failed to delete user")
 		return
 	}
 
 	h.logger.Info().Str("user_id", id).Msg("user deleted via admin api")
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	jsonapi.WriteNoContent(w)
 }
 
-func userToResponse(u ports.User) UserResponse {
-	return UserResponse{
-		ID:        u.ID,
-		Email:     u.Email,
-		Name:      u.Name,
-		PlanID:    u.PlanID,
-		Status:    u.Status,
-		CreatedAt: u.CreatedAt.Format(time.RFC3339),
-		UpdatedAt: u.UpdatedAt.Format(time.RFC3339),
-	}
+// userToResource converts a User to a JSON:API Resource.
+func userToResource(u ports.User) jsonapi.Resource {
+	return jsonapi.NewResource(TypeUser, u.ID).
+		Attr("email", u.Email).
+		Attr("name", u.Name).
+		Attr("status", u.Status).
+		Attr("created_at", u.CreatedAt.Format(time.RFC3339)).
+		Attr("updated_at", u.UpdatedAt.Format(time.RFC3339)).
+		BelongsTo("plan", "plans", u.PlanID).
+		Build()
 }
 
 func generateUserID() string {
@@ -731,7 +716,7 @@ func (h *Handler) ListKeys(w http.ResponseWriter, r *http.Request) {
 		users, err := h.users.List(r.Context(), 1000, 0)
 		if err != nil {
 			h.logger.Error().Err(err).Msg("failed to list users")
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list keys")
+			jsonapi.WriteInternalError(w, "Failed to list keys")
 			return
 		}
 
@@ -743,19 +728,17 @@ func (h *Handler) ListKeys(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		h.logger.Error().Err(err).Msg("failed to list keys")
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list keys")
+		jsonapi.WriteInternalError(w, "Failed to list keys")
 		return
 	}
 
-	response := make([]KeyResponse, len(keys))
+	resources := make([]jsonapi.Resource, len(keys))
 	for i, k := range keys {
-		response[i] = keyToResponse(k)
+		resources[i] = keyToResource(k)
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"keys":  response,
-		"total": len(response),
-	})
+	// Keys don't have pagination, just return collection with total in meta
+	jsonapi.WriteCollection(w, http.StatusOK, resources, nil)
 }
 
 // CreateKey creates a new API key.
@@ -773,18 +756,18 @@ func (h *Handler) ListKeys(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) CreateKey(w http.ResponseWriter, r *http.Request) {
 	var req CreateKeyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		jsonapi.WriteBadRequest(w, "Invalid JSON body")
 		return
 	}
 
 	if req.UserID == "" {
-		writeError(w, http.StatusBadRequest, "missing_user_id", "user_id is required")
+		jsonapi.WriteValidationError(w, "user_id", "user_id is required")
 		return
 	}
 
 	// Verify user exists
 	if _, err := h.users.Get(r.Context(), req.UserID); err != nil {
-		writeError(w, http.StatusNotFound, "user_not_found", "User not found")
+		jsonapi.WriteNotFound(w, "user")
 		return
 	}
 
@@ -797,20 +780,23 @@ func (h *Handler) CreateKey(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.keys.Create(r.Context(), keyData); err != nil {
 		h.logger.Error().Err(err).Msg("failed to create key")
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create key")
+		jsonapi.WriteInternalError(w, "Failed to create key")
 		return
 	}
 
 	h.logger.Info().Str("key_id", keyData.ID).Str("user_id", req.UserID).Msg("key created via admin api")
 
-	writeJSON(w, http.StatusCreated, CreateKeyResponse{
-		Key:    rawKey,
-		KeyID:  keyData.ID,
-		Prefix: keyData.Prefix,
-		UserID: req.UserID,
-		Name:   req.Name,
-		Note:   "Save this key securely. It will not be shown again.",
-	})
+	// Return key resource with the raw key in meta (only shown once)
+	resource := jsonapi.NewResource(TypeKey, keyData.ID).
+		Attr("prefix", keyData.Prefix).
+		Attr("name", req.Name).
+		Attr("created_at", keyData.CreatedAt.Format(time.RFC3339)).
+		BelongsTo("user", TypeUser, req.UserID).
+		Meta("key", rawKey).
+		Meta("note", "Save this key securely. It will not be shown again.").
+		Build()
+
+	jsonapi.WriteCreated(w, resource, "/admin/keys/"+keyData.ID)
 }
 
 // RevokeKey revokes an API key.
@@ -820,7 +806,7 @@ func (h *Handler) CreateKey(w http.ResponseWriter, r *http.Request) {
 //	@Tags			Admin - Keys
 //	@Produce		json
 //	@Param			id	path		string				true	"Key ID"
-//	@Success		200	{object}	map[string]string	"Revoked"
+//	@Success		204	"No content - successfully revoked"
 //	@Failure		404	{object}	ErrorResponse		"Key not found"
 //	@Security		AdminAuth
 //	@Router			/admin/keys/{id} [delete]
@@ -829,47 +815,56 @@ func (h *Handler) RevokeKey(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.keys.Revoke(r.Context(), id, time.Now().UTC()); err != nil {
 		h.logger.Error().Err(err).Str("key_id", id).Msg("failed to revoke key")
-		writeError(w, http.StatusNotFound, "not_found", "Key not found")
+		jsonapi.WriteNotFound(w, "key")
 		return
 	}
 
 	h.logger.Info().Str("key_id", id).Msg("key revoked via admin api")
-	writeJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
+	jsonapi.WriteNoContent(w)
 }
 
-func keyToResponse(k key.Key) KeyResponse {
-	resp := KeyResponse{
-		ID:        k.ID,
-		UserID:    k.UserID,
-		Prefix:    k.Prefix,
-		Name:      k.Name,
-		CreatedAt: k.CreatedAt.Format(time.RFC3339),
-	}
+// keyToResource converts a Key to a JSON:API Resource.
+func keyToResource(k key.Key) jsonapi.Resource {
+	rb := jsonapi.NewResource(TypeKey, k.ID).
+		Attr("prefix", k.Prefix).
+		Attr("name", k.Name).
+		Attr("created_at", k.CreatedAt.Format(time.RFC3339)).
+		BelongsTo("user", TypeUser, k.UserID)
+
 	if k.ExpiresAt != nil {
-		s := k.ExpiresAt.Format(time.RFC3339)
-		resp.ExpiresAt = &s
+		rb.Attr("expires_at", k.ExpiresAt.Format(time.RFC3339))
 	}
 	if k.RevokedAt != nil {
-		s := k.RevokedAt.Format(time.RFC3339)
-		resp.RevokedAt = &s
+		rb.Attr("revoked_at", k.RevokedAt.Format(time.RFC3339))
 	}
 	if k.LastUsed != nil {
-		s := k.LastUsed.Format(time.RFC3339)
-		resp.LastUsed = &s
+		rb.Attr("last_used", k.LastUsed.Format(time.RFC3339))
 	}
-	return resp
+	return rb.Build()
+}
+
+// sessionToResource converts a Session to a JSON:API Resource.
+func sessionToResource(s *Session, userID, userEmail string) jsonapi.Resource {
+	return jsonapi.NewResource(TypeSession, s.ID).
+		Attr("expires_at", s.ExpiresAt.Format(time.RFC3339)).
+		Attr("created_at", s.CreatedAt.Format(time.RFC3339)).
+		BelongsTo("user", TypeUser, userID).
+		Meta("user_email", userEmail).
+		Build()
 }
 
 // -----------------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------------
 
-// ErrorResponse represents an API error.
+// ErrorResponse represents an API error (kept for OpenAPI documentation).
 type ErrorResponse struct {
-	Error struct {
-		Code    string `json:"code"`
-		Message string `json:"message"`
-	} `json:"error"`
+	Errors []struct {
+		Status string `json:"status"`
+		Code   string `json:"code"`
+		Title  string `json:"title"`
+		Detail string `json:"detail,omitempty"`
+	} `json:"errors"`
 }
 
 var ErrInvalidCredentials = errorType{"invalid_credentials", "Invalid credentials"}
@@ -881,33 +876,4 @@ type errorType struct {
 
 func (e errorType) Error() string {
 	return e.message
-}
-
-func writeJSON(w http.ResponseWriter, status int, data interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
-}
-
-func writeError(w http.ResponseWriter, status int, code, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"error": map[string]string{
-			"code":    code,
-			"message": message,
-		},
-	})
-}
-
-func parseIntQuery(r *http.Request, name string, defaultVal int) int {
-	s := r.URL.Query().Get(name)
-	if s == "" {
-		return defaultVal
-	}
-	var v int
-	if err := json.Unmarshal([]byte(s), &v); err != nil {
-		return defaultVal
-	}
-	return v
 }

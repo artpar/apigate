@@ -1,4 +1,4 @@
-.PHONY: build run test clean docker webui webui-install all
+.PHONY: build run test clean docker docker-publish docker-build-binaries webui webui-install all
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
@@ -46,6 +46,30 @@ docker:
 docker-run:
 	docker compose up --build
 
+# Build and publish multi-arch Docker image to Docker Hub
+DOCKER_REPO ?= artpar/apigate
+DOCKER_PLATFORMS ?= linux/amd64,linux/arm64
+
+docker-publish: docker-build-binaries
+	@echo "Building and publishing multi-arch image to $(DOCKER_REPO)..."
+	docker buildx create --name apigate-builder --use 2>/dev/null || docker buildx use apigate-builder
+	docker buildx build \
+		--platform $(DOCKER_PLATFORMS) \
+		--tag $(DOCKER_REPO):$(VERSION) \
+		--tag $(DOCKER_REPO):latest \
+		--push \
+		-f Dockerfile.release \
+		.
+	@echo "Published $(DOCKER_REPO):$(VERSION) and $(DOCKER_REPO):latest"
+
+# Build binaries for Docker (pre-build to avoid memory issues in buildx)
+docker-build-binaries:
+	@echo "Building binaries for Docker..."
+	@mkdir -p build/linux/amd64 build/linux/arm64
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o build/linux/amd64/apigate ./cmd/apigate
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o build/linux/arm64/apigate ./cmd/apigate
+	@echo "Binaries built in build/linux/"
+
 # Create a release
 release:
 	@echo "Building for multiple platforms..."
@@ -70,5 +94,7 @@ help:
 	@echo "  test       - Run tests"
 	@echo "  docker     - Build Docker image"
 	@echo "  docker-run - Run with docker-compose"
+	@echo "  docker-publish - Build and push multi-arch image to artpar/apigate"
+	@echo "  docker-build-binaries - Build linux binaries for Docker"
 	@echo "  release    - Build for all platforms"
 	@echo "  clean      - Remove build artifacts"

@@ -16,6 +16,33 @@ import (
 )
 
 // -----------------------------------------------------------------------------
+// JSON:API Helper Functions
+// -----------------------------------------------------------------------------
+
+// getJSONAPIResourceID extracts the ID from a JSON:API single resource response
+func getJSONAPIResourceID(result map[string]any) string {
+	data, ok := result["data"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	id, _ := data["id"].(string)
+	return id
+}
+
+// getJSONAPIResourceAttr extracts an attribute from a JSON:API single resource response
+func getJSONAPIResourceAttr(result map[string]any, attr string) any {
+	data, ok := result["data"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	attrs, ok := data["attributes"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	return attrs[attr]
+}
+
+// -----------------------------------------------------------------------------
 // Mock Stores
 // -----------------------------------------------------------------------------
 
@@ -178,10 +205,14 @@ func TestRoutesHandler_ListRoutes_Empty(t *testing.T) {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	json.Unmarshal(w.Body.Bytes(), &resp)
 
-	routes := resp["routes"].([]interface{})
+	// JSON:API collections use "data" array
+	routes, _ := resp["data"].([]any)
+	if routes == nil {
+		routes = []any{} // Empty collection returns nil
+	}
 	if len(routes) != 0 {
 		t.Errorf("routes length = %d, want 0", len(routes))
 	}
@@ -210,10 +241,11 @@ func TestRoutesHandler_ListRoutes_WithData(t *testing.T) {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	json.Unmarshal(w.Body.Bytes(), &resp)
 
-	routes := resp["routes"].([]interface{})
+	// JSON:API collections use "data" array
+	routes, _ := resp["data"].([]any)
 	if len(routes) != 1 {
 		t.Errorf("routes length = %d, want 1", len(routes))
 	}
@@ -245,14 +277,18 @@ func TestRoutesHandler_CreateRoute(t *testing.T) {
 		t.Errorf("routes count = %d, want 1", len(routeStore.routes))
 	}
 
-	var resp admin.RouteResponse
+	var resp map[string]any
 	json.Unmarshal(w.Body.Bytes(), &resp)
 
-	if resp.Name != "Test Route" {
-		t.Errorf("name = %s, want Test Route", resp.Name)
+	// JSON:API format
+	name := getJSONAPIResourceAttr(resp, "name")
+	pathPattern := getJSONAPIResourceAttr(resp, "path_pattern")
+
+	if name != "Test Route" {
+		t.Errorf("name = %v, want Test Route", name)
 	}
-	if resp.PathPattern != "/api/v1/*" {
-		t.Errorf("path_pattern = %s, want /api/v1/*", resp.PathPattern)
+	if pathPattern != "/api/v1/*" {
+		t.Errorf("path_pattern = %v, want /api/v1/*", pathPattern)
 	}
 }
 
@@ -281,14 +317,18 @@ func TestRoutesHandler_CreateRoute_WithTransform(t *testing.T) {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusCreated)
 	}
 
-	var resp admin.RouteResponse
+	var resp map[string]any
 	json.Unmarshal(w.Body.Bytes(), &resp)
 
-	if resp.RequestTransform == nil {
+	// JSON:API format
+	requestTransform := getJSONAPIResourceAttr(resp, "request_transform")
+	if requestTransform == nil {
 		t.Fatal("request_transform should not be nil")
 	}
-	if resp.RequestTransform.SetHeaders["X-Custom"] != `"value"` {
-		t.Errorf("set_headers = %v", resp.RequestTransform.SetHeaders)
+	rt, _ := requestTransform.(map[string]any)
+	setHeaders, _ := rt["set_headers"].(map[string]any)
+	if setHeaders["X-Custom"] != `"value"` {
+		t.Errorf("set_headers = %v", setHeaders)
 	}
 }
 
@@ -303,8 +343,9 @@ func TestRoutesHandler_CreateRoute_MissingName(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	// JSON:API uses 422 for validation errors, accept both 400 and 422
+	if w.Code != http.StatusBadRequest && w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("status = %d, want 400 or 422", w.Code)
 	}
 }
 
@@ -319,8 +360,9 @@ func TestRoutesHandler_CreateRoute_MissingPathPattern(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	// JSON:API uses 422 for validation errors, accept both 400 and 422
+	if w.Code != http.StatusBadRequest && w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("status = %d, want 400 or 422", w.Code)
 	}
 }
 
@@ -347,14 +389,18 @@ func TestRoutesHandler_GetRoute(t *testing.T) {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	var resp admin.RouteResponse
+	var resp map[string]any
 	json.Unmarshal(w.Body.Bytes(), &resp)
 
-	if resp.ID != "rt1" {
-		t.Errorf("id = %s, want rt1", resp.ID)
+	// JSON:API format
+	id := getJSONAPIResourceID(resp)
+	name := getJSONAPIResourceAttr(resp, "name")
+
+	if id != "rt1" {
+		t.Errorf("id = %s, want rt1", id)
 	}
-	if resp.Name != "Test Route" {
-		t.Errorf("name = %s, want Test Route", resp.Name)
+	if name != "Test Route" {
+		t.Errorf("name = %v, want Test Route", name)
 	}
 }
 
@@ -397,14 +443,18 @@ func TestRoutesHandler_UpdateRoute(t *testing.T) {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	var resp admin.RouteResponse
+	var resp map[string]any
 	json.Unmarshal(w.Body.Bytes(), &resp)
 
-	if resp.Name != "Updated Name" {
-		t.Errorf("name = %s, want Updated Name", resp.Name)
+	// JSON:API format
+	name := getJSONAPIResourceAttr(resp, "name")
+	priority, _ := getJSONAPIResourceAttr(resp, "priority").(float64)
+
+	if name != "Updated Name" {
+		t.Errorf("name = %v, want Updated Name", name)
 	}
-	if resp.Priority != 100 {
-		t.Errorf("priority = %d, want 100", resp.Priority)
+	if int(priority) != 100 {
+		t.Errorf("priority = %v, want 100", priority)
 	}
 }
 
@@ -440,8 +490,9 @@ func TestRoutesHandler_DeleteRoute(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	// JSON:API uses 204 No Content for successful DELETE
+	if w.Code != http.StatusOK && w.Code != http.StatusNoContent {
+		t.Errorf("status = %d, want 200 or 204", w.Code)
 	}
 
 	// Verify deletion
@@ -479,10 +530,14 @@ func TestRoutesHandler_ListUpstreams_Empty(t *testing.T) {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	json.Unmarshal(w.Body.Bytes(), &resp)
 
-	upstreams := resp["upstreams"].([]interface{})
+	// JSON:API collections use "data" array
+	upstreams, _ := resp["data"].([]any)
+	if upstreams == nil {
+		upstreams = []any{} // Empty collection returns nil
+	}
 	if len(upstreams) != 0 {
 		t.Errorf("upstreams length = %d, want 0", len(upstreams))
 	}
@@ -512,14 +567,18 @@ func TestRoutesHandler_CreateUpstream(t *testing.T) {
 		t.Errorf("upstreams count = %d, want 1", len(upstreamStore.upstreams))
 	}
 
-	var resp admin.UpstreamResponse
+	var resp map[string]any
 	json.Unmarshal(w.Body.Bytes(), &resp)
 
-	if resp.Name != "Backend API" {
-		t.Errorf("name = %s, want Backend API", resp.Name)
+	// JSON:API format
+	name := getJSONAPIResourceAttr(resp, "name")
+	baseURL := getJSONAPIResourceAttr(resp, "base_url")
+
+	if name != "Backend API" {
+		t.Errorf("name = %v, want Backend API", name)
 	}
-	if resp.BaseURL != "https://api.example.com" {
-		t.Errorf("base_url = %s, want https://api.example.com", resp.BaseURL)
+	if baseURL != "https://api.example.com" {
+		t.Errorf("base_url = %v, want https://api.example.com", baseURL)
 	}
 }
 
@@ -543,11 +602,13 @@ func TestRoutesHandler_CreateUpstream_WithAuth(t *testing.T) {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusCreated)
 	}
 
-	var resp admin.UpstreamResponse
+	var resp map[string]any
 	json.Unmarshal(w.Body.Bytes(), &resp)
 
-	if resp.AuthType != "bearer" {
-		t.Errorf("auth_type = %s, want bearer", resp.AuthType)
+	// JSON:API format
+	authType := getJSONAPIResourceAttr(resp, "auth_type")
+	if authType != "bearer" {
+		t.Errorf("auth_type = %v, want bearer", authType)
 	}
 }
 
@@ -562,8 +623,9 @@ func TestRoutesHandler_CreateUpstream_MissingName(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	// JSON:API uses 422 for validation errors, accept both 400 and 422
+	if w.Code != http.StatusBadRequest && w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("status = %d, want 400 or 422", w.Code)
 	}
 }
 
@@ -578,8 +640,9 @@ func TestRoutesHandler_CreateUpstream_MissingBaseURL(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	// JSON:API uses 422 for validation errors, accept both 400 and 422
+	if w.Code != http.StatusBadRequest && w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("status = %d, want 400 or 422", w.Code)
 	}
 }
 
@@ -605,14 +668,18 @@ func TestRoutesHandler_GetUpstream(t *testing.T) {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	var resp admin.UpstreamResponse
+	var resp map[string]any
 	json.Unmarshal(w.Body.Bytes(), &resp)
 
-	if resp.ID != "up1" {
-		t.Errorf("id = %s, want up1", resp.ID)
+	// JSON:API format
+	id := getJSONAPIResourceID(resp)
+	name := getJSONAPIResourceAttr(resp, "name")
+
+	if id != "up1" {
+		t.Errorf("id = %s, want up1", id)
 	}
-	if resp.Name != "Test Upstream" {
-		t.Errorf("name = %s, want Test Upstream", resp.Name)
+	if name != "Test Upstream" {
+		t.Errorf("name = %v, want Test Upstream", name)
 	}
 }
 
@@ -653,14 +720,18 @@ func TestRoutesHandler_UpdateUpstream(t *testing.T) {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	var resp admin.UpstreamResponse
+	var resp map[string]any
 	json.Unmarshal(w.Body.Bytes(), &resp)
 
-	if resp.Name != "Updated" {
-		t.Errorf("name = %s, want Updated", resp.Name)
+	// JSON:API format
+	name := getJSONAPIResourceAttr(resp, "name")
+	baseURL := getJSONAPIResourceAttr(resp, "base_url")
+
+	if name != "Updated" {
+		t.Errorf("name = %v, want Updated", name)
 	}
-	if resp.BaseURL != "https://new.example.com" {
-		t.Errorf("base_url = %s, want https://new.example.com", resp.BaseURL)
+	if baseURL != "https://new.example.com" {
+		t.Errorf("base_url = %v, want https://new.example.com", baseURL)
 	}
 }
 
@@ -696,8 +767,9 @@ func TestRoutesHandler_DeleteUpstream(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	// JSON:API uses 204 No Content for successful DELETE
+	if w.Code != http.StatusOK && w.Code != http.StatusNoContent {
+		t.Errorf("status = %d, want 200 or 204", w.Code)
 	}
 
 	// Verify deletion

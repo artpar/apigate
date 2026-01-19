@@ -1,0 +1,134 @@
+# Certificate module - stores TLS certificates in database
+# Database-backed for horizontal scaling (stateless servers)
+module: certificate
+
+schema:
+  # Domain identification
+  domain:         { type: string, required: true, unique: true, lookup: true, description: "Domain name this certificate is for" }
+
+  # Certificate data (encrypted)
+  cert_pem:       { type: secret, required: true, description: "PEM-encoded certificate" }
+  chain_pem:      { type: secret, description: "PEM-encoded certificate chain (intermediate certs)" }
+  key_pem:        { type: secret, required: true, description: "PEM-encoded private key" }
+
+  # Metadata
+  issued_at:      { type: timestamp, required: true, description: "When the certificate was issued" }
+  expires_at:     { type: timestamp, required: true, description: "When the certificate expires" }
+  issuer:         { type: string, description: "Certificate issuer (e.g., Let's Encrypt)" }
+  serial_number:  { type: string, description: "Certificate serial number" }
+
+  # ACME account reference (if using ACME)
+  acme_account_url: { type: string, description: "ACME account URL used to obtain this cert" }
+
+  # Status
+  status:         { type: enum, values: [active, expired, revoked], default: active }
+  revoked_at:     { type: timestamp, description: "When the certificate was revoked" }
+  revoke_reason:  { type: string, description: "Reason for revocation" }
+
+actions:
+  # Get certificate by domain
+  get_by_domain:
+    input:
+      - { name: domain, type: string, required: true }
+    description: Get certificate for a domain
+
+  # List expiring certificates
+  list_expiring:
+    input:
+      - { name: days, type: int, default: 30, description: "Days until expiration" }
+    description: List certificates expiring within N days
+
+  # List expired certificates
+  list_expired:
+    description: List expired certificates
+
+  # Mark certificate as revoked
+  revoke:
+    input:
+      - { name: reason, type: string }
+    set:
+      status: revoked
+      revoked_at: "${NOW}"
+      revoke_reason: "${reason}"
+    description: Mark certificate as revoked
+
+  # Update certificate (for renewal)
+  renew:
+    input:
+      - { name: cert_pem, type: secret, required: true }
+      - { name: chain_pem, type: secret }
+      - { name: key_pem, type: secret, required: true }
+      - { name: issued_at, type: timestamp, required: true }
+      - { name: expires_at, type: timestamp, required: true }
+    description: Update certificate with renewed cert
+
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /api/certificates
+      endpoints:
+        - { action: list, method: GET, path: "/", auth: admin }
+        - { action: get_by_domain, method: GET, path: "/domain/{domain}", auth: admin }
+        - { action: list_expiring, method: GET, path: "/expiring", auth: admin }
+        - { action: list_expired, method: GET, path: "/expired", auth: admin }
+        - { action: get, method: GET, path: "/{id}", auth: admin }
+        - { action: create, method: POST, path: "/", auth: admin }
+        - { action: delete, method: DELETE, path: "/{id}", auth: admin }
+        - { action: revoke, method: POST, path: "/{id}/revoke", auth: admin }
+
+  cli:
+    serve:
+      enabled: true
+      command: certificates
+      commands:
+        - action: list
+          columns: [id, domain, issuer, issued_at, expires_at, status]
+        - action: get_by_domain
+          name: get-domain
+          args:
+            - { name: domain, required: true }
+        - action: list_expiring
+          name: expiring
+          flags:
+            - { param: days, default: "30" }
+          columns: [id, domain, expires_at]
+        - action: list_expired
+          name: expired
+          columns: [id, domain, expires_at]
+        - action: get
+          args:
+            - { name: id, required: true }
+        - action: create
+          flags:
+            - { param: domain, required: true }
+            - { param: cert_pem, required: true }
+            - { param: key_pem, required: true }
+            - { param: chain_pem }
+            - { param: issued_at, type: datetime }
+            - { param: expires_at, type: datetime, required: true }
+        - action: delete
+          args:
+            - { name: id, required: true }
+          confirm: "Are you sure you want to delete this certificate?"
+        - action: revoke
+          args:
+            - { name: id, required: true }
+          flags:
+            - { param: reason }
+
+hooks:
+  after_create:
+    - emit: certificate.created
+
+  after_renew:
+    - emit: certificate.renewed
+
+  after_revoke:
+    - emit: certificate.revoked
+
+meta:
+  description: TLS certificates stored in database
+  icon: shield
+  display_name: Certificates
+  plural: Certificates

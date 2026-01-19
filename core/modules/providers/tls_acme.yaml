@@ -1,0 +1,143 @@
+# ACME TLS Provider Module
+# Implements the tls capability using Let's Encrypt or other ACME providers
+module: tls_acme
+
+meta:
+  description: Automatic TLS certificate provisioning via ACME (Let's Encrypt)
+  implements: [tls]
+  icon: lock
+  display_name: ACME TLS (Let's Encrypt)
+
+schema:
+  # Instance identification
+  name:           { type: string, required: true, unique: true, lookup: true, description: "Instance name (e.g., tls_letsencrypt)" }
+  description:    { type: string, description: "Description of this instance" }
+
+  # Configuration
+  enabled:        { type: bool, default: false, description: "Whether this TLS provider is active" }
+  is_default:     { type: bool, default: false, description: "Whether this is the default TLS provider" }
+
+  # ACME Configuration
+  acme_url:       { type: string, default: "https://acme-v02.api.letsencrypt.org/directory", description: "ACME directory URL" }
+  email:          { type: email, required: true, description: "Contact email for ACME account" }
+
+  # Domain configuration
+  domains:        { type: json, description: "List of domains to obtain certificates for" }
+
+  # Challenge configuration
+  challenge_type: { type: enum, values: [http-01, dns-01], default: http-01, description: "ACME challenge type" }
+
+  # HTTP-01 challenge settings
+  http_port:      { type: int, default: 80, description: "Port for HTTP-01 challenge (must be 80 for Let's Encrypt)" }
+
+  # DNS-01 challenge settings (for wildcard certs)
+  dns_provider:   { type: string, description: "DNS provider for DNS-01 challenge" }
+  dns_credentials: { type: secret, description: "DNS provider API credentials" }
+
+  # Certificate settings
+  key_type:       { type: enum, values: [rsa2048, rsa4096, ec256, ec384], default: ec256, description: "Private key type" }
+  renewal_days:   { type: int, default: 30, min: 1, max: 60, description: "Renew certificates this many days before expiry" }
+
+  # Staging mode (for testing)
+  staging:        { type: bool, default: false, description: "Use ACME staging server (for testing)" }
+
+  # Rate limiting
+  rate_limit_daily: { type: int, default: 5, description: "Max certificate requests per day" }
+
+actions:
+  # Test ACME account
+  test_connection:
+    description: Verify ACME account and configuration
+    output:
+      - { name: valid, type: bool }
+      - { name: account_url, type: string }
+      - { name: error, type: string }
+
+  # Register ACME account
+  register_account:
+    description: Register or retrieve ACME account
+    output:
+      - { name: account_url, type: string }
+      - { name: created, type: bool }
+      - { name: error, type: string }
+
+  # Get certificate for domain
+  get_certificate:
+    description: Get TLS certificate for a domain
+    input:
+      - { name: domain, type: string, required: true }
+    output:
+      - { name: cert_pem, type: string }
+      - { name: key_pem, type: secret }
+      - { name: chain_pem, type: string }
+      - { name: expires_at, type: datetime }
+      - { name: error, type: string }
+
+  # Check renewal status
+  check_renewal:
+    description: Check if certificate needs renewal
+    input:
+      - { name: domain, type: string, required: true }
+    output:
+      - { name: needs_renewal, type: bool }
+      - { name: expires_at, type: datetime }
+      - { name: days_remaining, type: int }
+      - { name: error, type: string }
+
+  # Obtain/renew certificate
+  obtain_certificate:
+    description: Obtain or renew TLS certificate via ACME
+    input:
+      - { name: domain, type: string, required: true }
+      - { name: force, type: bool, default: false, description: "Force renewal even if not expiring" }
+    output:
+      - { name: cert_pem, type: string }
+      - { name: key_pem, type: secret }
+      - { name: chain_pem, type: string }
+      - { name: expires_at, type: datetime }
+      - { name: renewed, type: bool }
+      - { name: error, type: string }
+
+  # Revoke certificate
+  revoke_certificate:
+    description: Revoke a TLS certificate
+    input:
+      - { name: domain, type: string, required: true }
+      - { name: reason, type: enum, values: [unspecified, key_compromise, ca_compromise, affiliation_changed, superseded, cessation_of_operation], default: unspecified }
+    output:
+      - { name: revoked, type: bool }
+      - { name: error, type: string }
+
+  # List all certificates
+  list_certificates:
+    description: List all managed certificates
+    output:
+      - { name: certificates, type: list }
+
+channels:
+  cli:
+    serve:
+      enabled: true
+      command: tls-acme
+      commands:
+        - action: test_connection
+        - action: register_account
+        - action: list_certificates
+          columns: [domain, expires_at, needs_renewal]
+        - action: check_renewal
+          args:
+            - { name: domain, required: true }
+        - action: obtain_certificate
+          args:
+            - { name: domain, required: true }
+          flags:
+            - { param: force, type: bool }
+        - action: revoke_certificate
+          args:
+            - { name: domain, required: true }
+          confirm: "Are you sure you want to revoke this certificate?"
+
+# Implementation notes
+implementation:
+  staging_url: "https://acme-staging-v02.api.letsencrypt.org/directory"
+  production_url: "https://acme-v02.api.letsencrypt.org/directory"

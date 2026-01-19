@@ -130,10 +130,12 @@ func TestE2E_InvalidAPIKey(t *testing.T) {
 
 			var body map[string]interface{}
 			json.NewDecoder(resp.Body).Decode(&body)
-			errObj, ok := body["error"].(map[string]interface{})
-			if !ok {
-				t.Fatal("expected error object")
+			// JSON:API error format: {"errors": [{"code": "..."}]}
+			errors, ok := body["errors"].([]interface{})
+			if !ok || len(errors) == 0 {
+				t.Fatal("expected errors array in response")
 			}
+			errObj, _ := errors[0].(map[string]interface{})
 			if errObj["code"] != tt.code {
 				t.Errorf("code = %v, want %s", errObj["code"], tt.code)
 			}
@@ -212,7 +214,12 @@ func TestE2E_ExpiredKey(t *testing.T) {
 
 	var body map[string]interface{}
 	json.NewDecoder(resp.Body).Decode(&body)
-	errObj := body["error"].(map[string]interface{})
+	// JSON:API error format: {"errors": [{"code": "..."}]}
+	errors, ok := body["errors"].([]interface{})
+	if !ok || len(errors) == 0 {
+		t.Fatal("expected errors array in response")
+	}
+	errObj, _ := errors[0].(map[string]interface{})
 	if errObj["code"] != "key_expired" {
 		t.Errorf("code = %v, want key_expired", errObj["code"])
 	}

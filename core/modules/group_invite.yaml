@@ -1,0 +1,96 @@
+# Group Invite module - manages pending group invitations
+module: group_invite
+
+schema:
+  # References
+  group_id:   { type: ref, to: group, required: true, description: "The group to invite to" }
+  email:      { type: email, required: true, description: "Email address of the invitee" }
+  role:       { type: enum, values: [admin, member], default: member, description: "Role to assign when invite is accepted" }
+
+  # Invite details
+  invited_by: { type: ref, to: user, required: true, description: "User who sent the invitation" }
+  token:      { type: secret, lookup: true, internal: true, description: "Secure invite token" }
+  expires_at: { type: timestamp, required: true, description: "When the invitation expires" }
+
+actions:
+  # List invites for a group
+  list_by_group:
+    input:
+      - { name: group_id, type: ref, to: group, required: true }
+    description: List pending invites for a group
+
+  # List invites for an email
+  list_by_email:
+    input:
+      - { name: email, type: email, required: true }
+    description: List pending invites for an email address
+
+  # Accept an invite
+  accept:
+    input:
+      - { name: token, type: string, required: true }
+    description: Accept an invitation using the token
+
+  # Revoke an invite
+  revoke:
+    description: Revoke a pending invitation
+    confirm: true
+
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /api/groups/{group_id}/invites
+      endpoints:
+        - { action: list_by_group, method: GET, path: "/" }
+        - { action: create, method: POST, path: "/" }
+        - { action: delete, method: DELETE, path: "/{id}" }
+      # Accept invite is at a different path (no group_id needed)
+      standalone_endpoints:
+        - { action: accept, method: POST, path: "/invites/{token}/accept" }
+        - { action: list_by_email, method: GET, path: "/invites/email/{email}" }
+
+  cli:
+    serve:
+      enabled: true
+      command: group-invites
+      commands:
+        - action: list_by_group
+          name: list
+          flags:
+            - { param: group_id, name: group, short: g, required: true }
+          columns: [id, email, role, invited_by, expires_at, created_at]
+        - action: create
+          flags:
+            - { param: group_id, name: group, short: g, required: true }
+            - { param: email, short: e, required: true }
+            - { param: role, default: member }
+            - { param: invited_by, name: inviter, required: true }
+        - action: delete
+          name: revoke
+          args:
+            - { name: id, required: true }
+          confirm: "Are you sure you want to revoke this invitation?"
+
+hooks:
+  # Generate token before create
+  before_create:
+    - call: generate_invite_token
+    - call: set_expiration
+
+  after_create:
+    - emit: group_invite.created
+    - call: send_invite_email
+
+  after_accept:
+    - emit: group_invite.accepted
+    - call: create_membership
+
+  after_delete:
+    - emit: group_invite.revoked
+
+meta:
+  description: Pending invitations to join groups
+  icon: mail
+  display_name: Group Invites
+  plural: Group Invites

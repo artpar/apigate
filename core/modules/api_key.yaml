@@ -2,8 +2,10 @@
 module: api_key
 
 schema:
-  # Ownership
-  user_id:    { type: ref, to: user, required: true, description: "The user who owns this API key" }
+  # Ownership (either user_id or group_id must be set)
+  user_id:    { type: ref, to: user, description: "The user who owns this API key (for personal keys)" }
+  group_id:   { type: ref, to: group, description: "The group that owns this API key (for shared keys)" }
+  created_by: { type: ref, to: user, description: "The user who created this key (for audit)" }
 
   # Key data
   hash:       { type: secret, internal: true, description: "Cryptographic hash of the API key" }
@@ -21,7 +23,13 @@ actions:
   list_by_user:
     input:
       - { name: user_id, type: ref, to: user, required: true }
-    description: List all API keys for a user
+    description: List all personal API keys for a user
+
+  # List keys for a group
+  list_by_group:
+    input:
+      - { name: group_id, type: ref, to: group, required: true }
+    description: List all API keys for a group
 
   # Revoke a key
   revoke:
@@ -43,6 +51,7 @@ channels:
       endpoints:
         - { action: list, method: GET, path: "/", auth: admin }
         - { action: list_by_user, method: GET, path: "/user/{user_id}" }
+        - { action: list_by_group, method: GET, path: "/group/{group_id}" }
         - { action: get, method: GET, path: "/{id}" }
         - { action: create, method: POST, path: "/" }
         - { action: delete, method: DELETE, path: "/{id}" }
@@ -54,18 +63,24 @@ channels:
       command: keys
       commands:
         - action: list
-          columns: [id, user_id, prefix, name, expires_at, revoked_at, last_used, created_at]
+          columns: [id, user_id, group_id, prefix, name, expires_at, revoked_at, last_used, created_at]
         - action: list_by_user
           name: list-user
           flags:
             - { param: user_id, name: user, short: u, required: true }
           columns: [id, prefix, name, expires_at, revoked_at, last_used]
+        - action: list_by_group
+          name: list-group
+          flags:
+            - { param: group_id, name: group, short: g, required: true }
+          columns: [id, prefix, name, created_by, expires_at, revoked_at, last_used]
         - action: get
           args:
             - { name: id, required: true }
         - action: create
           flags:
-            - { param: user_id, name: user, short: u, required: true }
+            - { param: user_id, name: user, short: u, description: "User ID (for personal keys)" }
+            - { param: group_id, name: group, short: g, description: "Group ID (for shared keys)" }
             - { param: name, short: n }
             - { param: scopes, description: "Comma-separated list of scopes" }
             - { param: expires_at, name: expires, description: "Expiration time (RFC3339)" }

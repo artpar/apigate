@@ -72,6 +72,12 @@ type Handler struct {
 	deliveries          ports.DeliveryStore
 	webhookService      WebhookDispatcher
 	invites             ports.InviteStore
+	groups              ports.GroupStore
+	groupMembers        ports.GroupMemberStore
+	groupInvites        ports.GroupInviteStore
+	oauthIdentities     ports.OAuthIdentityStore
+	oauthStates         ports.OAuthStateStore
+	oauthProviders      map[string]ports.OAuthProvider
 	appSettings         AppSettings
 	logger              zerolog.Logger
 	hasher              ports.Hasher
@@ -101,6 +107,12 @@ type Deps struct {
 	Deliveries          ports.DeliveryStore
 	WebhookService      WebhookDispatcher
 	Invites             ports.InviteStore
+	Groups              ports.GroupStore
+	GroupMembers        ports.GroupMemberStore
+	GroupInvites        ports.GroupInviteStore
+	OAuthIdentities     ports.OAuthIdentityStore
+	OAuthStates         ports.OAuthStateStore
+	OAuthProviders      map[string]ports.OAuthProvider
 	AppSettings         AppSettings
 	Logger              zerolog.Logger
 	Hasher              ports.Hasher
@@ -139,6 +151,12 @@ func NewHandler(deps Deps) (*Handler, error) {
 		deliveries:          deps.Deliveries,
 		webhookService:      deps.WebhookService,
 		invites:             deps.Invites,
+		groups:              deps.Groups,
+		groupMembers:        deps.GroupMembers,
+		groupInvites:        deps.GroupInvites,
+		oauthIdentities:     deps.OAuthIdentities,
+		oauthStates:         deps.OAuthStates,
+		oauthProviders:      deps.OAuthProviders,
 		appSettings:         deps.AppSettings,
 		logger:              deps.Logger,
 		hasher:              deps.Hasher,
@@ -183,6 +201,14 @@ func (h *Handler) Router() chi.Router {
 	// Legal pages (no auth required)
 	r.Get("/terms", h.TermsPage)
 	r.Get("/privacy", h.PrivacyPage)
+
+	// Group invite acceptance (partial auth - user must be logged in to accept)
+	r.Get("/groups/invite/{token}", h.GroupInviteAcceptPage)
+	r.Post("/groups/invite/{token}", h.GroupInviteAccept)
+
+	// OAuth routes (no auth required - these initiate the flow)
+	r.Get("/auth/oauth/{provider}", h.OAuthStart)
+	r.Get("/auth/oauth/{provider}/callback", h.OAuthCallback)
 
 	// Protected pages (require auth)
 	r.Group(func(r chi.Router) {
@@ -258,6 +284,20 @@ func (h *Handler) Router() chi.Router {
 		r.Post("/invites", h.InviteCreate)
 		r.Delete("/invites/{id}", h.InviteDelete)
 
+		// Groups
+		r.Get("/groups", h.GroupsPage)
+		r.Get("/groups/new", h.GroupNewPage)
+		r.Post("/groups", h.GroupCreate)
+		r.Get("/groups/{id}", h.GroupDetailPage)
+		r.Get("/groups/{id}/edit", h.GroupEditPage)
+		r.Post("/groups/{id}", h.GroupUpdate)
+		r.Delete("/groups/{id}", h.GroupDelete)
+		r.Post("/groups/{id}/members", h.GroupMemberAdd)
+		r.Delete("/groups/{id}/members/{uid}", h.GroupMemberRemove)
+		r.Post("/groups/{id}/members/{uid}/role", h.GroupMemberUpdateRole)
+		r.Post("/groups/{id}/invites", h.GroupInviteCreate)
+		r.Delete("/groups/{id}/invites/{iid}", h.GroupInviteRevoke)
+
 		// Payment Providers
 		r.Get("/payments", h.PaymentsPage)
 		r.Post("/payments", h.PaymentsUpdate)
@@ -281,6 +321,9 @@ func (h *Handler) Router() chi.Router {
 		r.Get("/partials/plan-entitlements", h.PartialPlanEntitlements)
 		r.Get("/partials/webhooks", h.PartialWebhooks)
 		r.Get("/partials/webhooks/{id}/deliveries", h.PartialWebhookDeliveries)
+		r.Get("/partials/groups", h.PartialGroups)
+		r.Get("/partials/groups/{id}/members", h.PartialGroupMembers)
+		r.Get("/partials/groups/{id}/invites", h.PartialGroupInvites)
 
 		// API endpoints for dynamic UI features
 		r.Post("/api/expr/validate", h.ValidateExpr)

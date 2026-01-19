@@ -1,0 +1,83 @@
+# OAuth Capability Interface
+# Any module that implements this capability can authenticate users via OAuth/OIDC
+capability: oauth
+
+description: |
+  OAuth capability handles third-party authentication via OAuth2/OIDC providers.
+  Supports authorization code flow with PKCE for secure authentication.
+
+schema:
+  enabled: { type: bool, default: false, description: "Whether this OAuth provider is active" }
+
+# Actions that implementing modules MUST provide
+actions:
+  # Get the authorization URL for the OAuth flow
+  get_auth_url:
+    description: Generate OAuth authorization URL
+    input:
+      - { name: redirect_uri, type: string, required: true, description: "URL to redirect after auth" }
+      - { name: state, type: string, required: true, description: "CSRF state parameter" }
+      - { name: code_challenge, type: string, description: "PKCE code challenge" }
+    output:
+      - { name: url, type: string, description: "Authorization URL to redirect user to" }
+
+  # Exchange authorization code for tokens
+  exchange_code:
+    description: Exchange authorization code for tokens
+    input:
+      - { name: code, type: string, required: true, description: "Authorization code from provider" }
+      - { name: redirect_uri, type: string, required: true, description: "Same redirect_uri used in auth URL" }
+      - { name: code_verifier, type: string, description: "PKCE code verifier" }
+    output:
+      - { name: access_token, type: string }
+      - { name: refresh_token, type: string }
+      - { name: expires_at, type: datetime }
+      - { name: token_type, type: string }
+      - { name: error, type: string }
+
+  # Get user profile from provider
+  get_user_profile:
+    description: Get user profile from OAuth provider
+    input:
+      - { name: access_token, type: string, required: true }
+    output:
+      - { name: provider_user_id, type: string, description: "Unique ID from the provider" }
+      - { name: email, type: email, description: "User's email address" }
+      - { name: email_verified, type: bool, description: "Whether email is verified" }
+      - { name: name, type: string, description: "Display name" }
+      - { name: avatar_url, type: string, description: "Profile picture URL" }
+      - { name: raw_data, type: map, description: "Full profile data from provider" }
+      - { name: error, type: string }
+
+  # Refresh access token
+  refresh_token:
+    description: Refresh an expired access token
+    input:
+      - { name: refresh_token, type: string, required: true }
+    output:
+      - { name: access_token, type: string }
+      - { name: refresh_token, type: string, description: "New refresh token if rotated" }
+      - { name: expires_at, type: datetime }
+      - { name: error, type: string }
+
+  # Revoke token
+  revoke_token:
+    description: Revoke an access or refresh token
+    input:
+      - { name: token, type: string, required: true }
+      - { name: token_type, type: enum, values: [access_token, refresh_token], default: access_token }
+    output:
+      - { name: revoked, type: bool }
+      - { name: error, type: string }
+
+  # Test provider configuration
+  test_connection:
+    description: Verify OAuth provider configuration
+    output:
+      - { name: valid, type: bool }
+      - { name: provider_name, type: string }
+      - { name: error, type: string }
+
+meta:
+  icon: key
+  display_name: OAuth Provider

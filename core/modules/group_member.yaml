@@ -1,0 +1,101 @@
+# Group Member module - manages group membership
+module: group_member
+
+schema:
+  # References
+  group_id:   { type: ref, to: group, required: true, description: "The group" }
+  user_id:    { type: ref, to: user, required: true, description: "The user" }
+
+  # Role
+  role:       { type: enum, values: [owner, admin, member], default: member, description: "Member's role in the group" }
+
+  # Audit
+  invited_by: { type: ref, to: user, description: "User who invited this member" }
+  invited_at: { type: timestamp, description: "When the invitation was sent" }
+  joined_at:  { type: timestamp, description: "When the user joined" }
+
+constraints:
+  - unique: [group_id, user_id]  # One membership per user per group
+
+actions:
+  # List members of a group
+  list_by_group:
+    input:
+      - { name: group_id, type: ref, to: group, required: true }
+    description: List all members of a group
+
+  # List groups a user is a member of
+  list_by_user:
+    input:
+      - { name: user_id, type: ref, to: user, required: true }
+    description: List all groups a user is a member of
+
+  # Change member role
+  change_role:
+    input:
+      - { name: role, type: enum, values: [admin, member], required: true }
+    set: { role: "${role}" }
+    description: Change a member's role
+
+  # Remove member from group
+  remove:
+    description: Remove a member from the group
+    confirm: true
+
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /api/groups/{group_id}/members
+      endpoints:
+        - { action: list_by_group, method: GET, path: "/" }
+        - { action: get, method: GET, path: "/{id}" }
+        - { action: create, method: POST, path: "/" }
+        - { action: change_role, method: PATCH, path: "/{id}/role" }
+        - { action: delete, method: DELETE, path: "/{id}" }
+
+  cli:
+    serve:
+      enabled: true
+      command: group-members
+      commands:
+        - action: list_by_group
+          name: list
+          flags:
+            - { param: group_id, name: group, short: g, required: true }
+          columns: [id, user_id, role, invited_by, joined_at]
+        - action: list_by_user
+          name: list-user
+          flags:
+            - { param: user_id, name: user, short: u, required: true }
+          columns: [id, group_id, role, joined_at]
+        - action: create
+          flags:
+            - { param: group_id, name: group, short: g, required: true }
+            - { param: user_id, name: user, short: u, required: true }
+            - { param: role, default: member }
+        - action: change_role
+          args:
+            - { name: id, required: true }
+          flags:
+            - { param: role, required: true }
+        - action: delete
+          args:
+            - { name: id, required: true }
+          confirm: "Are you sure you want to remove this member?"
+
+hooks:
+  after_create:
+    - emit: group_member.added
+
+  after_change_role:
+    - emit: group_member.role_changed
+
+  after_delete:
+    - emit: group_member.removed
+
+meta:
+  description: Group membership for user access control
+  icon: user-plus
+  display_name: Group Members
+  plural: Group Members

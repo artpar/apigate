@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"runtime"
 	"time"
+
+	"github.com/artpar/apigate/pkg/jsonapi"
 )
 
 // DoctorResponse represents the system health check response.
@@ -135,7 +137,15 @@ func (h *Handler) Doctor(w http.ResponseWriter, r *http.Request) {
 		statusCode = http.StatusServiceUnavailable
 	}
 
-	writeJSON(w, statusCode, response)
+	// Return as JSON:API meta response (doctor is system metadata, not a resource)
+	jsonapi.WriteMeta(w, statusCode, jsonapi.Meta{
+		"status":     response.Status,
+		"timestamp":  response.Timestamp,
+		"version":    response.Version,
+		"checks":     response.Checks,
+		"system":     response.System,
+		"statistics": response.Statistics,
+	})
 }
 
 func (h *Handler) checkDatabase(ctx context.Context) HealthCheck {

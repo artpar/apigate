@@ -173,11 +173,11 @@ func TestDTOToTransform(t *testing.T) {
 	}
 }
 
-func TestKeyToResponse(t *testing.T) {
+func TestKeyToResource(t *testing.T) {
 	createdAt := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	// Test with nil optional fields
-	result := keyToResponse(key.Key{
+	result := keyToResource(key.Key{
 		ID:        "key1",
 		Name:      "Test Key",
 		Prefix:    "test_",
@@ -188,27 +188,31 @@ func TestKeyToResponse(t *testing.T) {
 	if result.ID != "key1" {
 		t.Errorf("ID = %s, want key1", result.ID)
 	}
-	if result.Name != "Test Key" {
-		t.Errorf("Name = %s, want Test Key", result.Name)
+	if result.Type != TypeKey {
+		t.Errorf("Type = %s, want %s", result.Type, TypeKey)
 	}
-	if result.Prefix != "test_" {
-		t.Errorf("Prefix = %s, want test_", result.Prefix)
+	if result.Attributes["name"] != "Test Key" {
+		t.Errorf("name = %s, want Test Key", result.Attributes["name"])
 	}
-	if result.RevokedAt != nil {
-		t.Errorf("RevokedAt should be nil")
+	if result.Attributes["prefix"] != "test_" {
+		t.Errorf("prefix = %s, want test_", result.Attributes["prefix"])
 	}
-	if result.ExpiresAt != nil {
-		t.Errorf("ExpiresAt should be nil")
+	// Optional fields should not be present when nil
+	if _, ok := result.Attributes["revoked_at"]; ok {
+		t.Error("revoked_at should not be present")
 	}
-	if result.LastUsed != nil {
-		t.Errorf("LastUsed should be nil")
+	if _, ok := result.Attributes["expires_at"]; ok {
+		t.Error("expires_at should not be present")
+	}
+	if _, ok := result.Attributes["last_used"]; ok {
+		t.Error("last_used should not be present")
 	}
 
 	// Test with all optional fields set
 	revokedAt := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
 	expiresAt := time.Date(2024, 12, 31, 0, 0, 0, 0, time.UTC)
 	lastUsed := time.Date(2024, 5, 15, 0, 0, 0, 0, time.UTC)
-	result2 := keyToResponse(key.Key{
+	result2 := keyToResource(key.Key{
 		ID:        "key2",
 		Name:      "Revoked Key",
 		Prefix:    "rev_",
@@ -219,13 +223,13 @@ func TestKeyToResponse(t *testing.T) {
 		LastUsed:  &lastUsed,
 	})
 
-	if result2.RevokedAt == nil {
-		t.Errorf("RevokedAt should not be nil")
+	if _, ok := result2.Attributes["revoked_at"]; !ok {
+		t.Error("revoked_at should be present")
 	}
-	if result2.ExpiresAt == nil {
-		t.Errorf("ExpiresAt should not be nil")
+	if _, ok := result2.Attributes["expires_at"]; !ok {
+		t.Error("expires_at should be present")
 	}
-	if result2.LastUsed == nil {
-		t.Errorf("LastUsed should not be nil")
+	if _, ok := result2.Attributes["last_used"]; !ok {
+		t.Error("last_used should be present")
 	}
 }

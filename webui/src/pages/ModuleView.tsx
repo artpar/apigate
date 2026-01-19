@@ -15,6 +15,7 @@ import {
   updateRecord,
 } from '@/api/schema';
 import { DynamicForm } from '@/components/DynamicForm';
+import { RouteForm } from '@/components/forms/RouteForm';
 import { PasswordModal } from '@/components/PasswordModal';
 import { formatModuleName } from '@/components/layout/ThreePaneLayout';
 import type { Record, RecordResponse } from '@/types/schema';
@@ -143,15 +144,26 @@ export function ModuleView() {
         )}
       </div>
 
-      {/* Form */}
-      <DynamicForm
-        module={schema}
-        initialData={isCreate ? {} : recordData?.data || {}}
-        mode={isCreate ? 'create' : 'edit'}
-        onSubmit={handleSubmit}
-        onCancel={handleCancel}
-        isLoading={createMutation.isPending || updateMutation.isPending}
-      />
+      {/* Form - use specialized form for routes */}
+      {module === 'routes' ? (
+        <RouteForm
+          module={schema}
+          initialData={isCreate ? {} : recordData?.data || {}}
+          mode={isCreate ? 'create' : 'edit'}
+          onSubmit={handleSubmit}
+          onCancel={handleCancel}
+          isLoading={createMutation.isPending || updateMutation.isPending}
+        />
+      ) : (
+        <DynamicForm
+          module={schema}
+          initialData={isCreate ? {} : recordData?.data || {}}
+          mode={isCreate ? 'create' : 'edit'}
+          onSubmit={handleSubmit}
+          onCancel={handleCancel}
+          isLoading={createMutation.isPending || updateMutation.isPending}
+        />
+      )}
 
       {/* Success message */}
       {updateMutation.isSuccess && (

@@ -3,13 +3,13 @@
 package http
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
 
 	"github.com/artpar/apigate/core/convention"
 	"github.com/artpar/apigate/core/schema"
+	"github.com/artpar/apigate/pkg/jsonapi"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -52,12 +52,11 @@ func (h *SchemaHandler) listModules(w http.ResponseWriter, r *http.Request) {
 		return summaries[i].Name < summaries[j].Name
 	})
 
-	resp := schema.ModuleListResponse{
-		Modules: summaries,
-		Count:   len(summaries),
-	}
-
-	writeJSON(w, resp)
+	// Return as JSON:API meta response
+	jsonapi.WriteMeta(w, http.StatusOK, jsonapi.Meta{
+		"modules": summaries,
+		"count":   len(summaries),
+	})
 }
 
 // getModuleSchema handles GET /mod/_schema/{module}
@@ -66,12 +65,24 @@ func (h *SchemaHandler) getModuleSchema(w http.ResponseWriter, r *http.Request) 
 
 	mod, ok := h.modules[moduleName]
 	if !ok {
-		writeSchemaError(w, "module not found", http.StatusNotFound)
+		jsonapi.WriteNotFound(w, "module")
 		return
 	}
 
 	resp := h.buildModuleSchema(mod)
-	writeJSON(w, resp)
+	// Return as JSON:API meta response (schema is metadata, not a resource)
+	jsonapi.WriteMeta(w, http.StatusOK, jsonapi.Meta{
+		"module":      resp.Module,
+		"plural":      resp.Plural,
+		"description": resp.Description,
+		"version":     resp.Version,
+		"table":       resp.Table,
+		"fields":      resp.Fields,
+		"actions":     resp.Actions,
+		"lookups":     resp.Lookups,
+		"endpoints":   resp.Endpoints,
+		"depends":     resp.Depends,
+	})
 }
 
 // buildModuleSchema converts convention.Derived to schema.ModuleSchemaResponse
@@ -316,17 +327,3 @@ func (h *SchemaHandler) buildEndpoints(actions []convention.DerivedAction, baseP
 	return endpoints
 }
 
-// writeJSON writes a JSON response.
-func writeJSON(w http.ResponseWriter, data any) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(data)
-}
-
-// writeSchemaError writes an error response.
-func writeSchemaError(w http.ResponseWriter, message string, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]string{
-		"error": message,
-	})
-}

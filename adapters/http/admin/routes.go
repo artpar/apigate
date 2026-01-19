@@ -8,9 +8,16 @@ import (
 	"time"
 
 	"github.com/artpar/apigate/domain/route"
+	"github.com/artpar/apigate/pkg/jsonapi"
 	"github.com/artpar/apigate/ports"
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog"
+)
+
+// JSON:API resource type constants for routes
+const (
+	TypeRoute    = "routes"
+	TypeUpstream = "upstreams"
 )
 
 // RoutesHandler handles route and upstream admin endpoints.
@@ -175,19 +182,16 @@ func (h *RoutesHandler) ListRoutes(w http.ResponseWriter, r *http.Request) {
 	routes, err := h.routes.List(r.Context())
 	if err != nil {
 		h.logger.Error().Err(err).Msg("failed to list routes")
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list routes")
+		jsonapi.WriteInternalError(w, "Failed to list routes")
 		return
 	}
 
-	response := make([]RouteResponse, len(routes))
+	resources := make([]jsonapi.Resource, len(routes))
 	for i, rt := range routes {
-		response[i] = routeToResponse(rt)
+		resources[i] = routeToResource(rt)
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"routes": response,
-		"total":  len(response),
-	})
+	jsonapi.WriteCollection(w, http.StatusOK, resources, nil)
 }
 
 // CreateRoute creates a new route.
@@ -206,16 +210,16 @@ func (h *RoutesHandler) ListRoutes(w http.ResponseWriter, r *http.Request) {
 func (h *RoutesHandler) CreateRoute(w http.ResponseWriter, r *http.Request) {
 	var req CreateRouteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		jsonapi.WriteBadRequest(w, "Invalid JSON body")
 		return
 	}
 
 	if req.Name == "" {
-		writeError(w, http.StatusBadRequest, "missing_name", "name is required")
+		jsonapi.WriteValidationError(w, "name", "name is required")
 		return
 	}
 	if req.PathPattern == "" {
-		writeError(w, http.StatusBadRequest, "missing_path_pattern", "path_pattern is required")
+		jsonapi.WriteValidationError(w, "path_pattern", "path_pattern is required")
 		return
 	}
 
@@ -262,13 +266,13 @@ func (h *RoutesHandler) CreateRoute(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.routes.Create(r.Context(), rt); err != nil {
 		h.logger.Error().Err(err).Msg("failed to create route")
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create route")
+		jsonapi.WriteInternalError(w, "Failed to create route")
 		return
 	}
 
 	h.logger.Info().Str("route_id", rt.ID).Str("name", rt.Name).Msg("route created via admin api")
 	h.notifyChange()
-	writeJSON(w, http.StatusCreated, routeToResponse(rt))
+	jsonapi.WriteCreated(w, routeToResource(rt), "/admin/routes/"+rt.ID)
 }
 
 // GetRoute returns a single route.
@@ -288,11 +292,11 @@ func (h *RoutesHandler) GetRoute(w http.ResponseWriter, r *http.Request) {
 
 	rt, err := h.routes.Get(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "Route not found")
+		jsonapi.WriteNotFound(w, "route")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, routeToResponse(rt))
+	jsonapi.WriteResource(w, http.StatusOK, routeToResource(rt))
 }
 
 // UpdateRoute updates a route.
@@ -315,13 +319,13 @@ func (h *RoutesHandler) UpdateRoute(w http.ResponseWriter, r *http.Request) {
 
 	rt, err := h.routes.Get(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "Route not found")
+		jsonapi.WriteNotFound(w, "route")
 		return
 	}
 
 	var req UpdateRouteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		jsonapi.WriteBadRequest(w, "Invalid JSON body")
 		return
 	}
 
@@ -378,13 +382,13 @@ func (h *RoutesHandler) UpdateRoute(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.routes.Update(r.Context(), rt); err != nil {
 		h.logger.Error().Err(err).Msg("failed to update route")
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update route")
+		jsonapi.WriteInternalError(w, "Failed to update route")
 		return
 	}
 
 	h.logger.Info().Str("route_id", rt.ID).Msg("route updated via admin api")
 	h.notifyChange()
-	writeJSON(w, http.StatusOK, routeToResponse(rt))
+	jsonapi.WriteResource(w, http.StatusOK, routeToResource(rt))
 }
 
 // DeleteRoute deletes a route.
@@ -403,13 +407,13 @@ func (h *RoutesHandler) DeleteRoute(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	if err := h.routes.Delete(r.Context(), id); err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "Route not found")
+		jsonapi.WriteNotFound(w, "route")
 		return
 	}
 
 	h.logger.Info().Str("route_id", id).Msg("route deleted via admin api")
 	h.notifyChange()
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	jsonapi.WriteNoContent(w)
 }
 
 // -----------------------------------------------------------------------------
@@ -479,19 +483,16 @@ func (h *RoutesHandler) ListUpstreams(w http.ResponseWriter, r *http.Request) {
 	upstreams, err := h.upstreams.List(r.Context())
 	if err != nil {
 		h.logger.Error().Err(err).Msg("failed to list upstreams")
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list upstreams")
+		jsonapi.WriteInternalError(w, "Failed to list upstreams")
 		return
 	}
 
-	response := make([]UpstreamResponse, len(upstreams))
+	resources := make([]jsonapi.Resource, len(upstreams))
 	for i, u := range upstreams {
-		response[i] = upstreamToResponse(u)
+		resources[i] = upstreamToResource(u)
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"upstreams": response,
-		"total":     len(response),
-	})
+	jsonapi.WriteCollection(w, http.StatusOK, resources, nil)
 }
 
 // CreateUpstream creates a new upstream.
@@ -510,16 +511,16 @@ func (h *RoutesHandler) ListUpstreams(w http.ResponseWriter, r *http.Request) {
 func (h *RoutesHandler) CreateUpstream(w http.ResponseWriter, r *http.Request) {
 	var req CreateUpstreamRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		jsonapi.WriteBadRequest(w, "Invalid JSON body")
 		return
 	}
 
 	if req.Name == "" {
-		writeError(w, http.StatusBadRequest, "missing_name", "name is required")
+		jsonapi.WriteValidationError(w, "name", "name is required")
 		return
 	}
 	if req.BaseURL == "" {
-		writeError(w, http.StatusBadRequest, "missing_base_url", "base_url is required")
+		jsonapi.WriteValidationError(w, "base_url", "base_url is required")
 		return
 	}
 
@@ -558,13 +559,13 @@ func (h *RoutesHandler) CreateUpstream(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.upstreams.Create(r.Context(), u); err != nil {
 		h.logger.Error().Err(err).Msg("failed to create upstream")
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create upstream")
+		jsonapi.WriteInternalError(w, "Failed to create upstream")
 		return
 	}
 
 	h.logger.Info().Str("upstream_id", u.ID).Str("name", u.Name).Msg("upstream created via admin api")
 	h.notifyChange()
-	writeJSON(w, http.StatusCreated, upstreamToResponse(u))
+	jsonapi.WriteCreated(w, upstreamToResource(u), "/admin/upstreams/"+u.ID)
 }
 
 // GetUpstream returns a single upstream.
@@ -584,11 +585,11 @@ func (h *RoutesHandler) GetUpstream(w http.ResponseWriter, r *http.Request) {
 
 	u, err := h.upstreams.Get(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "Upstream not found")
+		jsonapi.WriteNotFound(w, "upstream")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, upstreamToResponse(u))
+	jsonapi.WriteResource(w, http.StatusOK, upstreamToResource(u))
 }
 
 // UpdateUpstream updates an upstream.
@@ -611,13 +612,13 @@ func (h *RoutesHandler) UpdateUpstream(w http.ResponseWriter, r *http.Request) {
 
 	u, err := h.upstreams.Get(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "Upstream not found")
+		jsonapi.WriteNotFound(w, "upstream")
 		return
 	}
 
 	var req UpdateUpstreamRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		jsonapi.WriteBadRequest(w, "Invalid JSON body")
 		return
 	}
 
@@ -656,13 +657,13 @@ func (h *RoutesHandler) UpdateUpstream(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.upstreams.Update(r.Context(), u); err != nil {
 		h.logger.Error().Err(err).Msg("failed to update upstream")
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update upstream")
+		jsonapi.WriteInternalError(w, "Failed to update upstream")
 		return
 	}
 
 	h.logger.Info().Str("upstream_id", u.ID).Msg("upstream updated via admin api")
 	h.notifyChange()
-	writeJSON(w, http.StatusOK, upstreamToResponse(u))
+	jsonapi.WriteResource(w, http.StatusOK, upstreamToResource(u))
 }
 
 // DeleteUpstream deletes an upstream.
@@ -681,18 +682,67 @@ func (h *RoutesHandler) DeleteUpstream(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	if err := h.upstreams.Delete(r.Context(), id); err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "Upstream not found")
+		jsonapi.WriteNotFound(w, "upstream")
 		return
 	}
 
 	h.logger.Info().Str("upstream_id", id).Msg("upstream deleted via admin api")
 	h.notifyChange()
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	jsonapi.WriteNoContent(w)
 }
 
 // -----------------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------------
+
+// routeToResource converts a route to a JSON:API Resource.
+func routeToResource(rt route.Route) jsonapi.Resource {
+	rb := jsonapi.NewResource(TypeRoute, rt.ID).
+		Attr("name", rt.Name).
+		Attr("description", rt.Description).
+		Attr("path_pattern", rt.PathPattern).
+		Attr("match_type", string(rt.MatchType)).
+		Attr("methods", rt.Methods).
+		Attr("headers", headerMatchesToDTO(rt.Headers)).
+		Attr("path_rewrite", rt.PathRewrite).
+		Attr("method_override", rt.MethodOverride).
+		Attr("metering_expr", rt.MeteringExpr).
+		Attr("metering_mode", rt.MeteringMode).
+		Attr("protocol", string(rt.Protocol)).
+		Attr("priority", rt.Priority).
+		Attr("enabled", rt.Enabled).
+		Attr("created_at", rt.CreatedAt.Format(time.RFC3339)).
+		Attr("updated_at", rt.UpdatedAt.Format(time.RFC3339))
+
+	if rt.UpstreamID != "" {
+		rb.BelongsTo("upstream", TypeUpstream, rt.UpstreamID)
+	}
+	if rt.RequestTransform != nil {
+		rb.Attr("request_transform", transformToDTO(rt.RequestTransform))
+	}
+	if rt.ResponseTransform != nil {
+		rb.Attr("response_transform", transformToDTO(rt.ResponseTransform))
+	}
+
+	return rb.Build()
+}
+
+// upstreamToResource converts an upstream to a JSON:API Resource.
+func upstreamToResource(u route.Upstream) jsonapi.Resource {
+	return jsonapi.NewResource(TypeUpstream, u.ID).
+		Attr("name", u.Name).
+		Attr("description", u.Description).
+		Attr("base_url", u.BaseURL).
+		Attr("timeout_ms", u.Timeout.Milliseconds()).
+		Attr("max_idle_conns", u.MaxIdleConns).
+		Attr("idle_conn_timeout_ms", u.IdleConnTimeout.Milliseconds()).
+		Attr("auth_type", string(u.AuthType)).
+		Attr("auth_header", u.AuthHeader).
+		Attr("enabled", u.Enabled).
+		Attr("created_at", u.CreatedAt.Format(time.RFC3339)).
+		Attr("updated_at", u.UpdatedAt.Format(time.RFC3339)).
+		Build()
+}
 
 func routeToResponse(rt route.Route) RouteResponse {
 	resp := RouteResponse{

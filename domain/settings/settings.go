@@ -137,6 +137,47 @@ const (
 
 	// Terminology settings (customize UI labels for different metering modes)
 	KeyMeteringUnit = "metering.unit" // requests, tokens, data_points, bytes
+
+	// Groups settings
+	KeyGroupsEnabled         = "groups.enabled"
+	KeyGroupsMaxPerUser      = "groups.max_per_user"      // Max groups a user can own
+	KeyGroupsMaxMembers      = "groups.max_members"       // Max members per group
+	KeyGroupsAllowMemberKeys = "groups.allow_member_keys" // Can members create group keys?
+	KeyGroupsInviteTTL       = "groups.invite_ttl"        // Invite expiration duration
+
+	// TLS settings
+	KeyTLSEnabled      = "tls.enabled"
+	KeyTLSMode         = "tls.mode"         // acme, manual, none
+	KeyTLSDomain       = "tls.domain"       // Domain for ACME
+	KeyTLSEmail        = "tls.acme_email"   // Contact email for ACME
+	KeyTLSCertPath     = "tls.cert_path"    // Manual mode: cert file
+	KeyTLSKeyPath      = "tls.key_path"     // Manual mode: key file
+	KeyTLSHTTPRedirect = "tls.http_redirect"
+	KeyTLSMinVersion   = "tls.min_version"  // TLS 1.2 or 1.3
+	KeyTLSACMEStaging  = "tls.acme_staging" // Use staging for testing
+
+	// OAuth settings
+	KeyOAuthEnabled           = "oauth.enabled"
+	KeyOAuthAutoLinkEmail     = "oauth.auto_link_email"     // Auto-link by email
+	KeyOAuthAllowRegistration = "oauth.allow_registration"  // Create new users via OAuth
+
+	// Google OAuth
+	KeyOAuthGoogleEnabled      = "oauth.google.enabled"
+	KeyOAuthGoogleClientID     = "oauth.google.client_id"
+	KeyOAuthGoogleClientSecret = "oauth.google.client_secret"
+
+	// GitHub OAuth
+	KeyOAuthGitHubEnabled      = "oauth.github.enabled"
+	KeyOAuthGitHubClientID     = "oauth.github.client_id"
+	KeyOAuthGitHubClientSecret = "oauth.github.client_secret"
+
+	// Generic OIDC
+	KeyOAuthOIDCEnabled      = "oauth.oidc.enabled"
+	KeyOAuthOIDCName         = "oauth.oidc.name"          // Display name
+	KeyOAuthOIDCIssuerURL    = "oauth.oidc.issuer_url"    // Discovery URL
+	KeyOAuthOIDCClientID     = "oauth.oidc.client_id"
+	KeyOAuthOIDCClientSecret = "oauth.oidc.client_secret"
+	KeyOAuthOIDCScopes       = "oauth.oidc.scopes"        // Space-separated
 )
 
 // SensitiveKeys returns keys that contain secrets and should be encrypted.
@@ -152,6 +193,9 @@ func SensitiveKeys() []string {
 		KeyPaymentPaddleWebhookSecret,
 		KeyPaymentLemonAPIKey,
 		KeyPaymentLemonWebhookSecret,
+		KeyOAuthGoogleClientSecret,
+		KeyOAuthGitHubClientSecret,
+		KeyOAuthOIDCClientSecret,
 	}
 }
 
@@ -188,6 +232,25 @@ func Defaults() Settings {
 		KeyUpstreamMaxIdleConns: "100",
 		KeyUpstreamIdleConnTimeout: "90s",
 		KeyMeteringUnit:         "requests",
+		// Groups defaults
+		KeyGroupsEnabled:         "true",
+		KeyGroupsMaxPerUser:      "10",
+		KeyGroupsMaxMembers:      "50",
+		KeyGroupsAllowMemberKeys: "false",
+		KeyGroupsInviteTTL:       "168h", // 7 days
+		// TLS defaults
+		KeyTLSEnabled:      "false",
+		KeyTLSMode:         "none",
+		KeyTLSHTTPRedirect: "true",
+		KeyTLSMinVersion:   "1.2",
+		KeyTLSACMEStaging:  "false",
+		// OAuth defaults
+		KeyOAuthEnabled:           "false",
+		KeyOAuthAutoLinkEmail:     "true",
+		KeyOAuthAllowRegistration: "true",
+		KeyOAuthGoogleEnabled:     "false",
+		KeyOAuthGitHubEnabled:     "false",
+		KeyOAuthOIDCEnabled:       "false",
 	}
 }
 

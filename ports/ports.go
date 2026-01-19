@@ -4,6 +4,7 @@
 package ports
 
 import (
+	"errors"
 	"context"
 	"io"
 	"time"
@@ -11,14 +12,24 @@ import (
 	"github.com/artpar/apigate/domain/auth"
 	"github.com/artpar/apigate/domain/billing"
 	"github.com/artpar/apigate/domain/entitlement"
+	"github.com/artpar/apigate/domain/group"
 	"github.com/artpar/apigate/domain/key"
+	"github.com/artpar/apigate/domain/oauth"
 	"github.com/artpar/apigate/domain/proxy"
 	"github.com/artpar/apigate/domain/ratelimit"
 	"github.com/artpar/apigate/domain/route"
 	"github.com/artpar/apigate/domain/settings"
+	"github.com/artpar/apigate/domain/tls"
 	"github.com/artpar/apigate/domain/usage"
 	"github.com/artpar/apigate/domain/webhook"
 )
+
+// -----------------------------------------------------------------------------
+// Common Errors
+// -----------------------------------------------------------------------------
+
+// ErrNotFound is returned when an entity is not found.
+var ErrNotFound = errors.New("not found")
 
 // -----------------------------------------------------------------------------
 // Infrastructure Ports
@@ -822,4 +833,197 @@ type InviteStore interface {
 
 	// Count returns total invite count.
 	Count(ctx context.Context) (int, error)
+}
+
+// -----------------------------------------------------------------------------
+// Group Ports
+// -----------------------------------------------------------------------------
+
+// GroupStore persists user groups.
+type GroupStore interface {
+	// Get retrieves a group by ID.
+	Get(ctx context.Context, id string) (group.Group, error)
+
+	// GetBySlug retrieves a group by slug.
+	GetBySlug(ctx context.Context, slug string) (group.Group, error)
+
+	// Create stores a new group.
+	Create(ctx context.Context, g group.Group) error
+
+	// Update modifies an existing group.
+	Update(ctx context.Context, g group.Group) error
+
+	// Delete removes a group.
+	Delete(ctx context.Context, id string) error
+
+	// ListByUser returns all groups a user is a member of.
+	ListByUser(ctx context.Context, userID string) ([]group.Group, error)
+
+	// ListOwned returns all groups owned by a user.
+	ListOwned(ctx context.Context, ownerID string) ([]group.Group, error)
+}
+
+// GroupMemberStore persists group memberships.
+type GroupMemberStore interface {
+	// Get retrieves a membership by ID.
+	Get(ctx context.Context, id string) (group.Member, error)
+
+	// GetByGroupAndUser retrieves a membership by group and user.
+	GetByGroupAndUser(ctx context.Context, groupID, userID string) (group.Member, error)
+
+	// Create stores a new membership.
+	Create(ctx context.Context, m group.Member) error
+
+	// Update modifies a membership (e.g., change role).
+	Update(ctx context.Context, m group.Member) error
+
+	// Delete removes a membership.
+	Delete(ctx context.Context, id string) error
+
+	// ListByGroup returns all members of a group.
+	ListByGroup(ctx context.Context, groupID string) ([]group.Member, error)
+
+	// ListByUser returns all group memberships for a user.
+	ListByUser(ctx context.Context, userID string) ([]group.Member, error)
+}
+
+// GroupInviteStore persists group invitations.
+type GroupInviteStore interface {
+	// Get retrieves an invite by ID.
+	Get(ctx context.Context, id string) (group.Invite, error)
+
+	// GetByToken retrieves an invite by token.
+	GetByToken(ctx context.Context, token string) (group.Invite, error)
+
+	// Create stores a new invite.
+	Create(ctx context.Context, inv group.Invite) error
+
+	// Delete removes an invite.
+	Delete(ctx context.Context, id string) error
+
+	// ListByGroup returns all pending invites for a group.
+	ListByGroup(ctx context.Context, groupID string) ([]group.Invite, error)
+
+	// ListByEmail returns all pending invites for an email address.
+	ListByEmail(ctx context.Context, email string) ([]group.Invite, error)
+
+	// DeleteExpired removes all expired invites.
+	DeleteExpired(ctx context.Context) (int64, error)
+}
+
+// -----------------------------------------------------------------------------
+// OAuth Ports
+// -----------------------------------------------------------------------------
+
+// OAuthIdentityStore persists OAuth identities linked to users.
+type OAuthIdentityStore interface {
+	// Get retrieves an identity by ID.
+	Get(ctx context.Context, id string) (oauth.Identity, error)
+
+	// GetByProviderUser retrieves an identity by provider and provider user ID.
+	GetByProviderUser(ctx context.Context, provider oauth.Provider, providerUserID string) (oauth.Identity, error)
+
+	// Create stores a new identity.
+	Create(ctx context.Context, identity oauth.Identity) error
+
+	// Update modifies an identity (e.g., refresh tokens).
+	Update(ctx context.Context, identity oauth.Identity) error
+
+	// Delete removes an identity.
+	Delete(ctx context.Context, id string) error
+
+	// ListByUser returns all identities for a user.
+	ListByUser(ctx context.Context, userID string) ([]oauth.Identity, error)
+
+	// GetByUserAndProvider retrieves identity for a user from a specific provider.
+	GetByUserAndProvider(ctx context.Context, userID string, provider oauth.Provider) (oauth.Identity, error)
+}
+
+// OAuthStateStore persists OAuth state tokens for CSRF protection.
+// Database-backed for horizontal scaling (stateless servers).
+type OAuthStateStore interface {
+	// Create stores a new state.
+	Create(ctx context.Context, state oauth.State) error
+
+	// Get retrieves a state by state string.
+	Get(ctx context.Context, state string) (oauth.State, error)
+
+	// Delete removes a state (after use).
+	Delete(ctx context.Context, state string) error
+
+	// DeleteExpired removes all expired states.
+	DeleteExpired(ctx context.Context) (int64, error)
+}
+
+// OAuthProvider handles OAuth authentication flow.
+// Implementations: google, github, oidc
+type OAuthProvider interface {
+	// Name returns the provider name (e.g., "google", "github").
+	Name() string
+
+	// GetAuthURL returns the authorization URL to redirect the user.
+	GetAuthURL(ctx context.Context, state, codeChallenge, nonce, redirectURI string) (string, error)
+
+	// ExchangeCode exchanges an authorization code for tokens.
+	ExchangeCode(ctx context.Context, code, codeVerifier, redirectURI string) (oauth.TokenResponse, error)
+
+	// GetUserProfile fetches the user profile using the access token.
+	GetUserProfile(ctx context.Context, accessToken string) (oauth.UserProfile, error)
+
+	// RefreshToken refreshes an access token using a refresh token.
+	RefreshToken(ctx context.Context, refreshToken string) (oauth.TokenResponse, error)
+}
+
+// -----------------------------------------------------------------------------
+// TLS/Certificate Ports
+// -----------------------------------------------------------------------------
+
+// CertificateStore persists TLS certificates.
+// Database-backed for horizontal scaling (stateless servers).
+type CertificateStore interface {
+	// Get retrieves a certificate by ID.
+	Get(ctx context.Context, id string) (tls.Certificate, error)
+
+	// GetByDomain retrieves a certificate by domain.
+	GetByDomain(ctx context.Context, domain string) (tls.Certificate, error)
+
+	// Create stores a new certificate.
+	Create(ctx context.Context, cert tls.Certificate) error
+
+	// Update modifies a certificate (e.g., renewal).
+	Update(ctx context.Context, cert tls.Certificate) error
+
+	// Delete removes a certificate.
+	Delete(ctx context.Context, id string) error
+
+	// List returns all certificates.
+	List(ctx context.Context) ([]tls.Certificate, error)
+
+	// ListExpiring returns certificates expiring within N days.
+	ListExpiring(ctx context.Context, days int) ([]tls.Certificate, error)
+
+	// ListExpired returns expired certificates.
+	ListExpired(ctx context.Context) ([]tls.Certificate, error)
+}
+
+// TLSProvider handles TLS certificate provisioning.
+// Implementations: acme (Let's Encrypt), manual
+type TLSProvider interface {
+	// Name returns the provider name (e.g., "acme", "manual").
+	Name() string
+
+	// GetCertificate retrieves or obtains a certificate for a domain.
+	GetCertificate(ctx context.Context, domain string) (tls.Certificate, error)
+
+	// ObtainCertificate obtains a new certificate for a domain.
+	ObtainCertificate(ctx context.Context, domain string) (tls.Certificate, error)
+
+	// RenewCertificate renews an existing certificate.
+	RenewCertificate(ctx context.Context, domain string) (tls.Certificate, error)
+
+	// RevokeCertificate revokes a certificate.
+	RevokeCertificate(ctx context.Context, domain string, reason string) error
+
+	// CheckRenewal checks if a certificate needs renewal.
+	CheckRenewal(ctx context.Context, domain string, renewalDays int) (bool, error)
 }

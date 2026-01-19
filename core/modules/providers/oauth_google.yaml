@@ -1,0 +1,120 @@
+# Google OAuth Provider Module
+# Implements the oauth capability for Google authentication
+module: oauth_google
+
+meta:
+  description: Google OAuth2 authentication provider
+  implements: [oauth]
+  icon: google
+  display_name: Google OAuth
+
+schema:
+  # Instance identification
+  name:           { type: string, required: true, unique: true, lookup: true, description: "Instance name (e.g., oauth_google_default)" }
+  description:    { type: string, description: "Description of this instance" }
+
+  # Configuration
+  enabled:        { type: bool, default: false, description: "Whether this OAuth provider is active" }
+  is_default:     { type: bool, default: false, description: "Whether this is the default Google OAuth provider" }
+
+  # Google OAuth Configuration
+  client_id:      { type: string, required: true, description: "Google OAuth Client ID" }
+  client_secret:  { type: secret, required: true, description: "Google OAuth Client Secret" }
+
+  # Scopes (space-separated)
+  scopes:         { type: string, default: "openid email profile", description: "OAuth scopes to request" }
+
+  # Optional: Restrict to specific hosted domain
+  hosted_domain:  { type: string, description: "Restrict to specific Google Workspace domain (e.g., company.com)" }
+
+  # Allow signup or login only
+  allow_signup:   { type: bool, default: true, description: "Allow new users to sign up via Google" }
+
+actions:
+  # Test connection verifies the client credentials
+  test_connection:
+    description: Verify Google OAuth configuration
+    output:
+      - { name: valid, type: bool }
+      - { name: provider_name, type: string }
+      - { name: error, type: string }
+
+  # Generate authorization URL
+  get_auth_url:
+    description: Generate Google OAuth authorization URL
+    input:
+      - { name: redirect_uri, type: string, required: true }
+      - { name: state, type: string, required: true }
+      - { name: code_challenge, type: string }
+    output:
+      - { name: url, type: string }
+
+  # Exchange code for tokens
+  exchange_code:
+    description: Exchange authorization code for Google tokens
+    input:
+      - { name: code, type: string, required: true }
+      - { name: redirect_uri, type: string, required: true }
+      - { name: code_verifier, type: string }
+    output:
+      - { name: access_token, type: string }
+      - { name: refresh_token, type: string }
+      - { name: id_token, type: string }
+      - { name: expires_at, type: datetime }
+      - { name: token_type, type: string }
+      - { name: error, type: string }
+
+  # Get user profile
+  get_user_profile:
+    description: Get user profile from Google
+    input:
+      - { name: access_token, type: string, required: true }
+    output:
+      - { name: provider_user_id, type: string }
+      - { name: email, type: email }
+      - { name: email_verified, type: bool }
+      - { name: name, type: string }
+      - { name: given_name, type: string }
+      - { name: family_name, type: string }
+      - { name: avatar_url, type: string }
+      - { name: hosted_domain, type: string }
+      - { name: raw_data, type: map }
+      - { name: error, type: string }
+
+  # Refresh token
+  refresh_token:
+    description: Refresh Google access token
+    input:
+      - { name: refresh_token, type: string, required: true }
+    output:
+      - { name: access_token, type: string }
+      - { name: expires_at, type: datetime }
+      - { name: error, type: string }
+
+  # Revoke token
+  revoke_token:
+    description: Revoke Google token
+    input:
+      - { name: token, type: string, required: true }
+    output:
+      - { name: revoked, type: bool }
+      - { name: error, type: string }
+
+channels:
+  cli:
+    serve:
+      enabled: true
+      command: oauth-google
+      commands:
+        - action: test_connection
+        - action: get_auth_url
+          flags:
+            - { param: redirect_uri, required: true }
+            - { param: state, required: true }
+
+# Implementation details (for code generation)
+implementation:
+  auth_url: "https://accounts.google.com/o/oauth2/v2/auth"
+  token_url: "https://oauth2.googleapis.com/token"
+  userinfo_url: "https://www.googleapis.com/oauth2/v3/userinfo"
+  revoke_url: "https://oauth2.googleapis.com/revoke"

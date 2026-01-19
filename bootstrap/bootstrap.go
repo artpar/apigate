@@ -5,11 +5,13 @@ package bootstrap
 
 import (
 	"context"
+	cryptotls "crypto/tls"
 	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -23,6 +25,7 @@ import (
 	"github.com/artpar/apigate/adapters/metrics"
 	"github.com/artpar/apigate/adapters/payment"
 	"github.com/artpar/apigate/adapters/sqlite"
+	adapterstls "github.com/artpar/apigate/adapters/tls"
 	"github.com/artpar/apigate/app"
 	"github.com/artpar/apigate/core/capability"
 	capAdapters "github.com/artpar/apigate/core/capability/adapters"
@@ -37,6 +40,7 @@ import (
 	"github.com/artpar/apigate/web"
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
+	"golang.org/x/crypto/acme/autocert"
 )
 
 // Environment variable names for bootstrap configuration.
@@ -67,6 +71,14 @@ type App struct {
 
 	// Module runtime (declarative modules)
 	ModuleRuntime *ModuleRuntime
+
+	// TLS support
+	tlsEnabled    bool
+	tlsMode       string // acme, manual, none
+	tlsConfig     *cryptotls.Config
+	acmeManager   *autocert.Manager
+	acmeProvider  *adapterstls.ACMEProvider
+	httpChallenge *http.Server // HTTP server for ACME HTTP-01 challenges
 
 	// Adapters (for cleanup)
 	usageRecorder   ports.UsageRecorder
@@ -140,6 +152,11 @@ func NewWithConfig(cfg Config) (*App, error) {
 	// Initialize HTTP server (after module runtime so handlers are available)
 	if err := a.initHTTPServer(); err != nil {
 		return nil, fmt.Errorf("init http server: %w", err)
+	}
+
+	// Initialize TLS configuration (after HTTP server configured)
+	if err := a.initTLS(); err != nil {
+		return nil, fmt.Errorf("init tls: %w", err)
 	}
 
 	return a, nil
@@ -535,6 +552,116 @@ func (a *App) initHTTPServer() error {
 	return nil
 }
 
+// initTLS initializes TLS configuration based on settings.
+func (a *App) initTLS() error {
+	s := a.Settings.Get()
+
+	// Check if TLS is enabled
+	a.tlsEnabled = s.GetBool(settings.KeyTLSEnabled)
+	a.tlsMode = s.GetOrDefault(settings.KeyTLSMode, "none")
+
+	if !a.tlsEnabled || a.tlsMode == "none" {
+		a.Logger.Info().Msg("TLS disabled, using plain HTTP")
+		return nil
+	}
+
+	// Get TLS minimum version
+	minVersion := uint16(cryptotls.VersionTLS12)
+	minVersionStr := s.GetOrDefault(settings.KeyTLSMinVersion, "1.2")
+	if minVersionStr == "1.3" {
+		minVersion = cryptotls.VersionTLS13
+	}
+
+	switch a.tlsMode {
+	case "acme":
+		return a.initACMETLS(s, minVersion)
+	case "manual":
+		return a.initManualTLS(s, minVersion)
+	default:
+		a.Logger.Warn().Str("mode", a.tlsMode).Msg("unknown TLS mode, disabling TLS")
+		a.tlsEnabled = false
+		return nil
+	}
+}
+
+// initACMETLS initializes ACME (Let's Encrypt) TLS.
+func (a *App) initACMETLS(s settings.Settings, minVersion uint16) error {
+	domain := s.Get(settings.KeyTLSDomain)
+	if domain == "" {
+		return fmt.Errorf("TLS mode is 'acme' but no domain configured (tls.domain)")
+	}
+
+	email := s.Get(settings.KeyTLSEmail)
+	if email == "" {
+		a.Logger.Warn().Msg("no ACME email configured, Let's Encrypt may have issues contacting you")
+	}
+
+	staging := s.GetBool(settings.KeyTLSACMEStaging)
+
+	// Parse domains (comma-separated)
+	domains := strings.Split(domain, ",")
+	for i, d := range domains {
+		domains[i] = strings.TrimSpace(d)
+	}
+
+	// Create certificate store
+	certStore := sqlite.NewCertificateStore(a.DB)
+
+	// Create ACME provider
+	provider, err := adapterstls.NewACMEProvider(certStore, adapterstls.ACMEConfig{
+		Email:       email,
+		Staging:     staging,
+		Domains:     domains,
+		RenewalDays: 30,
+	})
+	if err != nil {
+		return fmt.Errorf("create ACME provider: %w", err)
+	}
+	a.acmeProvider = provider
+	a.acmeManager = provider.GetManager()
+
+	// Configure TLS with ACME
+	a.tlsConfig = &cryptotls.Config{
+		MinVersion:     minVersion,
+		GetCertificate: a.acmeManager.GetCertificate,
+		NextProtos:     []string{"h2", "http/1.1", "acme-tls/1"},
+	}
+
+	a.Logger.Info().
+		Strs("domains", domains).
+		Bool("staging", staging).
+		Msg("ACME TLS configured")
+
+	return nil
+}
+
+// initManualTLS initializes TLS with manually provided certificates.
+func (a *App) initManualTLS(s settings.Settings, minVersion uint16) error {
+	certPath := s.Get(settings.KeyTLSCertPath)
+	keyPath := s.Get(settings.KeyTLSKeyPath)
+
+	if certPath == "" || keyPath == "" {
+		return fmt.Errorf("TLS mode is 'manual' but cert_path or key_path not configured")
+	}
+
+	cert, err := cryptotls.LoadX509KeyPair(certPath, keyPath)
+	if err != nil {
+		return fmt.Errorf("load TLS certificate: %w", err)
+	}
+
+	a.tlsConfig = &cryptotls.Config{
+		MinVersion:   minVersion,
+		Certificates: []cryptotls.Certificate{cert},
+	}
+
+	a.Logger.Info().
+		Str("cert_path", certPath).
+		Str("key_path", keyPath).
+		Msg("manual TLS configured")
+
+	return nil
+}
+
 func (a *App) buildDependencies(s settings.Settings) (app.ProxyDeps, error) {
 	var deps app.ProxyDeps
 
@@ -688,15 +815,51 @@ func (a *App) Run() error {
 	}
 
 	// Start server in goroutine
-	errCh := make(chan error, 1)
-	go func() {
-		a.Logger.Info().
-			Str("addr", a.HTTPServer.Addr).
-			Msg("starting http server")
-		if err := a.HTTPServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errCh <- err
+	errCh := make(chan error, 2) // Buffer for both HTTP and HTTPS errors
+
+	if a.tlsEnabled && a.tlsConfig != nil {
+		// TLS is enabled - start HTTPS server
+		a.HTTPServer.TLSConfig = a.tlsConfig
+
+		// For ACME mode, we may need to start an HTTP server for challenges
+		// and/or for HTTP->HTTPS redirect
+		if a.tlsMode == "acme" {
+			if err := a.startACMEChallengeServer(errCh); err != nil {
+				return fmt.Errorf("start ACME challenge server: %w", err)
+			}
+		} else {
+			// Manual TLS mode - optionally start HTTP redirect server
+			s := a.Settings.Get()
+			if s.GetBool(settings.KeyTLSHTTPRedirect) {
+				if err := a.startHTTPRedirectServer(errCh); err != nil {
+					a.Logger.Warn().Err(err).Msg("failed to start HTTP redirect server")
+				}
+			}
 		}
-	}()
+
+		// Start HTTPS server
+		go func() {
+			a.Logger.Info().
+				Str("addr", a.HTTPServer.Addr).
+				Bool("tls", true).
+				Str("mode", a.tlsMode).
+				Msg("starting https server")
+			// ListenAndServeTLS with empty strings uses TLSConfig.Certificates or GetCertificate
+			if err := a.HTTPServer.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+				errCh <- err
+			}
+		}()
+	} else {
+		// Plain HTTP server
+		go func() {
+			a.Logger.Info().
+				Str("addr", a.HTTPServer.Addr).
+				Msg("starting http server")
+			if err := a.HTTPServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				errCh <- err
+			}
+		}()
+	}
 
 	// Wait for interrupt or error
 	quit := make(chan os.Signal, 1)
@@ -710,6 +873,81 @@ func (a *App) Run() error {
 	}
 
 	return a.Shutdown()
+}
+
+// startACMEChallengeServer starts an HTTP server for ACME HTTP-01 challenges.
+// It also handles HTTP->HTTPS redirects for non-challenge requests.
+func (a *App) startACMEChallengeServer(errCh chan error) error {
+	s := a.Settings.Get()
+	httpRedirect := s.GetBool(settings.KeyTLSHTTPRedirect)
+
+	// Create handler that serves ACME challenges and optionally redirects other traffic
+	handler := a.acmeManager.HTTPHandler(nil)
+
+	if httpRedirect {
+		// Wrap to redirect non-challenge requests to HTTPS
+		originalHandler := handler
+		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Let autocert handle ACME challenge paths
+			if strings.HasPrefix(r.URL.Path, "/.well-known/acme-challenge/") {
+				originalHandler.ServeHTTP(w, r)
+				return
+			}
+
+			// Redirect to HTTPS
+			target := "https://" + r.Host + r.URL.RequestURI()
+			http.Redirect(w, r, target, http.StatusMovedPermanently)
+		})
+	}
+
+	// Determine HTTP server address (port 80 for ACME)
+	host := s.GetOrDefault(settings.KeyServerHost, "0.0.0.0")
+	a.httpChallenge = &http.Server{
+		Addr:         host + ":80",
+		Handler:      handler,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 5 * time.Second,
+	}
+
+	go func() {
+		a.Logger.Info().
+			Str("addr", a.httpChallenge.Addr).
+			Bool("redirect", httpRedirect).
+			Msg("starting ACME HTTP challenge server")
+		if err := a.httpChallenge.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			errCh <- fmt.Errorf("ACME HTTP server: %w", err)
+		}
+	}()
+
+	return nil
+}
+
+// startHTTPRedirectServer starts an HTTP server that redirects all traffic to HTTPS.
+func (a *App) startHTTPRedirectServer(errCh chan error) error {
+	s := a.Settings.Get()
+	host := s.GetOrDefault(settings.KeyServerHost, "0.0.0.0")
+
+	a.httpChallenge = &http.Server{
+		Addr:         host + ":80",
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 5 * time.Second,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			target := "https://" + r.Host + r.URL.RequestURI()
+			http.Redirect(w, r, target, http.StatusMovedPermanently)
+		}),
+	}
+
+	go func() {
+		a.Logger.Info().
+			Str("addr", a.httpChallenge.Addr).
+			Msg("starting HTTP->HTTPS redirect server")
+		if err := a.httpChallenge.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			// Don't treat this as a fatal error, just log it
+			a.Logger.Warn().Err(err).Msg("HTTP redirect server error")
+		}
+	}()
+
+	return nil
 }
 
 // Shutdown gracefully stops the application.
@@ -734,7 +972,14 @@ func (a *App) Shutdown() error {
 		a.webhookService.StopRetryWorker()
 	}
 
-	// Shutdown HTTP server
+	// Shutdown HTTP challenge server (ACME or redirect)
+	if a.httpChallenge != nil {
+		if err := a.httpChallenge.Shutdown(ctx); err != nil {
+			a.Logger.Error().Err(err).Msg("http challenge server shutdown error")
+		}
+	}
+
+	// Shutdown HTTP/HTTPS server
 	if a.HTTPServer != nil {
 		if err := a.HTTPServer.Shutdown(ctx); err != nil {
 			a.Logger.Error().Err(err).Msg("http server shutdown error")

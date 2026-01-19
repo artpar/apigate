@@ -5,9 +5,13 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/artpar/apigate/pkg/jsonapi"
 	"github.com/artpar/apigate/ports"
 	"github.com/go-chi/chi/v5"
 )
+
+// JSON:API resource type for plans
+const TypePlan = "plans"
 
 // PlanResponse represents a plan in API responses.
 type PlanResponse struct {
@@ -73,19 +77,16 @@ func (h *Handler) ListPlans(w http.ResponseWriter, r *http.Request) {
 	planList, err := h.plans.List(ctx)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("failed to list plans")
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list plans")
+		jsonapi.WriteInternalError(w, "Failed to list plans")
 		return
 	}
 
-	plans := make([]PlanResponse, len(planList))
+	resources := make([]jsonapi.Resource, len(planList))
 	for i, p := range planList {
-		plans[i] = planToResponse(p)
+		resources[i] = planToResource(p)
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"plans": plans,
-		"total": len(plans),
-	})
+	jsonapi.WriteCollection(w, http.StatusOK, resources, nil)
 }
 
 // GetPlan returns a single plan.
@@ -105,11 +106,11 @@ func (h *Handler) GetPlan(w http.ResponseWriter, r *http.Request) {
 
 	plan, err := h.plans.Get(ctx, id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "Plan not found")
+		jsonapi.WriteNotFound(w, "plan")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, planToResponse(plan))
+	jsonapi.WriteResource(w, http.StatusOK, planToResource(plan))
 }
 
 // CreatePlan creates a new plan.
@@ -130,23 +131,23 @@ func (h *Handler) CreatePlan(w http.ResponseWriter, r *http.Request) {
 
 	var req CreatePlanRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		jsonapi.WriteBadRequest(w, "Invalid JSON body")
 		return
 	}
 
 	if req.ID == "" {
-		writeError(w, http.StatusBadRequest, "missing_id", "Plan ID is required")
+		jsonapi.WriteValidationError(w, "id", "Plan ID is required")
 		return
 	}
 
 	if req.Name == "" {
-		writeError(w, http.StatusBadRequest, "missing_name", "Plan name is required")
+		jsonapi.WriteValidationError(w, "name", "Plan name is required")
 		return
 	}
 
 	// Check if plan already exists
 	if _, err := h.plans.Get(ctx, req.ID); err == nil {
-		writeError(w, http.StatusConflict, "plan_exists", "Plan with this ID already exists")
+		jsonapi.WriteConflict(w, "Plan with this ID already exists")
 		return
 	}
 
@@ -184,12 +185,12 @@ func (h *Handler) CreatePlan(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.plans.Create(ctx, plan); err != nil {
 		h.logger.Error().Err(err).Msg("failed to create plan")
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create plan")
+		jsonapi.WriteInternalError(w, "Failed to create plan")
 		return
 	}
 
 	h.logger.Info().Str("plan_id", plan.ID).Msg("plan created via admin api")
-	writeJSON(w, http.StatusCreated, planToResponse(plan))
+	jsonapi.WriteCreated(w, planToResource(plan), "/admin/plans/"+plan.ID)
 }
 
 // UpdatePlan updates a plan.
@@ -211,13 +212,13 @@ func (h *Handler) UpdatePlan(w http.ResponseWriter, r *http.Request) {
 
 	plan, err := h.plans.Get(ctx, id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "Plan not found")
+		jsonapi.WriteNotFound(w, "plan")
 		return
 	}
 
 	var req UpdatePlanRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		jsonapi.WriteBadRequest(w, "Invalid JSON body")
 		return
 	}
 
@@ -271,12 +272,12 @@ func (h *Handler) UpdatePlan(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.plans.Update(ctx, plan); err != nil {
 		h.logger.Error().Err(err).Msg("failed to update plan")
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update plan")
+		jsonapi.WriteInternalError(w, "Failed to update plan")
 		return
 	}
 
 	h.logger.Info().Str("plan_id", plan.ID).Msg("plan updated via admin api")
-	writeJSON(w, http.StatusOK, planToResponse(plan))
+	jsonapi.WriteResource(w, http.StatusOK, planToResource(plan))
 }
 
 // DeletePlan deletes a plan.
@@ -296,7 +297,7 @@ func (h *Handler) DeletePlan(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	if _, err := h.plans.Get(ctx, id); err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "Plan not found")
+		jsonapi.WriteNotFound(w, "plan")
 		return
 	}
 
@@ -304,36 +305,36 @@ func (h *Handler) DeletePlan(w http.ResponseWriter, r *http.Request) {
 	users, _ := h.users.List(ctx, 1000, 0)
 	for _, u := range users {
 		if u.PlanID == id {
-			writeError(w, http.StatusConflict, "plan_in_use", "Cannot delete plan: users are assigned to it")
+			jsonapi.WriteConflict(w, "Cannot delete plan: users are assigned to it")
 			return
 		}
 	}
 
 	if err := h.plans.Delete(ctx, id); err != nil {
 		h.logger.Error().Err(err).Msg("failed to delete plan")
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete plan")
+		jsonapi.WriteInternalError(w, "Failed to delete plan")
 		return
 	}
 
 	h.logger.Info().Str("plan_id", id).Msg("plan deleted via admin api")
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	jsonapi.WriteNoContent(w)
 }
 
-func planToResponse(p ports.Plan) PlanResponse {
-	return PlanResponse{
-		ID:                 p.ID,
-		Name:               p.Name,
-		Description:        p.Description,
-		RateLimitPerMinute: p.RateLimitPerMinute,
-		RequestsPerMonth:   p.RequestsPerMonth,
-		PriceMonthly:       float64(p.PriceMonthly) / 100,
-		OveragePrice:       float64(p.OveragePrice) / 10000,
-		StripePriceID:      p.StripePriceID,
-		PaddlePriceID:      p.PaddlePriceID,
-		LemonVariantID:     p.LemonVariantID,
-		IsDefault:          p.IsDefault,
-		Enabled:            p.Enabled,
-		CreatedAt:          p.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:          p.UpdatedAt.Format(time.RFC3339),
-	}
+// planToResource converts a Plan to a JSON:API Resource.
+func planToResource(p ports.Plan) jsonapi.Resource {
+	return jsonapi.NewResource(TypePlan, p.ID).
+		Attr("name", p.Name).
+		Attr("description", p.Description).
+		Attr("rate_limit_per_minute", p.RateLimitPerMinute).
+		Attr("requests_per_month", p.RequestsPerMonth).
+		Attr("price_monthly", float64(p.PriceMonthly)/100).
+		Attr("overage_price", float64(p.OveragePrice)/10000).
+		Attr("stripe_price_id", p.StripePriceID).
+		Attr("paddle_price_id", p.PaddlePriceID).
+		Attr("lemon_variant_id", p.LemonVariantID).
+		Attr("is_default", p.IsDefault).
+		Attr("enabled", p.Enabled).
+		Attr("created_at", p.CreatedAt.Format(time.RFC3339)).
+		Attr("updated_at", p.UpdatedAt.Format(time.RFC3339)).
+		Build()
 }

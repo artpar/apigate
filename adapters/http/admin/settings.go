@@ -2,6 +2,8 @@ package admin
 
 import (
 	"net/http"
+
+	"github.com/artpar/apigate/pkg/jsonapi"
 )
 
 // SettingsResponse represents current settings.
@@ -126,7 +128,18 @@ func (h *Handler) GetSettings(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	writeJSON(w, http.StatusOK, response)
+	// Return as JSON:API meta response (settings aren't a typical resource)
+	jsonapi.WriteMeta(w, http.StatusOK, jsonapi.Meta{
+		"server":     response.Server,
+		"upstream":   response.Upstream,
+		"auth":       response.Auth,
+		"rate_limit": response.RateLimit,
+		"usage":      response.Usage,
+		"billing":    response.Billing,
+		"logging":    response.Logging,
+		"metrics":    response.Metrics,
+		"openapi":    response.OpenAPI,
+	})
 }
 
 // UpdateSettings updates settings.
@@ -143,6 +156,5 @@ func (h *Handler) GetSettings(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	// Settings are now managed via the database settings domain.
 	// Use the web UI settings page for configuration changes.
-	writeError(w, http.StatusNotImplemented, "not_implemented",
-		"Settings updates via API not yet available. Use the web UI settings page.")
+	jsonapi.WriteError(w, jsonapi.ErrNotImplemented("Settings updates via API"))
 }

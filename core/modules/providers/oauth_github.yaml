@@ -1,0 +1,133 @@
+# GitHub OAuth Provider Module
+# Implements the oauth capability for GitHub authentication
+module: oauth_github
+
+meta:
+  description: GitHub OAuth2 authentication provider
+  implements: [oauth]
+  icon: github
+  display_name: GitHub OAuth
+
+schema:
+  # Instance identification
+  name:           { type: string, required: true, unique: true, lookup: true, description: "Instance name (e.g., oauth_github_default)" }
+  description:    { type: string, description: "Description of this instance" }
+
+  # Configuration
+  enabled:        { type: bool, default: false, description: "Whether this OAuth provider is active" }
+  is_default:     { type: bool, default: false, description: "Whether this is the default GitHub OAuth provider" }
+
+  # GitHub OAuth Configuration
+  client_id:      { type: string, required: true, description: "GitHub OAuth App Client ID" }
+  client_secret:  { type: secret, required: true, description: "GitHub OAuth App Client Secret" }
+
+  # Scopes (space-separated)
+  scopes:         { type: string, default: "read:user user:email", description: "OAuth scopes to request" }
+
+  # Optional: GitHub Enterprise configuration
+  enterprise_host: { type: string, description: "GitHub Enterprise hostname (leave empty for github.com)" }
+
+  # Allow signup or login only
+  allow_signup:   { type: bool, default: true, description: "Allow new users to sign up via GitHub" }
+
+  # Optional: Restrict to organization members
+  required_org:   { type: string, description: "Require membership in this GitHub organization" }
+
+actions:
+  # Test connection verifies the client credentials
+  test_connection:
+    description: Verify GitHub OAuth configuration
+    output:
+      - { name: valid, type: bool }
+      - { name: provider_name, type: string }
+      - { name: error, type: string }
+
+  # Generate authorization URL
+  get_auth_url:
+    description: Generate GitHub OAuth authorization URL
+    input:
+      - { name: redirect_uri, type: string, required: true }
+      - { name: state, type: string, required: true }
+      - { name: code_challenge, type: string }
+    output:
+      - { name: url, type: string }
+
+  # Exchange code for tokens
+  exchange_code:
+    description: Exchange authorization code for GitHub tokens
+    input:
+      - { name: code, type: string, required: true }
+      - { name: redirect_uri, type: string, required: true }
+      - { name: code_verifier, type: string }
+    output:
+      - { name: access_token, type: string }
+      - { name: token_type, type: string }
+      - { name: scope, type: string }
+      - { name: error, type: string }
+
+  # Get user profile
+  get_user_profile:
+    description: Get user profile from GitHub
+    input:
+      - { name: access_token, type: string, required: true }
+    output:
+      - { name: provider_user_id, type: string }
+      - { name: login, type: string, description: "GitHub username" }
+      - { name: email, type: email }
+      - { name: email_verified, type: bool }
+      - { name: name, type: string }
+      - { name: avatar_url, type: string }
+      - { name: company, type: string }
+      - { name: blog, type: string }
+      - { name: location, type: string }
+      - { name: raw_data, type: map }
+      - { name: error, type: string }
+
+  # Get user's primary email (if email scope granted)
+  get_primary_email:
+    description: Get user's primary verified email from GitHub
+    input:
+      - { name: access_token, type: string, required: true }
+    output:
+      - { name: email, type: email }
+      - { name: verified, type: bool }
+      - { name: error, type: string }
+
+  # Check organization membership
+  check_org_membership:
+    description: Check if user is a member of required organization
+    input:
+      - { name: access_token, type: string, required: true }
+      - { name: org, type: string, required: true }
+    output:
+      - { name: is_member, type: bool }
+      - { name: error, type: string }
+
+  # Revoke token (GitHub doesn't support programmatic revocation easily)
+  revoke_token:
+    description: Note - GitHub tokens are revoked via GitHub settings
+    input:
+      - { name: token, type: string, required: true }
+    output:
+      - { name: revoked, type: bool }
+      - { name: error, type: string }
+
+channels:
+  cli:
+    serve:
+      enabled: true
+      command: oauth-github
+      commands:
+        - action: test_connection
+        - action: get_auth_url
+          flags:
+            - { param: redirect_uri, required: true }
+            - { param: state, required: true }
+
+# Implementation details (for code generation)
+implementation:
+  auth_url: "https://github.com/login/oauth/authorize"
+  token_url: "https://github.com/login/oauth/access_token"
+  userinfo_url: "https://api.github.com/user"
+  emails_url: "https://api.github.com/user/emails"
+  orgs_url: "https://api.github.com/user/orgs"

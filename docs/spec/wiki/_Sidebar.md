@@ -18,6 +18,12 @@
 
 ---
 
+### Team Features
+* [[Groups]]
+* [[Entitlements]]
+
+---
+
 ### Features
 * [[Rate-Limiting]]
 * [[Quotas]]
@@ -25,6 +31,17 @@
 * [[Transformations]]
 * [[Webhooks]]
 * [[Customer-Portal]]
+
+---
+
+### Authentication
+* [[OAuth]]
+* [[Certificates]]
+
+---
+
+### Integrations
+* [[Providers]]
 
 ---
 

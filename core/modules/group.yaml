@@ -1,0 +1,122 @@
+# Group module - manages user groups for shared API keys and billing
+module: group
+
+schema:
+  # Identity
+  name:              { type: string, required: true, description: "Human-readable group name" }
+  slug:              { type: string, required: true, unique: true, lookup: true, description: "URL-friendly identifier" }
+  description:       { type: string, default: "", description: "Optional group description" }
+
+  # Ownership
+  owner_id:          { type: ref, to: user, required: true, description: "User who owns this group" }
+
+  # Billing
+  plan_id:           { type: ref, to: plan, description: "Pricing plan for the group" }
+  billing_email:     { type: email, description: "Email for billing notifications" }
+  stripe_customer_id: { type: string, internal: true, description: "Stripe customer ID" }
+
+  # State
+  status:            { type: enum, values: [active, suspended], default: active, description: "Group status" }
+
+actions:
+  # List groups for a user (as owner or member)
+  list_by_user:
+    input:
+      - { name: user_id, type: ref, to: user, required: true }
+    description: List groups a user owns or is a member of
+
+  # List groups owned by a user
+  list_owned:
+    input:
+      - { name: owner_id, type: ref, to: user, required: true }
+    description: List groups owned by a user
+
+  # Suspend a group
+  suspend:
+    set: { status: suspended }
+    description: Suspend a group
+    confirm: true
+
+  # Activate a group
+  activate:
+    set: { status: active }
+    description: Activate a group
+
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /api/groups
+      endpoints:
+        - { action: list, method: GET, path: "/", auth: admin }
+        - { action: list_by_user, method: GET, path: "/user/{user_id}" }
+        - { action: list_owned, method: GET, path: "/owned/{owner_id}" }
+        - { action: get, method: GET, path: "/{id}" }
+        - { action: create, method: POST, path: "/" }
+        - { action: update, method: PATCH, path: "/{id}" }
+        - { action: delete, method: DELETE, path: "/{id}" }
+        - { action: suspend, method: POST, path: "/{id}/suspend", auth: admin }
+        - { action: activate, method: POST, path: "/{id}/activate", auth: admin }
+
+  cli:
+    serve:
+      enabled: true
+      command: groups
+      commands:
+        - action: list
+          columns: [id, name, slug, owner_id, status, plan_id, created_at]
+        - action: list_by_user
+          name: list-user
+          flags:
+            - { param: user_id, name: user, short: u, required: true }
+          columns: [id, name, slug, status, created_at]
+        - action: get
+          args:
+            - { name: id, required: true, description: "Group ID or slug" }
+        - action: create
+          flags:
+            - { param: name, required: true }
+            - { param: slug }
+            - { param: description }
+            - { param: owner_id, name: owner, short: o, required: true }
+            - { param: plan_id, name: plan }
+            - { param: billing_email }
+        - action: update
+          args:
+            - { name: id, required: true }
+          flags:
+            - { param: name }
+            - { param: description }
+            - { param: billing_email }
+        - action: delete
+          args:
+            - { name: id, required: true }
+          confirm: "Are you sure you want to delete this group? All members will lose access."
+        - action: suspend
+          args:
+            - { name: id, required: true }
+        - action: activate
+          args:
+            - { name: id, required: true }
+
+hooks:
+  # Generate slug from name if not provided
+  before_create:
+    - call: generate_slug_if_empty
+
+  # After group creation, add owner as a member
+  after_create:
+    - emit: group.created
+    - call: add_owner_as_member
+
+  after_update:
+    - emit: group.updated
+
+  after_delete:
+    - emit: group.deleted
+
+meta:
+  description: User groups for shared API keys and billing
+  icon: users
+  display_name: Groups
+  plural: Groups

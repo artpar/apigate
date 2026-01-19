@@ -56,13 +56,18 @@ Example: ak_a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef12345678
 |----------|------|-------------|
 | `id` | string | Unique identifier |
 | `name` | string | Human-readable name |
-| `prefix` | string | First 12 chars for identification |
+| `prefix` | string | First chars for identification (immutable) |
+| `hash` | string | Bcrypt hash of key (internal, never exposed) |
 | `user_id` | string | Owner user |
-| `scopes` | []string | Allowed endpoints/operations |
+| `group_id` | string | Owner group (for team keys) |
+| `created_by` | string | User who created the key |
+| `scopes` | JSON | Allowed endpoints/operations |
 | `expires_at` | timestamp | Expiration time (optional) |
-| `last_used_at` | timestamp | Last usage time |
-| `revoked_at` | timestamp | Revocation time |
+| `last_used` | timestamp | Last usage time (internal) |
+| `revoked_at` | timestamp | Revocation time (internal) |
 | `created_at` | timestamp | Creation time |
+
+> **Note**: Keys can belong to either a user OR a group, enabling team-based API access. See [[Groups]].
 
 ---
 

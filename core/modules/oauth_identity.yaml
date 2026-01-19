@@ -1,0 +1,110 @@
+# OAuth Identity module - links OAuth providers to users
+module: oauth_identity
+
+schema:
+  # References
+  user_id:          { type: ref, to: user, required: true, description: "The linked user" }
+
+  # Provider identification
+  provider:         { type: string, required: true, lookup: true, description: "Provider name (google, github, oidc)" }
+  provider_user_id: { type: string, required: true, description: "User ID from the provider" }
+
+  # Profile data from provider
+  email:            { type: email, description: "Email from provider" }
+  name:             { type: string, description: "Display name from provider" }
+  avatar_url:       { type: string, description: "Avatar URL from provider" }
+
+  # Tokens (encrypted)
+  access_token:     { type: secret, internal: true, description: "OAuth access token" }
+  refresh_token:    { type: secret, internal: true, description: "OAuth refresh token" }
+  token_expires_at: { type: timestamp, internal: true, description: "When the access token expires" }
+
+  # Raw profile data
+  raw_data:         { type: json, internal: true, description: "Full profile data from provider" }
+
+constraints:
+  - unique: [provider, provider_user_id]  # One identity per provider user
+
+actions:
+  # List identities for a user
+  list_by_user:
+    input:
+      - { name: user_id, type: ref, to: user, required: true }
+    description: List all OAuth identities for a user
+
+  # Find by provider and provider user ID
+  find_by_provider:
+    input:
+      - { name: provider, type: string, required: true }
+      - { name: provider_user_id, type: string, required: true }
+    description: Find OAuth identity by provider credentials
+
+  # Find by provider and email (for auto-linking)
+  find_by_email:
+    input:
+      - { name: provider, type: string, required: true }
+      - { name: email, type: email, required: true }
+    description: Find OAuth identity by provider and email
+
+  # Unlink provider from user
+  unlink:
+    description: Unlink an OAuth provider from user
+    confirm: true
+
+  # Update tokens
+  update_tokens:
+    input:
+      - { name: access_token, type: secret, required: true }
+      - { name: refresh_token, type: secret }
+      - { name: token_expires_at, type: timestamp }
+    set:
+      access_token: "${access_token}"
+      refresh_token: "${refresh_token}"
+      token_expires_at: "${token_expires_at}"
+    description: Update OAuth tokens after refresh
+    internal: true
+
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /api/oauth/identities
+      endpoints:
+        - { action: list, method: GET, path: "/", auth: admin }
+        - { action: list_by_user, method: GET, path: "/user/{user_id}" }
+        - { action: get, method: GET, path: "/{id}" }
+        - { action: delete, method: DELETE, path: "/{id}" }
+
+  cli:
+    serve:
+      enabled: true
+      command: oauth-identities
+      commands:
+        - action: list
+          columns: [id, user_id, provider, provider_user_id, email, name, created_at]
+        - action: list_by_user
+          name: list-user
+          flags:
+            - { param: user_id, name: user, short: u, required: true }
+          columns: [id, provider, provider_user_id, email, name, created_at]
+        - action: get
+          args:
+            - { name: id, required: true }
+        - action: delete
+          name: unlink
+          args:
+            - { name: id, required: true }
+          confirm: "Are you sure you want to unlink this OAuth provider?"
+
+hooks:
+  after_create:
+    - emit: oauth_identity.linked
+
+  after_delete:
+    - emit: oauth_identity.unlinked
+
+meta:
+  description: OAuth provider identities linked to users
+  icon: link
+  display_name: OAuth Identities
+  plural: OAuth Identities

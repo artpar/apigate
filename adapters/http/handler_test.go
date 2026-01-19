@@ -81,13 +81,15 @@ func TestProxyHandler_MissingAPIKey(t *testing.T) {
 		t.Errorf("status = %d, want 401", resp.StatusCode)
 	}
 
-	var body map[string]interface{}
+	var body map[string]any
 	json.NewDecoder(resp.Body).Decode(&body)
 
-	errObj, ok := body["error"].(map[string]interface{})
-	if !ok {
-		t.Fatal("expected error object in response")
+	// JSON:API error format: {"errors": [{"code": "..."}]}
+	errors, ok := body["errors"].([]any)
+	if !ok || len(errors) == 0 {
+		t.Fatal("expected errors array in response")
 	}
+	errObj, _ := errors[0].(map[string]any)
 	if errObj["code"] != "missing_api_key" {
 		t.Errorf("code = %s, want missing_api_key", errObj["code"])
 	}

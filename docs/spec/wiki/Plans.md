@@ -36,19 +36,22 @@ Plans are the foundation of API monetization. Each plan specifies:
 | Property | Type | Description |
 |----------|------|-------------|
 | `id` | string | Unique identifier |
-| `name` | string | Display name (required) |
+| `name` | string | Display name (required, unique) |
 | `description` | string | Plan description |
-| `price_cents` | int | Monthly price in cents |
-| `requests_per_month` | int | Monthly quota (0 = unlimited) |
-| `rate_limit_per_minute` | int | Requests per minute |
-| `rate_limit_burst` | int | Burst allowance |
-| `quota_grace_percent` | int | Grace percentage before hard block |
-| `quota_enforcement` | enum | hard, soft, warn |
-| `features` | []string | Enabled feature flags |
-| `metadata` | object | Custom key-value data |
-| `stripe_price_id` | string | Stripe integration |
-| `paddle_price_id` | string | Paddle integration |
-| `enabled` | bool | Plan availability |
+| `price_monthly` | int | Monthly price in cents |
+| `overage_price` | int | Price per overage unit in cents |
+| `requests_per_month` | int | Monthly quota (0 = unlimited, default: 1000) |
+| `rate_limit_per_minute` | int | Requests per minute (default: 60) |
+| `trial_days` | int | Free trial period in days (default: 0) |
+| `stripe_price_id` | string | Stripe price ID for billing |
+| `paddle_price_id` | string | Paddle price ID for billing |
+| `lemon_variant_id` | string | LemonSqueezy variant ID |
+| `is_default` | bool | Default plan for new users |
+| `enabled` | bool | Plan available for selection |
+| `created_at` | timestamp | Creation time |
+| `updated_at` | timestamp | Last update time |
+
+> **Note**: Feature flags are managed separately via [[Entitlements]].
 
 ---
 
@@ -110,28 +113,20 @@ curl -X POST http://localhost:8080/admin/plans \
 
 ## Quota Settings
 
-### Quota Enforcement Modes
+When a user exceeds their monthly quota (`requests_per_month`), APIGate returns HTTP 429.
 
-| Mode | Behavior |
-|------|----------|
-| `hard` | Block requests when quota exceeded |
-| `soft` | Allow requests but flag as over-quota |
-| `warn` | Allow requests, send warning notifications |
+### Overage Billing
 
-### Grace Percentage
-
-Allow temporary overage before hard blocking:
+If `overage_price` is set, users can continue past their quota and pay for extra usage:
 
 ```bash
 apigate plans create \
   --name "Pro" \
   --monthly-quota 100000 \
-  --quota-grace-percent 10 \
-  --quota-enforcement hard
+  --overage-price 10   # $0.10 per 1000 extra requests
 ```
 
-- At 100,000 requests: Warning sent
-- At 110,000 requests: Hard block (10% grace exceeded)
+Overage charges are reported to the payment provider.
 
 ---
 
@@ -140,22 +135,23 @@ apigate plans create \
 ### Per-Minute Rate Limit
 
 ```bash
-# 60 requests per minute
-apigate plans create --rate-limit 60
+# 60 requests per minute (default)
+apigate plans create --name "Free" --rate-limit 60
 
-# With burst allowance
-apigate plans create \
-  --rate-limit 60 \
-  --rate-limit-burst 100
+# Higher limit for paid plans
+apigate plans create --name "Pro" --rate-limit 600
 ```
 
-### Token Bucket Algorithm
+### Rate Limiting Behavior
 
-APIGate uses token bucket rate limiting:
-- Bucket fills at `rate_limit / 60` tokens per second
-- Maximum bucket size = `rate_limit_burst`
-- Each request consumes 1 token
-- Empty bucket = 429 Too Many Requests
+When the rate limit is exceeded, APIGate returns HTTP 429 with headers:
+
+```
+X-RateLimit-Limit: 60
+X-RateLimit-Remaining: 0
+X-RateLimit-Reset: 1705660800
+Retry-After: 45
+```
 
 ---
 
@@ -196,23 +192,22 @@ apigate plans create \
 
 ---
 
-## Feature Flags
+## Entitlements (Feature Flags)
 
-Control access to specific features per plan:
+Control access to specific features per plan using the Entitlements system:
+
+1. Create entitlements (e.g., "webhooks", "analytics")
+2. Assign entitlements to plans via Plan-Entitlements
+3. APIGate injects entitlement headers to upstream
 
 ```bash
-apigate plans create \
-  --name "Enterprise" \
-  --features "webhooks,analytics,priority_support,custom_domains"
+# Entitlements are passed to upstream as headers:
+X-Entitlement-Webhooks: true
+X-Entitlement-Analytics: true
+X-Entitlement-Rate-Limit: 600
 ```
 
-Check features in your upstream:
-
-```go
-// Request includes X-Plan-Features header
-features := r.Header.Get("X-Plan-Features")
-// "webhooks,analytics,priority_support,custom_domains"
-```
+See [[Entitlements]] for detailed documentation.
 
 ---
 
@@ -288,7 +283,7 @@ apigate plans delete <id>
 
 ## Default Plans
 
-Create a default plan for new users:
+Set a default plan for new users with `is_default`:
 
 ```bash
 apigate plans create \
@@ -296,10 +291,21 @@ apigate plans create \
   --price 0 \
   --rate-limit 60 \
   --monthly-quota 1000 \
-  --default true
+  --is-default true
 ```
 
 New users without explicit plan assignment get the default plan.
+
+### Trial Days
+
+Offer a free trial period before billing starts:
+
+```bash
+apigate plans create \
+  --name "Pro" \
+  --price 4900 \
+  --trial-days 14  # 14-day free trial
+```
 
 ---
 

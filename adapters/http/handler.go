@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	_ "github.com/artpar/apigate/docs/swagger" // swagger docs
 	"github.com/artpar/apigate/domain/proxy"
 	"github.com/artpar/apigate/domain/streaming"
+	"github.com/artpar/apigate/pkg/jsonapi"
 	"github.com/artpar/apigate/ports"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -454,15 +456,13 @@ func extractIP(r *http.Request) string {
 	return addr
 }
 
-// writeError writes a JSON error response.
+// writeError writes a JSON:API error response.
 func writeError(w http.ResponseWriter, err *proxy.ErrorResponse) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(err.Status)
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"error": map[string]interface{}{
-			"code":    err.Code,
-			"message": err.Message,
-		},
+	jsonapi.WriteError(w, jsonapi.Error{
+		Status: strconv.Itoa(err.Status),
+		Code:   err.Code,
+		Title:  err.Code,
+		Detail: err.Message,
 	})
 }
 
