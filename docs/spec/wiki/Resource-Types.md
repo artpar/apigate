@@ -240,6 +240,8 @@ Represents URL routing rules.
 |-----------|------|-------------|
 | `name` | string | Route name |
 | `description` | string | Route description |
+| `host_pattern` | string | Host/domain pattern to match |
+| `host_match_type` | enum | exact, wildcard, regex, or empty (any host) |
 | `path_pattern` | string | URL pattern to match |
 | `match_type` | enum | exact, prefix, regex |
 | `methods` | []string | HTTP methods (empty = all) |
@@ -265,6 +267,8 @@ Represents URL routing rules.
     "id": "rte_abc123",
     "attributes": {
       "name": "users-api",
+      "host_pattern": "api.example.com",
+      "host_match_type": "exact",
       "path_pattern": "/api/v1/users/*",
       "match_type": "prefix",
       "methods": ["GET", "POST", "PUT", "DELETE"],
