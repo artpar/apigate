@@ -12,6 +12,7 @@ schema:
   prefix:     { type: string, lookup: true, immutable: true, description: "Visible key prefix for identification (e.g., ak_xxxxx)" }
   name:       { type: string, default: "", description: "Human-readable label for this key" }
   scopes:     { type: json, description: "Array of permission scopes granted to this key" }
+  quota_bypass: { type: bool, default: false, description: "Service account: bypass quota limits for admin/infrastructure operations" }
 
   # Lifecycle (internal - managed by system)
   expires_at: { type: timestamp, description: "When this key expires and becomes invalid" }
@@ -84,6 +85,7 @@ channels:
             - { param: name, short: n }
             - { param: scopes, description: "Comma-separated list of scopes" }
             - { param: expires_at, name: expires, description: "Expiration time (RFC3339)" }
+            - { param: quota_bypass, name: quota-bypass, description: "Service account: bypass quota limits" }
         - action: delete
           args:
             - { name: id, required: true }

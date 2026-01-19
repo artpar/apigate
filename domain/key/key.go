@@ -13,16 +13,17 @@ import (
 
 // Key represents an API key (immutable value type).
 type Key struct {
-	ID        string
-	UserID    string
-	Hash      []byte     // bcrypt hash of the full key
-	Prefix    string     // First 12 chars for lookup
-	Name      string
-	Scopes    []string   // Optional: restrict to specific endpoints
-	ExpiresAt *time.Time // nil = never expires
-	RevokedAt *time.Time // nil = not revoked
-	CreatedAt time.Time
-	LastUsed  *time.Time
+	ID          string
+	UserID      string
+	Hash        []byte     // bcrypt hash of the full key
+	Prefix      string     // First 12 chars for lookup
+	Name        string
+	Scopes      []string   // Optional: restrict to specific endpoints
+	QuotaBypass bool       // Service account: bypass quota limits
+	ExpiresAt   *time.Time // nil = never expires
+	RevokedAt   *time.Time // nil = not revoked
+	CreatedAt   time.Time
+	LastUsed    *time.Time
 }
 
 // ValidationResult represents the outcome of key validation (value type).

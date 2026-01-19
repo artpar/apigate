@@ -24,7 +24,7 @@ func NewKeyStore(db *DB) *KeyStore {
 // Get retrieves keys matching a prefix.
 func (s *KeyStore) Get(ctx context.Context, prefix string) ([]key.Key, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, user_id, hash, prefix, name, scopes, expires_at, revoked_at, created_at, last_used
+		SELECT id, user_id, hash, prefix, name, scopes, quota_bypass, expires_at, revoked_at, created_at, last_used
 		FROM api_keys
 		WHERE prefix = ?
 	`, prefix)
@@ -52,9 +52,9 @@ func (s *KeyStore) Create(ctx context.Context, k key.Key) error {
 	}
 
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO api_keys (id, user_id, hash, prefix, name, scopes, expires_at, revoked_at, created_at, last_used)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, k.ID, k.UserID, k.Hash, k.Prefix, k.Name, string(scopes),
+		INSERT INTO api_keys (id, user_id, hash, prefix, name, scopes, quota_bypass, expires_at, revoked_at, created_at, last_used)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, k.ID, k.UserID, k.Hash, k.Prefix, k.Name, string(scopes), k.QuotaBypass,
 		nullTime(k.ExpiresAt), nullTime(k.RevokedAt), k.CreatedAt, nullTime(k.LastUsed))
 	return err
 }
@@ -80,7 +80,7 @@ func (s *KeyStore) Revoke(ctx context.Context, id string, at time.Time) error {
 // List returns all keys.
 func (s *KeyStore) List(ctx context.Context) ([]key.Key, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, user_id, hash, prefix, name, scopes, expires_at, revoked_at, created_at, last_used
+		SELECT id, user_id, hash, prefix, name, scopes, quota_bypass, expires_at, revoked_at, created_at, last_used
 		FROM api_keys
 		ORDER BY created_at DESC
 	`)
@@ -103,7 +103,7 @@ func (s *KeyStore) List(ctx context.Context) ([]key.Key, error) {
 // ListByUser returns all keys for a user.
 func (s *KeyStore) ListByUser(ctx context.Context, userID string) ([]key.Key, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, user_id, hash, prefix, name, scopes, expires_at, revoked_at, created_at, last_used
+		SELECT id, user_id, hash, prefix, name, scopes, quota_bypass, expires_at, revoked_at, created_at, last_used
 		FROM api_keys
 		WHERE user_id = ?
 		ORDER BY created_at DESC
@@ -141,9 +141,9 @@ func (s *KeyStore) Update(ctx context.Context, k key.Key) error {
 
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE api_keys
-		SET name = ?, scopes = ?, expires_at = ?, revoked_at = ?, last_used = ?
+		SET name = ?, scopes = ?, quota_bypass = ?, expires_at = ?, revoked_at = ?, last_used = ?
 		WHERE id = ?
-	`, k.Name, string(scopes), nullTime(k.ExpiresAt), nullTime(k.RevokedAt), nullTime(k.LastUsed), k.ID)
+	`, k.Name, string(scopes), k.QuotaBypass, nullTime(k.ExpiresAt), nullTime(k.RevokedAt), nullTime(k.LastUsed), k.ID)
 	if err != nil {
 		return err
 	}
@@ -160,7 +160,7 @@ func (s *KeyStore) Update(ctx context.Context, k key.Key) error {
 // GetByID retrieves a key by ID.
 func (s *KeyStore) GetByID(ctx context.Context, id string) (key.Key, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, user_id, hash, prefix, name, scopes, expires_at, revoked_at, created_at, last_used
+		SELECT id, user_id, hash, prefix, name, scopes, quota_bypass, expires_at, revoked_at, created_at, last_used
 		FROM api_keys
 		WHERE id = ?
 	`, id)
@@ -186,10 +186,11 @@ func (s *KeyStore) Delete(ctx context.Context, id string) error {
 func scanKey(rows *sql.Rows) (key.Key, error) {
 	var k key.Key
 	var scopes sql.NullString
+	var quotaBypass sql.NullBool
 	var expiresAt, revokedAt, lastUsed sql.NullTime
 
 	err := rows.Scan(
-		&k.ID, &k.UserID, &k.Hash, &k.Prefix, &k.Name, &scopes,
+		&k.ID, &k.UserID, &k.Hash, &k.Prefix, &k.Name, &scopes, &quotaBypass,
 		&expiresAt, &revokedAt, &k.CreatedAt, &lastUsed,
 	)
 	if err != nil {
@@ -202,6 +203,9 @@ func scanKey(rows *sql.Rows) (key.Key, error) {
 		}
 	}
 
+	if quotaBypass.Valid {
+		k.QuotaBypass = quotaBypass.Bool
+	}
 	if expiresAt.Valid {
 		k.ExpiresAt = &expiresAt.Time
 	}
@@ -218,10 +222,11 @@ func scanKey(rows *sql.Rows) (key.Key, error) {
 func scanKeyRow(row *sql.Row) (key.Key, error) {
 	var k key.Key
 	var scopes sql.NullString
+	var quotaBypass sql.NullBool
 	var expiresAt, revokedAt, lastUsed sql.NullTime
 
 	err := row.Scan(
-		&k.ID, &k.UserID, &k.Hash, &k.Prefix, &k.Name, &scopes,
+		&k.ID, &k.UserID, &k.Hash, &k.Prefix, &k.Name, &scopes, &quotaBypass,
 		&expiresAt, &revokedAt, &k.CreatedAt, &lastUsed,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -237,6 +242,9 @@ func scanKeyRow(row *sql.Row) (key.Key, error) {
 		}
 	}
 
+	if quotaBypass.Valid {
+		k.QuotaBypass = quotaBypass.Bool
+	}
 	if expiresAt.Valid {
 		k.ExpiresAt = &expiresAt.Time
 	}

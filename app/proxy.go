@@ -225,9 +225,10 @@ func (s *ProxyService) Handle(ctx context.Context, req proxy.Request) HandleResu
 	}
 
 	// 8.5. Check quota (PURE + I/O for state)
+	// Service accounts (quota_bypass=true) skip quota checks entirely
 	periodStart, periodEnd := quota.PeriodBounds(now)
 	var quotaResult quota.CheckResult
-	if s.quota != nil && userPlan.RequestsPerMonth >= 0 { // Not unlimited
+	if s.quota != nil && userPlan.RequestsPerMonth >= 0 && !matchedKey.QuotaBypass { // Not unlimited and not service account
 		// Build quota config from plan
 		enforceMode := quota.EnforceHard
 		switch userPlan.QuotaEnforceMode {
