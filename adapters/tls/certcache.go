@@ -73,11 +73,18 @@ func (c *DBCertCache) Get(ctx context.Context, key string) ([]byte, error) {
 
 // Put stores certificate data in cache.
 // Implements autocert.Cache interface.
+// Note: autocert uses this cache for both ACME account keys and TLS certificates.
+// Account keys are single PEM blocks (just private key), while certificates have multiple blocks.
 func (c *DBCertCache) Put(ctx context.Context, key string, data []byte) error {
-	// Parse the certificate data
+	// Try to parse as certificate data (cert + key)
 	certPEM, keyPEM, chainPEM, err := splitCertData(data)
 	if err != nil {
-		return fmt.Errorf("parse certificate data: %w", err)
+		// Not a certificate (probably an ACME account key) - store in memory cache only
+		// These don't need to be persisted to the database as certificates
+		c.mu.Lock()
+		c.cache[key] = data
+		c.mu.Unlock()
+		return nil
 	}
 
 	// Parse certificate to extract metadata
