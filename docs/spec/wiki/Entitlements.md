@@ -163,15 +163,18 @@ Link entitlements to plans with specific values:
 ```bash
 # CLI
 apigate plan-entitlements create \
-  --plan "pro" \
-  --entitlement "webhooks" \
+  --plan-id "pro-plan-id" \
+  --entitlement-id "webhooks-entitlement-id" \
   --value "true"
 
 # Different value for enterprise
 apigate plan-entitlements create \
-  --plan "enterprise" \
-  --entitlement "max_api_keys" \
+  --plan-id "enterprise-plan-id" \
+  --entitlement-id "max-api-keys-entitlement-id" \
   --value "100"
+
+# List entitlements for a plan
+apigate plan-entitlements list-by-plan <plan-id>
 ```
 
 ### Plan-Entitlement Properties
@@ -188,26 +191,28 @@ apigate plan-entitlements create \
 
 ```bash
 # Create entitlements
-apigate entitlements create --name "webhooks" --value-type boolean --default "false"
-apigate entitlements create --name "analytics" --value-type boolean --default "false"
-apigate entitlements create --name "max_api_keys" --value-type number --default "3"
-apigate entitlements create --name "support_tier" --value-type string --default "community"
+apigate entitlements create --name "webhooks" --value-type boolean --default-value "false"
+apigate entitlements create --name "analytics" --value-type boolean --default-value "false"
+apigate entitlements create --name "max_api_keys" --value-type number --default-value "3"
+apigate entitlements create --name "support_tier" --value-type string --default-value "community"
 
 # Free plan - minimal features
 # (uses defaults: no webhooks, no analytics, 3 keys, community support)
 
-# Pro plan - more features
-apigate plan-entitlements create --plan "pro" --entitlement "webhooks" --value "true"
-apigate plan-entitlements create --plan "pro" --entitlement "analytics" --value "true"
-apigate plan-entitlements create --plan "pro" --entitlement "max_api_keys" --value "10"
-apigate plan-entitlements create --plan "pro" --entitlement "support_tier" --value "email"
+# Pro plan - more features (use IDs from entitlements list)
+apigate plan-entitlements create --plan-id <pro-plan-id> --entitlement-id <webhooks-id> --value "true"
+apigate plan-entitlements create --plan-id <pro-plan-id> --entitlement-id <analytics-id> --value "true"
+apigate plan-entitlements create --plan-id <pro-plan-id> --entitlement-id <max-api-keys-id> --value "10"
+apigate plan-entitlements create --plan-id <pro-plan-id> --entitlement-id <support-tier-id> --value "email"
 
 # Enterprise plan - all features
-apigate plan-entitlements create --plan "enterprise" --entitlement "webhooks" --value "true"
-apigate plan-entitlements create --plan "enterprise" --entitlement "analytics" --value "true"
-apigate plan-entitlements create --plan "enterprise" --entitlement "max_api_keys" --value "unlimited"
-apigate plan-entitlements create --plan "enterprise" --entitlement "support_tier" --value "priority"
+apigate plan-entitlements create --plan-id <enterprise-plan-id> --entitlement-id <webhooks-id> --value "true"
+apigate plan-entitlements create --plan-id <enterprise-plan-id> --entitlement-id <analytics-id> --value "true"
+apigate plan-entitlements create --plan-id <enterprise-plan-id> --entitlement-id <max-api-keys-id> --value "unlimited"
+apigate plan-entitlements create --plan-id <enterprise-plan-id> --entitlement-id <support-tier-id> --value "priority"
 ```
+
+> **Note**: Use `apigate entitlements list` to get entitlement IDs and `apigate plans list` to get plan IDs.
 
 ---
 

@@ -164,16 +164,19 @@ curl -X POST http://localhost:8080/admin/groups \
 
 ## Managing Members
 
+Members are managed via the `group-members` CLI command.
+
 ### Add Member
 
 ```bash
 # CLI
-apigate groups add-member <group-id> \
+apigate group-members create \
+  --group "group-id-here" \
   --user "user-id-here" \
-  --role "member"
+  --role member
 
 # API
-curl -X POST http://localhost:8080/admin/groups/<id>/members \
+curl -X POST http://localhost:8080/api/groups/<group-id>/members \
   -H "Content-Type: application/json" \
   -d '{
     "user_id": "user-id-here",
@@ -185,12 +188,10 @@ curl -X POST http://localhost:8080/admin/groups/<id>/members \
 
 ```bash
 # CLI
-apigate groups update-member <group-id> \
-  --user "user-id-here" \
-  --role "admin"
+apigate group-members change_role <member-id> --role admin
 
 # API
-curl -X POST http://localhost:8080/admin/groups/<id>/members/<user-id>/role \
+curl -X PATCH http://localhost:8080/api/groups/<group-id>/members/<member-id>/role \
   -H "Content-Type: application/json" \
   -d '{"role": "admin"}'
 ```
@@ -199,28 +200,40 @@ curl -X POST http://localhost:8080/admin/groups/<id>/members/<user-id>/role \
 
 ```bash
 # CLI
-apigate groups remove-member <group-id> --user "user-id-here"
+apigate group-members delete <member-id>
 
 # API
-curl -X DELETE http://localhost:8080/admin/groups/<id>/members/<user-id>
+curl -X DELETE http://localhost:8080/api/groups/<group-id>/members/<member-id>
+```
+
+### List Group Members
+
+```bash
+# List members of a group
+apigate group-members list --group <group-id>
+
+# List groups a user belongs to
+apigate group-members list-user --user <user-id>
 ```
 
 ---
 
 ## Group Invites
 
-Invite users to join a group via email:
+Invite users to join a group via email. Invites are managed via the `group-invites` CLI command.
 
 ### Create Invite
 
 ```bash
 # CLI
-apigate groups invite <group-id> \
+apigate group-invites create \
+  --group "group-id-here" \
   --email "newmember@example.com" \
-  --role "member"
+  --role member \
+  --inviter "admin-user-id"
 
 # API
-curl -X POST http://localhost:8080/admin/groups/<id>/invites \
+curl -X POST http://localhost:8080/api/groups/<group-id>/invites \
   -H "Content-Type: application/json" \
   -d '{
     "email": "newmember@example.com",
@@ -245,18 +258,24 @@ curl -X POST http://localhost:8080/admin/groups/<id>/invites \
 
 1. Admin creates invite with email and role
 2. Invite email sent with unique link
-3. User clicks link: `/groups/invite/<token>`
+3. User clicks link to accept
 4. If logged in: Immediately added to group
 5. If not logged in: Redirected to login, then added
+
+### List Invites
+
+```bash
+apigate group-invites list --group <group-id>
+```
 
 ### Revoke Invite
 
 ```bash
 # CLI
-apigate groups revoke-invite <invite-id>
+apigate group-invites revoke <invite-id>
 
 # API
-curl -X DELETE http://localhost:8080/admin/groups/<group-id>/invites/<invite-id>
+curl -X DELETE http://localhost:8080/api/groups/<group-id>/invites/<invite-id>
 ```
 
 ---
@@ -306,15 +325,9 @@ apigate groups update <id> --plan "enterprise"
 3. Invoices sent to billing email
 4. Usage quota shared across all members
 
-### Usage Tracking
+### View Group Usage
 
-```bash
-# Get group usage
-apigate groups usage <id>
-
-# API
-curl http://localhost:8080/admin/groups/<id>/usage
-```
+Group usage can be viewed in the Admin UI under **Groups** > **[Group Name]** > **Usage**.
 
 ---
 
