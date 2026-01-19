@@ -3,6 +3,7 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"strings"
@@ -130,7 +131,16 @@ func (h *PortalHandler) Router() chi.Router {
 	// Landing page (public, redirects to dashboard if logged in)
 	r.Get("/", h.LandingPage)
 
-	// Public routes (no auth required)
+	// Public JSON API routes (no auth required)
+	// These are for JavaScript/AJAX clients that need JSON responses
+	r.Route("/api", func(r chi.Router) {
+		r.Post("/register", h.APIRegister)
+		r.Post("/login", h.APILogin)
+		r.Post("/forgot-password", h.APIForgotPassword)
+		r.Post("/reset-password", h.APIResetPassword)
+	})
+
+	// Public form routes (no auth required)
 	r.Get("/signup", h.SignupPage)
 	r.Post("/signup", h.SignupSubmit)
 	r.Get("/login", h.PortalLoginPage)
@@ -1642,4 +1652,377 @@ func (h *PortalHandler) renderError(w http.ResponseWriter, status int, message s
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
 	w.Write([]byte(h.renderErrorPage(message)))
+}
+
+// -----------------------------------------------------------------------------
+// JSON API Endpoints (Public - No API Key Required)
+// These endpoints are for JavaScript/AJAX clients that need JSON responses.
+// -----------------------------------------------------------------------------
+
+// APIRegister handles user registration via JSON API.
+// POST /portal/api/register
+func (h *PortalHandler) APIRegister(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Parse JSON body
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+		Name     string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeJSONError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		return
+	}
+
+	// Validate
+	signupReq := domainAuth.SignupRequest{
+		Email:    req.Email,
+		Password: req.Password,
+		Name:     req.Name,
+	}
+	result := domainAuth.ValidateSignup(signupReq)
+	if !result.Valid {
+		h.writeJSONValidationErrors(w, result.Errors)
+		return
+	}
+
+	// Check if email already exists
+	if _, err := h.users.GetByEmail(ctx, req.Email); err == nil {
+		h.writeJSONError(w, http.StatusConflict, "email_exists", "Email already registered")
+		return
+	}
+
+	// Hash password
+	passwordHash, err := h.hasher.Hash(req.Password)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to hash password")
+		h.writeJSONError(w, http.StatusInternalServerError, "server_error", "Failed to create account")
+		return
+	}
+
+	// Check if email verification is required
+	requireVerification := false
+	if h.settings != nil {
+		allSettings, err := h.settings.GetAll(ctx)
+		if err == nil {
+			requireVerification = allSettings.GetBool(settings.KeyAuthRequireEmailVerification)
+		}
+	}
+
+	// Create user
+	userID := h.idGen.New()
+	userStatus := "active"
+	if requireVerification {
+		userStatus = "pending"
+	}
+
+	// Find default plan for new users
+	defaultPlanID := "free"
+	if plans, err := h.plans.List(ctx); err == nil {
+		for _, p := range plans {
+			if p.IsDefault {
+				defaultPlanID = p.ID
+				break
+			}
+		}
+	}
+
+	user := ports.User{
+		ID:           userID,
+		Email:        req.Email,
+		PasswordHash: passwordHash,
+		Name:         req.Name,
+		PlanID:       defaultPlanID,
+		Status:       userStatus,
+		CreatedAt:    time.Now().UTC(),
+		UpdatedAt:    time.Now().UTC(),
+	}
+
+	if err := h.users.Create(ctx, user); err != nil {
+		h.logger.Error().Err(err).Msg("failed to create user")
+		h.writeJSONError(w, http.StatusInternalServerError, "server_error", "Failed to create account")
+		return
+	}
+
+	// Send verification email if required
+	if requireVerification {
+		tokenResult := domainAuth.GenerateToken(userID, req.Email, domainAuth.TokenTypeEmailVerification, 24*time.Hour)
+		tokenWithHash := tokenResult.Token.WithHash(domainAuth.HashToken(tokenResult.RawToken))
+		if err := h.authTokens.Create(ctx, tokenWithHash); err != nil {
+			h.logger.Error().Err(err).Msg("failed to store verification token")
+		} else if err := h.emailSender.SendVerification(ctx, req.Email, req.Name, tokenResult.RawToken); err != nil {
+			h.logger.Error().Err(err).Str("email", req.Email).Msg("failed to send verification email")
+		}
+
+		h.writeJSON(w, http.StatusCreated, map[string]interface{}{
+			"success":               true,
+			"message":               "Account created. Please check your email to verify your account.",
+			"verification_required": true,
+		})
+		return
+	}
+
+	// Auto-login: generate JWT
+	token, _, err := h.tokens.GenerateToken(userID, req.Email, "user")
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to generate token after signup")
+		h.writeJSON(w, http.StatusCreated, map[string]interface{}{
+			"success": true,
+			"message": "Account created. Please log in.",
+		})
+		return
+	}
+
+	h.setPortalCookie(w, token)
+	h.logger.Info().Str("user_id", userID).Str("email", req.Email).Msg("user signed up via API")
+
+	h.writeJSON(w, http.StatusCreated, map[string]interface{}{
+		"success": true,
+		"message": "Account created successfully",
+		"user": map[string]interface{}{
+			"id":    userID,
+			"email": req.Email,
+			"name":  req.Name,
+		},
+		"token": token,
+	})
+}
+
+// APILogin handles user login via JSON API.
+// POST /portal/api/login
+func (h *PortalHandler) APILogin(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Parse JSON body
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeJSONError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		return
+	}
+
+	// Validate input
+	loginReq := domainAuth.LoginRequest{
+		Email:    req.Email,
+		Password: req.Password,
+	}
+	result := domainAuth.ValidateLogin(loginReq)
+	if !result.Valid {
+		h.writeJSONValidationErrors(w, result.Errors)
+		return
+	}
+
+	// Get user
+	user, err := h.users.GetByEmail(ctx, req.Email)
+	if err != nil {
+		h.writeJSONError(w, http.StatusUnauthorized, "invalid_credentials", "Invalid email or password")
+		return
+	}
+
+	// Check password
+	if !h.hasher.Compare(user.PasswordHash, req.Password) {
+		h.writeJSONError(w, http.StatusUnauthorized, "invalid_credentials", "Invalid email or password")
+		return
+	}
+
+	// Check status
+	if user.Status == "pending" {
+		h.writeJSONError(w, http.StatusForbidden, "email_not_verified", "Please verify your email before logging in")
+		return
+	}
+	if user.Status != "active" {
+		h.writeJSONError(w, http.StatusForbidden, "account_inactive", "Your account is not active")
+		return
+	}
+
+	// Generate JWT
+	token, _, err := h.tokens.GenerateToken(user.ID, user.Email, "user")
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to generate token")
+		h.writeJSONError(w, http.StatusInternalServerError, "server_error", "Failed to log in")
+		return
+	}
+
+	h.setPortalCookie(w, token)
+
+	h.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"user": map[string]interface{}{
+			"id":    user.ID,
+			"email": user.Email,
+			"name":  user.Name,
+		},
+		"token": token,
+	})
+}
+
+// APIForgotPassword handles password reset requests via JSON API.
+// POST /portal/api/forgot-password
+func (h *PortalHandler) APIForgotPassword(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Parse JSON body
+	var req struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeJSONError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		return
+	}
+
+	// Validate
+	resetReq := domainAuth.PasswordResetRequest{Email: req.Email}
+	valid, errMsg := domainAuth.ValidatePasswordResetRequest(resetReq)
+	if !valid {
+		h.writeJSONError(w, http.StatusUnprocessableEntity, "validation_error", errMsg)
+		return
+	}
+
+	// Always return success to prevent email enumeration
+	successResp := map[string]interface{}{
+		"success": true,
+		"message": "If an account exists with this email, you will receive a password reset link.",
+	}
+
+	// Get user (if exists)
+	user, err := h.users.GetByEmail(ctx, req.Email)
+	if err != nil {
+		h.writeJSON(w, http.StatusOK, successResp)
+		return
+	}
+
+	// Generate reset token
+	tokenResult := domainAuth.GenerateToken(user.ID, user.Email, domainAuth.TokenTypePasswordReset, 1*time.Hour)
+	tokenWithHash := tokenResult.Token.WithHash(domainAuth.HashToken(tokenResult.RawToken))
+
+	if err := h.authTokens.Create(ctx, tokenWithHash); err != nil {
+		h.logger.Error().Err(err).Msg("failed to store reset token")
+	} else if err := h.emailSender.SendPasswordReset(ctx, user.Email, user.Name, tokenResult.RawToken); err != nil {
+		h.logger.Error().Err(err).Msg("failed to send reset email")
+	}
+
+	h.writeJSON(w, http.StatusOK, successResp)
+}
+
+// APIResetPassword handles password reset completion via JSON API.
+// POST /portal/api/reset-password
+func (h *PortalHandler) APIResetPassword(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Parse JSON body
+	var req struct {
+		Token           string `json:"token"`
+		Password        string `json:"password"`
+		ConfirmPassword string `json:"confirm_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeJSONError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		return
+	}
+
+	// Validate passwords match
+	if req.Password != req.ConfirmPassword {
+		h.writeJSONError(w, http.StatusUnprocessableEntity, "validation_error", "Passwords do not match")
+		return
+	}
+
+	// Validate password strength
+	resetReq := domainAuth.PasswordResetConfirm{Token: req.Token, NewPassword: req.Password}
+	result := domainAuth.ValidatePasswordResetConfirm(resetReq)
+	if !result.Valid {
+		h.writeJSONValidationErrors(w, result.Errors)
+		return
+	}
+
+	// Verify token
+	hash := domainAuth.HashToken(req.Token)
+	token, err := h.authTokens.GetByHash(ctx, hash)
+	if err != nil {
+		h.writeJSONError(w, http.StatusBadRequest, "invalid_token", "Invalid or expired reset link")
+		return
+	}
+
+	if token.Type != domainAuth.TokenTypePasswordReset {
+		h.writeJSONError(w, http.StatusBadRequest, "invalid_token", "Invalid token type")
+		return
+	}
+
+	if token.ExpiresAt.Before(time.Now().UTC()) {
+		h.writeJSONError(w, http.StatusBadRequest, "token_expired", "Reset link has expired. Please request a new one.")
+		return
+	}
+
+	if token.UsedAt != nil {
+		h.writeJSONError(w, http.StatusBadRequest, "token_used", "This reset link has already been used")
+		return
+	}
+
+	// Get user and update password
+	user, err := h.users.Get(ctx, token.UserID)
+	if err != nil {
+		h.writeJSONError(w, http.StatusBadRequest, "user_not_found", "User not found")
+		return
+	}
+
+	passwordHash, err := h.hasher.Hash(req.Password)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to hash password")
+		h.writeJSONError(w, http.StatusInternalServerError, "server_error", "Failed to reset password")
+		return
+	}
+
+	user.PasswordHash = passwordHash
+	user.UpdatedAt = time.Now().UTC()
+	if err := h.users.Update(ctx, user); err != nil {
+		h.logger.Error().Err(err).Msg("failed to update password")
+		h.writeJSONError(w, http.StatusInternalServerError, "server_error", "Failed to reset password")
+		return
+	}
+
+	// Mark token as used
+	if err := h.authTokens.MarkUsed(ctx, token.ID, time.Now().UTC()); err != nil {
+		h.logger.Error().Err(err).Msg("failed to mark token as used")
+	}
+
+	// Invalidate all sessions
+	if err := h.sessions.DeleteByUser(ctx, user.ID); err != nil {
+		h.logger.Error().Err(err).Msg("failed to delete sessions")
+	}
+
+	h.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "Password reset successfully. You can now log in with your new password.",
+	})
+}
+
+// JSON response helpers
+
+func (h *PortalHandler) writeJSON(w http.ResponseWriter, status int, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(data)
+}
+
+func (h *PortalHandler) writeJSONError(w http.ResponseWriter, status int, code, message string) {
+	h.writeJSON(w, status, map[string]interface{}{
+		"success": false,
+		"error": map[string]interface{}{
+			"code":    code,
+			"message": message,
+		},
+	})
+}
+
+func (h *PortalHandler) writeJSONValidationErrors(w http.ResponseWriter, errors map[string]string) {
+	h.writeJSON(w, http.StatusUnprocessableEntity, map[string]interface{}{
+		"success": false,
+		"error": map[string]interface{}{
+			"code":    "validation_error",
+			"message": "Validation failed",
+			"fields":  errors,
+		},
+	})
 }
