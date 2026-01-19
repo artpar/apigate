@@ -83,6 +83,9 @@ type Route struct {
 	// Protocol behavior
 	Protocol Protocol // http, http_stream, sse, websocket
 
+	// Authentication
+	AuthRequired bool // If false, requests to this route skip API key validation (public route)
+
 	// Metadata
 	Priority  int  // Higher = evaluated first (for overlapping patterns)
 	Enabled   bool
@@ -152,6 +155,7 @@ func NewRoute(id, name, pathPattern string, upstreamID string) Route {
 		MeteringMode:  "request",
 		MeteringUnit:  "requests", // Display unit for UI
 		Protocol:      ProtocolHTTP,
+		AuthRequired:  true, // Default: require authentication
 		Priority:      0,
 		Enabled:       true,
 		CreatedAt:     time.Now(),

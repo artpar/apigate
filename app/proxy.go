@@ -146,19 +146,37 @@ func (s *ProxyService) Handle(ctx context.Context, req proxy.Request) HandleResu
 	// Get current dynamic config (hot-reloadable)
 	dynCfg := s.getDynamicConfig()
 
-	// 1. Validate API key format (PURE)
+	// 1. Route matching FIRST (PURE) - determines if auth is required
+	var matchedRoute *route.Route
+	var pathParams map[string]string
+	originalPath := req.Path
+
+	if s.routeService != nil {
+		if match := s.routeService.Match(req.Method, req.Path, req.Headers); match != nil {
+			matchedRoute = match.Route
+			pathParams = match.PathParams
+		}
+	}
+
+	// 2. Check if this is a public route (no auth required)
+	if matchedRoute != nil && !matchedRoute.AuthRequired {
+		// Public route - skip auth, quota, rate limiting
+		return s.handlePublicRoute(ctx, req, matchedRoute, pathParams, originalPath, dynCfg)
+	}
+
+	// 3. Validate API key format (PURE)
 	prefix, valid := key.ValidateFormat(req.APIKey, s.keyPrefix)
 	if !valid {
 		return HandleResult{Error: &proxy.ErrInvalidKey}
 	}
 
-	// 2. Lookup key (I/O)
+	// 4. Lookup key (I/O)
 	keys, err := s.keys.Get(ctx, prefix)
 	if err != nil || len(keys) == 0 {
 		return HandleResult{Error: &proxy.ErrInvalidKey}
 	}
 
-	// 3. Find matching key by comparing hash (PURE comparison, I/O lookup)
+	// 5. Find matching key by comparing hash (PURE comparison, I/O lookup)
 	var matchedKey key.Key
 	found := false
 	for _, k := range keys {
@@ -172,7 +190,7 @@ func (s *ProxyService) Handle(ctx context.Context, req proxy.Request) HandleResu
 		return HandleResult{Error: &proxy.ErrInvalidKey}
 	}
 
-	// 4. Validate key (PURE)
+	// 6. Validate key (PURE)
 	validation := key.Validate(matchedKey, now)
 	if !validation.Valid {
 		return HandleResult{Error: &proxy.ErrorResponse{
@@ -182,7 +200,7 @@ func (s *ProxyService) Handle(ctx context.Context, req proxy.Request) HandleResu
 		}}
 	}
 
-	// 5. Get user and check status (I/O)
+	// 7. Get user and check status (I/O)
 	user, err := s.users.Get(ctx, matchedKey.UserID)
 	if err != nil {
 		return HandleResult{Error: &proxy.ErrInvalidKey}
@@ -195,7 +213,7 @@ func (s *ProxyService) Handle(ctx context.Context, req proxy.Request) HandleResu
 		}}
 	}
 
-	// 6. Get plan and rate limit config (PURE) - uses dynamic config
+	// 8. Get plan and rate limit config (PURE) - uses dynamic config
 	userPlan, _ := plan.FindPlan(dynCfg.Plans, user.PlanID)
 	rlConfig := ratelimit.Config{
 		Limit:       userPlan.RateLimitPerMinute,
@@ -206,7 +224,7 @@ func (s *ProxyService) Handle(ctx context.Context, req proxy.Request) HandleResu
 		rlConfig.Limit = 60 // default
 	}
 
-	// 6.5. Check quota (PURE + I/O for state)
+	// 8.5. Check quota (PURE + I/O for state)
 	periodStart, periodEnd := quota.PeriodBounds(now)
 	var quotaResult quota.CheckResult
 	if s.quota != nil && userPlan.RequestsPerMonth >= 0 { // Not unlimited
@@ -261,7 +279,7 @@ func (s *ProxyService) Handle(ctx context.Context, req proxy.Request) HandleResu
 		}
 	}
 
-	// 7. Check rate limit (PURE + I/O for state)
+	// 9. Check rate limit (PURE + I/O for state)
 	rlState, _ := s.rateLimit.Get(ctx, matchedKey.ID)
 	rlResult, newRLState := ratelimit.Check(rlState, rlConfig, now)
 	s.rateLimit.Set(ctx, matchedKey.ID, newRLState)
@@ -279,7 +297,7 @@ func (s *ProxyService) Handle(ctx context.Context, req proxy.Request) HandleResu
 		}
 	}
 
-	// 8. Build auth context (PURE)
+	// 10. Build auth context (PURE)
 	auth := proxy.AuthContext{
 		KeyID:     matchedKey.ID,
 		UserID:    matchedKey.UserID,
@@ -288,7 +306,7 @@ func (s *ProxyService) Handle(ctx context.Context, req proxy.Request) HandleResu
 		Scopes:    matchedKey.Scopes,
 	}
 
-	// 8.5. Resolve entitlements for user's plan and add headers (PURE)
+	// 10.5. Resolve entitlements for user's plan and add headers (PURE)
 	userEntitlements := entitlement.ResolveForPlan(
 		user.PlanID,
 		dynCfg.Entitlements,
@@ -300,18 +318,6 @@ func (s *ProxyService) Handle(ctx context.Context, req proxy.Request) HandleResu
 	}
 	for k, v := range entitlementHeaders {
 		req.Headers[k] = v
-	}
-
-	// 9. Route matching (PURE) - optional, falls back to default upstream
-	var matchedRoute *route.Route
-	var pathParams map[string]string
-	originalPath := req.Path
-
-	if s.routeService != nil {
-		if match := s.routeService.Match(req.Method, req.Path, req.Headers); match != nil {
-			matchedRoute = match.Route
-			pathParams = match.PathParams
-		}
 	}
 
 	// 10. Apply request transform (PURE + Expr eval)
@@ -479,6 +485,200 @@ func itoa(n int) string {
 	return itoa(n/10) + string(rune('0'+n%10))
 }
 
+// handlePublicRoute processes a request to a route that doesn't require authentication.
+// This skips API key validation, rate limiting, and quota checks.
+// Used for reverse proxy scenarios where upstream apps handle their own auth.
+func (s *ProxyService) handlePublicRoute(
+	ctx context.Context,
+	req proxy.Request,
+	matchedRoute *route.Route,
+	pathParams map[string]string,
+	originalPath string,
+	dynCfg *DynamicConfig,
+) HandleResult {
+	now := s.clock.Now()
+
+	// Apply request transform (PURE + Expr eval)
+	if matchedRoute.RequestTransform != nil && s.transformService != nil {
+		var err error
+		req, err = s.transformService.TransformRequest(ctx, req, matchedRoute.RequestTransform, nil)
+		if err != nil {
+			return HandleResult{Error: &proxy.ErrorResponse{
+				Status:  500,
+				Code:    "transform_error",
+				Message: "Request transformation failed",
+			}}
+		}
+	}
+
+	// Path rewriting (PURE + Expr eval)
+	if matchedRoute.PathRewrite != "" && s.transformService != nil {
+		rewriteCtx := map[string]any{
+			"path":       req.Path,
+			"pathParams": pathParams,
+			"method":     req.Method,
+		}
+		newPath, err := s.transformService.EvalString(ctx, matchedRoute.PathRewrite, rewriteCtx)
+		if err == nil && newPath != "" {
+			req.Path = newPath
+		}
+	}
+
+	// Method override (PURE)
+	if matchedRoute.MethodOverride != "" {
+		req.Method = matchedRoute.MethodOverride
+	}
+
+	// Forward to upstream (I/O)
+	var resp proxy.Response
+	var routeUpstream *route.Upstream
+	var err error
+
+	if matchedRoute.UpstreamID != "" && s.routeService != nil {
+		routeUpstream = s.routeService.GetUpstream(matchedRoute.UpstreamID)
+		if routeUpstream != nil {
+			// Apply upstream authentication headers
+			req.Headers = s.routeService.ApplyUpstreamAuth(routeUpstream, req.Headers)
+		}
+	}
+
+	// Forward to route's upstream if available, otherwise use default
+	if routeUpstream != nil {
+		resp, err = s.upstream.ForwardTo(ctx, req, routeUpstream)
+	} else {
+		resp, err = s.upstream.Forward(ctx, req)
+	}
+	if err != nil {
+		return HandleResult{Error: &proxy.ErrUpstreamError}
+	}
+
+	// Apply response transform (PURE + Expr eval)
+	if matchedRoute.ResponseTransform != nil && s.transformService != nil {
+		resp, _ = s.transformService.TransformResponse(ctx, resp, matchedRoute.ResponseTransform, nil)
+	}
+
+	// Calculate cost/metering value for anonymous tracking (PURE + Expr eval)
+	var costMult float64 = 1.0
+	if matchedRoute.MeteringExpr != "" && s.transformService != nil {
+		meteringCtx := map[string]any{
+			"status":        resp.Status,
+			"responseBytes": int64(len(resp.Body)),
+			"requestBytes":  int64(len(req.Body)),
+			"path":          originalPath,
+			"method":        req.Method,
+		}
+		if len(resp.Body) > 0 {
+			var respBody any
+			if jsonErr := json.Unmarshal(resp.Body, &respBody); jsonErr == nil {
+				meteringCtx["respBody"] = respBody
+			}
+		}
+
+		if val, err := s.transformService.EvalFloat(ctx, matchedRoute.MeteringExpr, meteringCtx); err == nil {
+			costMult = val
+		}
+	} else {
+		costMult = plan.GetCostMultiplier(dynCfg.Endpoints, req.Method, originalPath)
+	}
+
+	// Record anonymous usage event (async I/O)
+	// Use special "anonymous" identifiers for public routes
+	event := usage.Event{
+		ID:             s.idGen.New(),
+		KeyID:          "anonymous",
+		UserID:         "anonymous",
+		Method:         req.Method,
+		Path:           originalPath,
+		StatusCode:     resp.Status,
+		LatencyMs:      resp.LatencyMs,
+		RequestBytes:   int64(len(req.Body)),
+		ResponseBytes:  int64(len(resp.Body)),
+		CostMultiplier: costMult,
+		IPAddress:      req.RemoteIP,
+		UserAgent:      req.UserAgent,
+		Timestamp:      now,
+	}
+	s.usage.Record(event)
+
+	// Initialize response headers if needed
+	if resp.Headers == nil {
+		resp.Headers = make(map[string]string)
+	}
+
+	// No rate limit or quota headers for public routes
+	return HandleResult{
+		Response: resp,
+		// No Auth context for public routes
+	}
+}
+
+// handlePublicStreamingRoute processes a streaming request to a route that doesn't require authentication.
+// This skips API key validation and rate limiting for public streaming routes.
+func (s *ProxyService) handlePublicStreamingRoute(
+	ctx context.Context,
+	req proxy.Request,
+	matchedRoute *route.Route,
+	pathParams map[string]string,
+	originalPath string,
+	dynCfg *DynamicConfig,
+) StreamingHandleResult {
+	var routeUpstream *route.Upstream
+
+	// Apply request transform
+	if matchedRoute.RequestTransform != nil && s.transformService != nil {
+		var transformErr error
+		req, transformErr = s.transformService.TransformRequest(ctx, req, matchedRoute.RequestTransform, nil)
+		if transformErr != nil {
+			return StreamingHandleResult{Error: &proxy.ErrorResponse{
+				Status:  500,
+				Code:    "transform_error",
+				Message: "Request transformation failed: " + transformErr.Error(),
+			}}
+		}
+	}
+
+	// Path rewriting
+	if matchedRoute.PathRewrite != "" && s.transformService != nil {
+		rewriteCtx := map[string]any{
+			"path":       req.Path,
+			"pathParams": pathParams,
+			"method":     req.Method,
+		}
+		if newPath, evalErr := s.transformService.EvalString(ctx, matchedRoute.PathRewrite, rewriteCtx); evalErr == nil && newPath != "" {
+			req.Path = newPath
+		}
+	}
+
+	// Method override
+	if matchedRoute.MethodOverride != "" {
+		req.Method = matchedRoute.MethodOverride
+	}
+
+	// Get and apply upstream auth
+	if matchedRoute.UpstreamID != "" && s.routeService != nil {
+		routeUpstream = s.routeService.GetUpstream(matchedRoute.UpstreamID)
+		if routeUpstream != nil {
+			req.Headers = s.routeService.ApplyUpstreamAuth(routeUpstream, req.Headers)
+		}
+	}
+
+	// Return streaming context with modified request and upstream for public route
+	// Use anonymous identifiers since no auth context
+	return StreamingHandleResult{
+		StreamingResponse: &StreamingResponseContext{
+			Headers:      make(map[string]string),
+			MatchedRoute: matchedRoute,
+			OriginalPath: originalPath,
+			KeyID:        "anonymous",
+			UserID:       "anonymous",
+		},
+		ModifiedRequest: &req,
+		RouteUpstream:   routeUpstream,
+		// No Auth context for public routes
+		Headers: make(map[string]string), // No rate limit headers for public routes
+	}
+}
+
 // StreamingHandleResult represents the outcome of handling a streaming request.
 type StreamingHandleResult struct {
 	StreamingResponse *StreamingResponseContext
@@ -538,20 +738,36 @@ func (s *ProxyService) HandleStreaming(ctx context.Context, req proxy.Request, s
 	// Get current dynamic config (hot-reloadable)
 	dynCfg := s.getDynamicConfig()
 
-	// 1-7: Same auth and rate limiting as Handle()
-	// Validate API key format
+	// 1. Route matching FIRST - determines if auth is required
+	var matchedRoute *route.Route
+	var routeUpstream *route.Upstream
+	originalPath := req.Path
+
+	if s.routeService != nil {
+		if match := s.routeService.Match(req.Method, req.Path, req.Headers); match != nil {
+			matchedRoute = match.Route
+
+			// 2. Check if this is a public route (no auth required)
+			if !matchedRoute.AuthRequired {
+				// Public streaming route - skip auth and rate limiting
+				return s.handlePublicStreamingRoute(ctx, req, matchedRoute, match.PathParams, originalPath, dynCfg)
+			}
+		}
+	}
+
+	// 3. Validate API key format
 	prefix, valid := key.ValidateFormat(req.APIKey, s.keyPrefix)
 	if !valid {
 		return StreamingHandleResult{Error: &proxy.ErrInvalidKey}
 	}
 
-	// Lookup key
+	// 4. Lookup key
 	keys, err := s.keys.Get(ctx, prefix)
 	if err != nil || len(keys) == 0 {
 		return StreamingHandleResult{Error: &proxy.ErrInvalidKey}
 	}
 
-	// Find matching key
+	// 5. Find matching key
 	var matchedKey key.Key
 	found := false
 	for _, k := range keys {
@@ -565,7 +781,7 @@ func (s *ProxyService) HandleStreaming(ctx context.Context, req proxy.Request, s
 		return StreamingHandleResult{Error: &proxy.ErrInvalidKey}
 	}
 
-	// Validate key
+	// 6. Validate key
 	validation := key.Validate(matchedKey, now)
 	if !validation.Valid {
 		return StreamingHandleResult{Error: &proxy.ErrorResponse{
@@ -575,7 +791,7 @@ func (s *ProxyService) HandleStreaming(ctx context.Context, req proxy.Request, s
 		}}
 	}
 
-	// Get user and check status
+	// 7. Get user and check status
 	user, err := s.users.Get(ctx, matchedKey.UserID)
 	if err != nil {
 		return StreamingHandleResult{Error: &proxy.ErrInvalidKey}
@@ -588,7 +804,7 @@ func (s *ProxyService) HandleStreaming(ctx context.Context, req proxy.Request, s
 		}}
 	}
 
-	// Get plan and rate limit config
+	// 8. Get plan and rate limit config
 	userPlan, _ := plan.FindPlan(dynCfg.Plans, user.PlanID)
 	rlConfig := ratelimit.Config{
 		Limit:       userPlan.RateLimitPerMinute,
@@ -599,7 +815,7 @@ func (s *ProxyService) HandleStreaming(ctx context.Context, req proxy.Request, s
 		rlConfig.Limit = 60
 	}
 
-	// Check rate limit
+	// 9. Check rate limit
 	rlState, _ := s.rateLimit.Get(ctx, matchedKey.ID)
 	rlResult, newRLState := ratelimit.Check(rlState, rlConfig, now)
 	if setErr := s.rateLimit.Set(ctx, matchedKey.ID, newRLState); setErr != nil {
@@ -617,7 +833,7 @@ func (s *ProxyService) HandleStreaming(ctx context.Context, req proxy.Request, s
 		}
 	}
 
-	// Build auth context
+	// 10. Build auth context
 	auth := proxy.AuthContext{
 		KeyID:     matchedKey.ID,
 		UserID:    matchedKey.UserID,
@@ -626,13 +842,10 @@ func (s *ProxyService) HandleStreaming(ctx context.Context, req proxy.Request, s
 		Scopes:    matchedKey.Scopes,
 	}
 
-	// Route matching
-	var matchedRoute *route.Route
-	var routeUpstream *route.Upstream
-	originalPath := req.Path
-
-	if s.routeService != nil {
-		if match := s.routeService.Match(req.Method, req.Path, req.Headers); match != nil {
+	// 11. Continue route processing (route already matched above)
+	if matchedRoute != nil && s.routeService != nil {
+		match := s.routeService.Match(req.Method, req.Path, req.Headers)
+		if match != nil {
 			matchedRoute = match.Route
 
 			// Apply request transform

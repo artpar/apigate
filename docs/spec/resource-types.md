@@ -294,6 +294,7 @@ Keys in list don't include the full key:
 | `method_override` | string | Override HTTP method for upstream | Yes |
 | `priority` | int | Match priority | Yes |
 | `protocol` | enum | Protocol type | Yes |
+| `auth_required` | bool | Whether API key authentication is required (default: true) | Yes |
 | `description` | string | Route description | Yes |
 | `enabled` | bool | Route active state | Yes |
 | `metering_expr` | string | Expression to calculate request cost | Yes |
@@ -356,11 +357,36 @@ Keys in list don't include the full key:
       "path_rewrite": "/api/v2$1",
       "priority": 100,
       "protocol": "http",
+      "auth_required": true,
       "description": "Version 2 API routes",
       "enabled": true,
       "metering_mode": "request",
       "created_at": "2025-01-01T00:00:00Z",
       "updated_at": "2025-01-15T00:00:00Z"
+    }
+  }
+}
+```
+
+### Example: Public Route (No Authentication)
+
+For reverse proxy scenarios where the upstream handles its own authentication:
+
+```json
+{
+  "data": {
+    "type": "routes",
+    "id": "rt_public123",
+    "attributes": {
+      "name": "Deployed App",
+      "host_pattern": "myapp.apps.example.com",
+      "host_match_type": "exact",
+      "path_pattern": "/*",
+      "match_type": "prefix",
+      "upstream_id": "up_myapp",
+      "auth_required": false,
+      "description": "Public route for deployed application",
+      "enabled": true
     }
   }
 }

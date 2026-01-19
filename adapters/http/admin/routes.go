@@ -102,6 +102,7 @@ type RouteResponse struct {
 	MeteringExpr      string           `json:"metering_expr,omitempty"`
 	MeteringMode      string           `json:"metering_mode,omitempty"`
 	Protocol          string           `json:"protocol"`
+	AuthRequired      bool             `json:"auth_required"`
 	Priority          int              `json:"priority"`
 	Enabled           bool             `json:"enabled"`
 	CreatedAt         string           `json:"created_at"`
@@ -143,6 +144,7 @@ type CreateRouteRequest struct {
 	MeteringExpr      string           `json:"metering_expr,omitempty"`
 	MeteringMode      string           `json:"metering_mode,omitempty"`
 	Protocol          string           `json:"protocol,omitempty"`
+	AuthRequired      *bool            `json:"auth_required,omitempty"`
 	Priority          int              `json:"priority,omitempty"`
 	Enabled           *bool            `json:"enabled,omitempty"`
 }
@@ -165,6 +167,7 @@ type UpdateRouteRequest struct {
 	MeteringExpr      *string          `json:"metering_expr,omitempty"`
 	MeteringMode      *string          `json:"metering_mode,omitempty"`
 	Protocol          *string          `json:"protocol,omitempty"`
+	AuthRequired      *bool            `json:"auth_required,omitempty"`
 	Priority          *int             `json:"priority,omitempty"`
 	Enabled           *bool            `json:"enabled,omitempty"`
 }
@@ -246,12 +249,16 @@ func (h *RoutesHandler) CreateRoute(w http.ResponseWriter, r *http.Request) {
 		MeteringExpr:   req.MeteringExpr,
 		MeteringMode:   req.MeteringMode,
 		Protocol:       route.Protocol(req.Protocol),
+		AuthRequired:   true, // Default to requiring authentication
 		Priority:       req.Priority,
 		Enabled:        true,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
 
+	if req.AuthRequired != nil {
+		rt.AuthRequired = *req.AuthRequired
+	}
 	if req.Enabled != nil {
 		rt.Enabled = *req.Enabled
 	}
@@ -384,6 +391,9 @@ func (h *RoutesHandler) UpdateRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Protocol != nil {
 		rt.Protocol = route.Protocol(*req.Protocol)
+	}
+	if req.AuthRequired != nil {
+		rt.AuthRequired = *req.AuthRequired
 	}
 	if req.Priority != nil {
 		rt.Priority = *req.Priority
@@ -725,6 +735,7 @@ func routeToResource(rt route.Route) jsonapi.Resource {
 		Attr("metering_expr", rt.MeteringExpr).
 		Attr("metering_mode", rt.MeteringMode).
 		Attr("protocol", string(rt.Protocol)).
+		Attr("auth_required", rt.AuthRequired).
 		Attr("priority", rt.Priority).
 		Attr("enabled", rt.Enabled).
 		Attr("created_at", rt.CreatedAt.Format(time.RFC3339)).

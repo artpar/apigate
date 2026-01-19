@@ -32,6 +32,9 @@ schema:
   # Protocol behavior
   protocol:       { type: enum, values: [http, http_stream, sse, websocket], default: http, description: "Protocol handling mode for this route" }
 
+  # Authentication
+  auth_required:  { type: bool, default: true, description: "Whether requests to this route require API key authentication (set to false for public routes)" }
+
   # Priority and state
   priority:       { type: int, default: 0, description: "Route matching priority (higher values match first)" }
   enabled:        { type: bool, default: true, description: "Whether this route is active and processing requests" }
@@ -84,6 +87,7 @@ channels:
             - { param: host_pattern, name: host, short: H, description: "Host pattern (e.g., *.apps.localhost)" }
             - { param: host_match_type, name: host-match, description: "Host match type: exact, wildcard, regex" }
             - { param: protocol, default: http }
+            - { param: auth_required, name: auth, type: bool, default: "true", description: "Require authentication (false for public routes)" }
             - { param: priority, type: int, default: "0" }
         - action: update
           args:
@@ -94,6 +98,7 @@ channels:
             - { param: upstream_id, name: upstream }
             - { param: host_pattern, name: host, short: H, description: "Host pattern (e.g., *.apps.localhost)" }
             - { param: host_match_type, name: host-match, description: "Host match type: exact, wildcard, regex" }
+            - { param: auth_required, name: auth, type: bool, description: "Require authentication (false for public routes)" }
             - { param: priority, type: int }
         - action: delete
           args:

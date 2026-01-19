@@ -253,6 +253,7 @@ Represents URL routing rules.
 | `metering_expr` | string | Expression to calculate request cost |
 | `metering_mode` | enum | request, bytes, response_field, custom |
 | `protocol` | enum | http, http_stream, sse, websocket |
+| `auth_required` | bool | Whether API key auth is required (default: true) |
 | `priority` | int | Matching priority |
 | `enabled` | bool | Route active |
 | `request_transform` | object | Request header/body transformations |
@@ -284,6 +285,7 @@ Represents URL routing rules.
       "path_rewrite": "/users/$1",
       "metering_mode": "request",
       "protocol": "http",
+      "auth_required": true,
       "priority": 100,
       "enabled": true,
       "created_at": "2025-01-19T10:00:00Z",
@@ -292,6 +294,34 @@ Represents URL routing rules.
     "relationships": {
       "upstream": {
         "data": { "type": "upstreams", "id": "ups_abc123" }
+      }
+    }
+  }
+}
+```
+
+**Example: Public Route (No Authentication)**
+
+For reverse proxy scenarios where the upstream handles its own authentication:
+
+```json
+{
+  "data": {
+    "type": "routes",
+    "id": "rte_public123",
+    "attributes": {
+      "name": "deployed-app",
+      "description": "Public route for deployed application",
+      "host_pattern": "myapp.apps.example.com",
+      "host_match_type": "exact",
+      "path_pattern": "/*",
+      "match_type": "prefix",
+      "auth_required": false,
+      "enabled": true
+    },
+    "relationships": {
+      "upstream": {
+        "data": { "type": "upstreams", "id": "ups_myapp" }
       }
     }
   }

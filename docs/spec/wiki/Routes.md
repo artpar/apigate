@@ -50,6 +50,7 @@ Request: GET /api/v1/users/123
 | `metering_mode` | enum | How to count usage |
 | `metering_expr` | string | Custom metering expression |
 | `protocol` | enum | http, http_stream, sse, websocket |
+| `auth_required` | bool | Require API key authentication (default: true) |
 | `priority` | int | Match priority (higher = first) |
 | `enabled` | bool | Route active state |
 
@@ -565,6 +566,69 @@ apigate routes create --name "users-list" --path "/api/users" --methods "GET"
 apigate routes create --name "users-create" --path "/api/users" --methods "POST"
 apigate routes create --name "users-detail" --path "/api/users/*" --methods "GET,PUT,DELETE"
 ```
+
+---
+
+## Public Routes (No Authentication)
+
+By default, all routes require API key authentication. Set `auth_required: false` to create public routes that skip authentication, rate limiting, and quota checks.
+
+### Use Cases
+
+- **Reverse proxy**: Forward traffic to deployed applications that handle their own auth
+- **Health checks**: Public `/health` endpoints
+- **Webhooks**: Receive callbacks from external services
+- **Static content**: Serve public assets without auth overhead
+
+### Creating Public Routes
+
+#### CLI
+
+```bash
+# Create a public route for a deployed app
+apigate routes create \
+  --name "deployed-app" \
+  --host "myapp.apps.localhost" \
+  --host-match exact \
+  --path "/*" \
+  --upstream myapp-service \
+  --auth=false
+```
+
+#### REST API
+
+```bash
+curl -X POST http://localhost:8080/admin/routes \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "deployed-app",
+    "host_pattern": "myapp.apps.localhost",
+    "host_match_type": "exact",
+    "path_pattern": "/*",
+    "match_type": "prefix",
+    "upstream_id": "myapp-service-id",
+    "auth_required": false,
+    "enabled": true
+  }'
+```
+
+### Behavior
+
+When a request hits a public route (`auth_required: false`):
+
+1. **No API key required** - requests without API keys are accepted
+2. **No rate limiting** - requests are not rate limited
+3. **No quota tracking** - requests don't count against user quotas
+4. **Anonymous usage** - usage is logged with `anonymous` user/key IDs
+5. **Transforms still apply** - request/response transformations work normally
+6. **Upstream auth works** - backend authentication headers are still injected
+
+### Security Considerations
+
+- Public routes expose your upstreams without authentication
+- The upstream service is responsible for its own security
+- Consider using host-based routing to isolate public routes
+- Monitor anonymous usage for abuse patterns
 
 ---
 

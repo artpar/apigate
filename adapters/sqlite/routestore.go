@@ -30,7 +30,7 @@ func (s *RouteStore) Get(ctx context.Context, id string) (route.Route, error) {
 		       upstream_id, path_rewrite, method_override,
 		       request_transform, response_transform,
 		       metering_expr, metering_mode, metering_unit, protocol,
-		       priority, enabled, created_at, updated_at
+		       auth_required, priority, enabled, created_at, updated_at
 		FROM routes
 		WHERE id = ?
 	`, id)
@@ -46,7 +46,7 @@ func (s *RouteStore) List(ctx context.Context) ([]route.Route, error) {
 		       upstream_id, path_rewrite, method_override,
 		       request_transform, response_transform,
 		       metering_expr, metering_mode, metering_unit, protocol,
-		       priority, enabled, created_at, updated_at
+		       auth_required, priority, enabled, created_at, updated_at
 		FROM routes
 		ORDER BY priority DESC, name ASC
 	`)
@@ -75,7 +75,7 @@ func (s *RouteStore) ListEnabled(ctx context.Context) ([]route.Route, error) {
 		       upstream_id, path_rewrite, method_override,
 		       request_transform, response_transform,
 		       metering_expr, metering_mode, metering_unit, protocol,
-		       priority, enabled, created_at, updated_at
+		       auth_required, priority, enabled, created_at, updated_at
 		FROM routes
 		WHERE enabled = 1
 		ORDER BY priority DESC, name ASC
@@ -134,8 +134,8 @@ func (s *RouteStore) Create(ctx context.Context, r route.Route) error {
 			upstream_id, path_rewrite, method_override,
 			request_transform, response_transform,
 			metering_expr, metering_mode, metering_unit, protocol,
-			priority, enabled, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			auth_required, priority, enabled, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		r.ID, r.Name, r.Description, r.ExampleRequest, r.ExampleResponse,
 		r.HostPattern, string(r.HostMatchType),
@@ -144,7 +144,7 @@ func (s *RouteStore) Create(ctx context.Context, r route.Route) error {
 		r.UpstreamID, nullString(r.PathRewrite), nullString(r.MethodOverride),
 		reqTransformJSON, respTransformJSON,
 		r.MeteringExpr, r.MeteringMode, r.MeteringUnit, string(r.Protocol),
-		r.Priority, boolToInt(r.Enabled), r.CreatedAt, r.UpdatedAt,
+		boolToInt(r.AuthRequired), r.Priority, boolToInt(r.Enabled), r.CreatedAt, r.UpdatedAt,
 	)
 
 	if err != nil && isUniqueConstraintError(err) {
@@ -186,7 +186,7 @@ func (s *RouteStore) Update(ctx context.Context, r route.Route) error {
 		    upstream_id = ?, path_rewrite = ?, method_override = ?,
 		    request_transform = ?, response_transform = ?,
 		    metering_expr = ?, metering_mode = ?, metering_unit = ?, protocol = ?,
-		    priority = ?, enabled = ?, updated_at = ?
+		    auth_required = ?, priority = ?, enabled = ?, updated_at = ?
 		WHERE id = ?
 	`,
 		r.Name, r.Description, r.ExampleRequest, r.ExampleResponse,
@@ -196,7 +196,7 @@ func (s *RouteStore) Update(ctx context.Context, r route.Route) error {
 		r.UpstreamID, nullString(r.PathRewrite), nullString(r.MethodOverride),
 		reqTransformJSON, respTransformJSON,
 		r.MeteringExpr, r.MeteringMode, r.MeteringUnit, string(r.Protocol),
-		r.Priority, boolToInt(r.Enabled), r.UpdatedAt, r.ID,
+		boolToInt(r.AuthRequired), r.Priority, boolToInt(r.Enabled), r.UpdatedAt, r.ID,
 	)
 	if err != nil {
 		return err
@@ -234,7 +234,7 @@ func scanRoute(row *sql.Row) (route.Route, error) {
 	var methodsJSON, headersJSON sql.NullString
 	var pathRewrite, methodOverride sql.NullString
 	var reqTransformJSON, respTransformJSON sql.NullString
-	var enabled int
+	var authRequired, enabled int
 
 	err := row.Scan(
 		&r.ID, &r.Name, &r.Description, &r.ExampleRequest, &r.ExampleResponse,
@@ -244,7 +244,7 @@ func scanRoute(row *sql.Row) (route.Route, error) {
 		&r.UpstreamID, &pathRewrite, &methodOverride,
 		&reqTransformJSON, &respTransformJSON,
 		&r.MeteringExpr, &r.MeteringMode, &r.MeteringUnit, &protocol,
-		&r.Priority, &enabled, &r.CreatedAt, &r.UpdatedAt,
+		&authRequired, &r.Priority, &enabled, &r.CreatedAt, &r.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return route.Route{}, ErrNotFound
@@ -256,6 +256,7 @@ func scanRoute(row *sql.Row) (route.Route, error) {
 	r.HostMatchType = route.HostMatchType(hostMatchType)
 	r.MatchType = route.MatchType(matchType)
 	r.Protocol = route.Protocol(protocol)
+	r.AuthRequired = authRequired == 1
 	r.Enabled = enabled == 1
 
 	if pathRewrite.Valid {
@@ -302,7 +303,7 @@ func scanRouteRows(rows *sql.Rows) (route.Route, error) {
 	var methodsJSON, headersJSON sql.NullString
 	var pathRewrite, methodOverride sql.NullString
 	var reqTransformJSON, respTransformJSON sql.NullString
-	var enabled int
+	var authRequired, enabled int
 
 	err := rows.Scan(
 		&r.ID, &r.Name, &r.Description, &r.ExampleRequest, &r.ExampleResponse,
@@ -312,7 +313,7 @@ func scanRouteRows(rows *sql.Rows) (route.Route, error) {
 		&r.UpstreamID, &pathRewrite, &methodOverride,
 		&reqTransformJSON, &respTransformJSON,
 		&r.MeteringExpr, &r.MeteringMode, &r.MeteringUnit, &protocol,
-		&r.Priority, &enabled, &r.CreatedAt, &r.UpdatedAt,
+		&authRequired, &r.Priority, &enabled, &r.CreatedAt, &r.UpdatedAt,
 	)
 	if err != nil {
 		return route.Route{}, err
@@ -321,6 +322,7 @@ func scanRouteRows(rows *sql.Rows) (route.Route, error) {
 	r.HostMatchType = route.HostMatchType(hostMatchType)
 	r.MatchType = route.MatchType(matchType)
 	r.Protocol = route.Protocol(protocol)
+	r.AuthRequired = authRequired == 1
 	r.Enabled = enabled == 1
 
 	if pathRewrite.Valid {
