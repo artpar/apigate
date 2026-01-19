@@ -334,6 +334,26 @@ Then obtain a new certificate by restarting with ACME enabled, or upload a new m
 
 ## Troubleshooting
 
+### Verifying Binary Version
+
+Before troubleshooting, verify you're running the correct binary version. APIGate logs version info at startup:
+
+```
+apigate v1.2.3 (commit: 1f021b9, built: 2026-01-19T17:20:21Z)
+```
+
+You can also check the version explicitly:
+
+```bash
+apigate version
+```
+
+**If version info shows `dev` or `none`**: You may be running a development build without proper ldflags. Use official releases or build with:
+
+```bash
+make build  # Sets version, commit, and build date
+```
+
 ### Challenge Failed
 
 **Error**: `ACME challenge failed for domain`
@@ -360,6 +380,36 @@ apigate certificates get-domain "api.example.com"
 # For ACME mode, ensure domain is configured
 apigate settings get tls.domain
 ```
+
+### ACME Account Key Errors
+
+**Error**: `expected at least 2 PEM blocks, got 1`
+
+**Cause**: This error occurred in versions before v0.x.x when the certificate cache incorrectly tried to parse ACME account keys as certificates.
+
+**Background**: The ACME protocol uses two types of data stored in the certificate cache:
+- **ACME account keys**: Single PEM block (just the private key)
+- **TLS certificates**: Multiple PEM blocks (certificate + private key + optional chain)
+
+**Solution**:
+1. **Verify binary version** - Check startup logs show recent commit hash
+2. **Upgrade to latest version** - This was fixed in commit `1f021b9`
+3. **Clear stale data** - If upgrading from an old version:
+   ```bash
+   # The certificates table can be safely cleared if using ACME
+   # (certificates will be re-obtained automatically)
+   sqlite3 apigate.db "DELETE FROM certificates;"
+   ```
+
+**Debug logging**: Enable debug logging to see ACME certificate operations:
+```bash
+APIGATE_LOG_LEVEL=debug apigate serve
+```
+
+You'll see messages like:
+- `ACME account key stored in memory cache` - Account key handling
+- `certificate retrieved from database` - Certificate loaded from DB
+- `new certificate obtained and stored` - Fresh certificate from Let's Encrypt
 
 ### Rate Limit Hit
 
