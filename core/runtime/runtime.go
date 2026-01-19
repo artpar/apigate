@@ -4,6 +4,8 @@ package runtime
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"sync"
@@ -17,6 +19,7 @@ import (
 	"github.com/artpar/apigate/core/schema"
 	"github.com/artpar/apigate/core/validation"
 	"github.com/rs/zerolog"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // Runtime is the core execution environment for modules.
@@ -500,6 +503,12 @@ func (r *Runtime) executeCreate(ctx context.Context, mod convention.Derived, act
 		return ActionResult{}, err
 	}
 
+	// Special handling for api_key module: auto-generate key if not provided
+	var rawKey string
+	if mod.Source.Name == "api_key" {
+		rawKey = r.generateAPIKey(data)
+	}
+
 	id, err := r.storage.Create(ctx, mod.Source.Name, data)
 	if err != nil {
 		return ActionResult{}, err
@@ -508,7 +517,15 @@ func (r *Runtime) executeCreate(ctx context.Context, mod convention.Derived, act
 	// Fetch the created record
 	result, _ := r.storage.Get(ctx, mod.Source.Name, "id", id)
 
-	return ActionResult{ID: id, Data: result}, nil
+	// Build response with optional meta
+	actionResult := ActionResult{ID: id, Data: result}
+	if rawKey != "" {
+		actionResult.Meta = map[string]any{
+			"raw_key": rawKey,
+		}
+	}
+
+	return actionResult, nil
 }
 
 // resolveRefs resolves ref field values from names to IDs.
@@ -614,6 +631,35 @@ func (r *Runtime) validateRefExists(ctx context.Context, mod convention.Derived,
 	}
 
 	return nil
+}
+
+// generateAPIKey generates a new API key with hash and prefix for the api_key module.
+// It modifies the data map in place to add hash and prefix fields.
+// Returns the raw key that should be shown to the user once.
+func (r *Runtime) generateAPIKey(data map[string]any) string {
+	// Generate 32 random bytes → 64 hex chars
+	randomBytes := make([]byte, 32)
+	if _, err := rand.Read(randomBytes); err != nil {
+		r.logger.Error().Err(err).Msg("failed to generate random bytes for API key")
+		return ""
+	}
+	randomHex := hex.EncodeToString(randomBytes)
+
+	// Create rawKey = "ak_" + randomHex
+	rawKey := "ak_" + randomHex
+
+	// Hash with bcrypt
+	hash, err := bcrypt.GenerateFromPassword([]byte(rawKey), bcrypt.DefaultCost)
+	if err != nil {
+		r.logger.Error().Err(err).Msg("failed to hash API key")
+		return ""
+	}
+
+	// Set the hash and prefix in data
+	data["hash"] = hash
+	data["prefix"] = rawKey[:12] // First 12 chars for lookup (ak_ + 9 hex chars)
+
+	return rawKey
 }
 
 // executeUpdate handles update actions.
