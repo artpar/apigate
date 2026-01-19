@@ -10,7 +10,8 @@ import (
 )
 
 // ErrNotFound is returned when an entity is not found.
-var ErrNotFound = errors.New("not found")
+// This aliases ports.ErrNotFound for consistency across adapters.
+var ErrNotFound = ports.ErrNotFound
 
 // ErrDuplicate is returned when a unique constraint is violated.
 var ErrDuplicate = errors.New("already exists")

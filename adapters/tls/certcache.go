@@ -12,6 +12,7 @@ import (
 
 	domaintls "github.com/artpar/apigate/domain/tls"
 	"github.com/artpar/apigate/ports"
+	"golang.org/x/crypto/acme/autocert"
 )
 
 // DBCertCache implements autocert.Cache using database storage.
@@ -49,14 +50,14 @@ func (c *DBCertCache) Get(ctx context.Context, key string) ([]byte, error) {
 	cert, err := c.store.GetByDomain(ctx, key)
 	if err != nil {
 		if errors.Is(err, ports.ErrNotFound) {
-			return nil, ErrCacheMiss
+			return nil, autocert.ErrCacheMiss
 		}
 		return nil, fmt.Errorf("get certificate from database: %w", err)
 	}
 
 	// Check if certificate is still valid
 	if !cert.IsActive() {
-		return nil, ErrCacheMiss
+		return nil, autocert.ErrCacheMiss
 	}
 
 	// Combine cert and key data (autocert expects this format)
@@ -239,12 +240,4 @@ func splitCertData(data []byte) (certPEM, keyPEM, chainPEM []byte, err error) {
 	}
 
 	return certPEM, keyPEM, chainPEM, nil
-}
-
-// ErrCacheMiss is returned when a certificate is not found in the cache.
-var ErrCacheMiss = errors.New("certificate not found in cache")
-
-// Ensure the error message is compatible with autocert.
-func init() {
-	// autocert.ErrCacheMiss check uses string comparison
 }

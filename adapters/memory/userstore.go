@@ -9,7 +9,8 @@ import (
 )
 
 // ErrNotFound is returned when an entity is not found.
-var ErrNotFound = errors.New("not found")
+// This aliases ports.ErrNotFound for consistency across adapters.
+var ErrNotFound = ports.ErrNotFound
 
 // UserStore is an in-memory implementation of ports.UserStore.
 type UserStore struct {
