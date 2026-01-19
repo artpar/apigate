@@ -28,7 +28,6 @@ This document defines all JSON:API resource types used in the APIGate API.
 | `name` | string | User's display name | Yes |
 | `status` | enum | Account status | Yes |
 | `plan_id` | string | Associated plan ID | Yes |
-| `stripe_id` | string | Stripe customer ID | Yes |
 | `created_at` | timestamp | Creation time | No |
 | `updated_at` | timestamp | Last update time | No |
 
@@ -95,17 +94,20 @@ This document defines all JSON:API resource types used in the APIGate API.
 |-----------|------|-------------|---------|
 | `name` | string | Key name/description | Yes |
 | `prefix` | string | Key prefix (for identification) | No |
-| `key` | string | Full key (only on create) | No |
-| `user_id` | string | Owner user ID | No |
-| `scopes` | []string | Allowed scopes | Yes |
 | `expires_at` | timestamp | Expiration time | Yes |
-| `last_used_at` | timestamp | Last usage time | No |
+| `last_used` | timestamp | Last usage time | No |
 | `revoked_at` | timestamp | Revocation time | No |
 | `created_at` | timestamp | Creation time | No |
 
+### Relationships
+
+| Relationship | Type | Description |
+|--------------|------|-------------|
+| `user` | to-one | Key owner |
+
 ### Example: Create Response
 
-The full key is only returned once, at creation:
+The full key is returned in `meta` at creation (only shown once):
 
 ```json
 {
@@ -115,10 +117,16 @@ The full key is only returned once, at creation:
     "attributes": {
       "name": "Production Key",
       "prefix": "ak_abc123def456",
-      "key": "ak_abc123def456789...(full key)",
-      "user_id": "usr_xyz789",
-      "scopes": ["read", "write"],
       "created_at": "2025-01-19T10:00:00Z"
+    },
+    "relationships": {
+      "user": {
+        "data": { "type": "users", "id": "usr_xyz789" }
+      }
+    },
+    "meta": {
+      "key": "ak_abc123def456789...(full key)",
+      "note": "Save this key securely. It will not be shown again."
     }
   }
 }
@@ -136,10 +144,13 @@ Keys in list don't include the full key:
     "attributes": {
       "name": "Production Key",
       "prefix": "ak_abc123def456",
-      "user_id": "usr_xyz789",
-      "scopes": ["read", "write"],
-      "last_used_at": "2025-01-19T09:00:00Z",
+      "last_used": "2025-01-19T09:00:00Z",
       "created_at": "2025-01-19T08:00:00Z"
+    },
+    "relationships": {
+      "user": {
+        "data": { "type": "users", "id": "usr_xyz789" }
+      }
     }
   }
 }
@@ -215,6 +226,8 @@ Keys in list don't include the full key:
 | `overage_price` | int | Per-request overage price | Yes |
 | `trial_days` | int | Trial period length | Yes |
 | `stripe_price_id` | string | Stripe price ID | Yes |
+| `paddle_price_id` | string | Paddle price ID | Yes |
+| `lemon_variant_id` | string | LemonSqueezy variant ID | Yes |
 | `is_default` | bool | Default plan flag | Yes |
 | `enabled` | bool | Plan availability | Yes |
 | `created_at` | timestamp | Creation time | No |
@@ -236,6 +249,8 @@ Keys in list don't include the full key:
       "overage_price": 1,
       "trial_days": 14,
       "stripe_price_id": "price_xxx",
+      "paddle_price_id": "pri_xxx",
+      "lemon_variant_id": "var_xxx",
       "is_default": false,
       "enabled": true,
       "created_at": "2025-01-01T00:00:00Z",

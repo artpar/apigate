@@ -10,10 +10,10 @@ APIGate returns errors in JSON:API format with consistent error codes.
 {
   "errors": [
     {
-      "status": "400",
+      "status": "422",
       "code": "validation_error",
-      "title": "Validation Error",
-      "detail": "Email is required",
+      "title": "Validation Failed",
+      "detail": "email is required",
       "source": {
         "pointer": "/data/attributes/email"
       }
@@ -24,198 +24,167 @@ APIGate returns errors in JSON:API format with consistent error codes.
 
 ### Error Object Fields
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `status` | string | HTTP status code (as string) |
-| `code` | string | Machine-readable error code |
-| `title` | string | Human-readable error title |
-| `detail` | string | Specific error description |
-| `source` | object | Location of error in request |
-| `meta` | object | Additional error metadata |
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `status` | string | Yes | HTTP status code (as string) |
+| `code` | string | Yes | Machine-readable error code |
+| `title` | string | Yes | Human-readable error title |
+| `detail` | string | No | Specific error description |
+| `source` | object | No | Location of error in request |
+| `meta` | object | No | Additional error metadata |
+
+### Source Object Fields
+
+| Field | Description | Example |
+|-------|-------------|---------|
+| `pointer` | JSON pointer to offending field | `/data/attributes/email` |
+| `parameter` | Query parameter that caused error | `page[number]` |
+| `header` | Header that caused error | `Authorization` |
 
 ---
 
-## Error Codes by Category
+## Standard Error Codes
 
-### Authentication Errors (401)
+### Client Errors (4xx)
 
-| Code | Title | Description |
-|------|-------|-------------|
-| `unauthorized` | Unauthorized | No valid authentication provided |
-| `invalid_api_key` | Invalid API Key | API key is malformed or doesn't exist |
-| `expired_api_key` | API Key Expired | API key has passed its expiration date |
-| `revoked_api_key` | API Key Revoked | API key has been revoked |
-| `invalid_token` | Invalid Token | JWT or session token is invalid |
-| `expired_token` | Token Expired | Authentication token has expired |
+| Code | Status | Title | When Used |
+|------|--------|-------|-----------|
+| `bad_request` | 400 | Bad Request | Malformed request syntax, invalid JSON |
+| `unauthorized` | 401 | Unauthorized | Missing or invalid authentication |
+| `forbidden` | 403 | Forbidden | Authenticated but not authorized |
+| `not_found` | 404 | Not Found | Resource doesn't exist |
+| `method_not_allowed` | 405 | Method Not Allowed | HTTP method not supported |
+| `conflict` | 409 | Conflict | Resource conflict (duplicate, etc.) |
+| `validation_error` | 422 | Validation Failed | Request validation failed |
+| `rate_limit_exceeded` | 429 | Too Many Requests | Rate limit exceeded |
 
-### Authorization Errors (403)
+### Metering API Errors (4xx)
 
-| Code | Title | Description |
-|------|-------|-------------|
-| `forbidden` | Forbidden | Action not permitted for this user |
-| `insufficient_scope` | Insufficient Scope | API key lacks required scope |
-| `account_suspended` | Account Suspended | User account is suspended |
-| `plan_required` | Plan Required | Action requires a specific plan |
-
-### Not Found Errors (404)
-
-| Code | Title | Description |
-|------|-------|-------------|
-| `not_found` | Not Found | Requested resource doesn't exist |
-| `user_not_found` | User Not Found | Specified user doesn't exist |
-| `route_not_found` | Route Not Found | No route matches the request |
-| `upstream_not_found` | Upstream Not Found | Specified upstream doesn't exist |
-| `plan_not_found` | Plan Not Found | Specified plan doesn't exist |
-
-### Validation Errors (400/422)
-
-| Code | Title | Description |
-|------|-------|-------------|
-| `validation_error` | Validation Error | Request failed validation |
-| `invalid_json` | Invalid JSON | Request body is not valid JSON |
-| `missing_field` | Missing Field | Required field not provided |
-| `invalid_field` | Invalid Field | Field value is invalid |
-| `invalid_email` | Invalid Email | Email format is invalid |
-
-### Rate Limiting Errors (429)
-
-| Code | Title | Description |
-|------|-------|-------------|
-| `rate_limited` | Rate Limit Exceeded | Too many requests in time window |
-| `quota_exceeded` | Quota Exceeded | Monthly quota has been exceeded |
-
-### Conflict Errors (409)
-
-| Code | Title | Description |
-|------|-------|-------------|
-| `conflict` | Conflict | Resource state conflict |
-| `duplicate_email` | Duplicate Email | Email already registered |
-| `duplicate_name` | Duplicate Name | Name already exists |
+| Code | Status | Title | When Used |
+|------|--------|-------|-----------|
+| `invalid_event_type` | 422 | Invalid Event Type | Unknown event type submitted |
+| `duplicate_event` | 409 | Duplicate Event | Event ID already processed |
+| `user_not_found` | 422 | User Not Found | user_id doesn't exist |
+| `invalid_quantity` | 422 | Invalid Quantity | Quantity <= 0 |
+| `invalid_timestamp` | 422 | Invalid Timestamp | Timestamp in future or too old |
+| `insufficient_scope` | 403 | Insufficient Scope | API key lacks required scope |
 
 ### Server Errors (5xx)
 
-| Code | Title | Description |
-|------|-------|-------------|
-| `internal_error` | Internal Error | Unexpected server error |
-| `upstream_error` | Upstream Error | Error from upstream service |
-| `upstream_timeout` | Upstream Timeout | Upstream service timed out |
-| `service_unavailable` | Service Unavailable | Service temporarily unavailable |
+| Code | Status | Title | When Used |
+|------|--------|-------|-----------|
+| `internal_error` | 500 | Internal Server Error | Unexpected server error |
+| `not_implemented` | 501 | Not Implemented | Feature not implemented |
+| `service_unavailable` | 503 | Service Unavailable | Service temporarily down |
 
 ---
 
 ## Error Response Examples
 
-### Invalid API Key
+### Bad Request (400)
+
+```json
+{
+  "errors": [{
+    "status": "400",
+    "code": "bad_request",
+    "title": "Bad Request",
+    "detail": "Invalid JSON body"
+  }]
+}
+```
+
+### Unauthorized (401)
 
 ```json
 {
   "errors": [{
     "status": "401",
-    "code": "invalid_api_key",
-    "title": "Invalid API Key",
-    "detail": "The provided API key is invalid or has been revoked"
+    "code": "unauthorized",
+    "title": "Unauthorized",
+    "detail": "Invalid API key"
   }]
 }
 ```
 
-### Rate Limited
+### Forbidden (403)
 
 ```json
 {
   "errors": [{
-    "status": "429",
-    "code": "rate_limited",
-    "title": "Rate Limit Exceeded",
-    "detail": "You have exceeded the rate limit of 60 requests per minute. Please retry after 45 seconds.",
-    "meta": {
-      "limit": 60,
-      "remaining": 0,
-      "reset_at": "2025-01-19T10:01:00Z",
-      "retry_after": 45
-    }
+    "status": "403",
+    "code": "forbidden",
+    "title": "Forbidden",
+    "detail": "Admin access required"
   }]
 }
 ```
 
-### Validation Error
+### Not Found (404)
+
+```json
+{
+  "errors": [{
+    "status": "404",
+    "code": "not_found",
+    "title": "Not Found",
+    "detail": "The requested user was not found"
+  }]
+}
+```
+
+### Validation Error (422)
 
 ```json
 {
   "errors": [
     {
       "status": "422",
-      "code": "missing_field",
-      "title": "Missing Field",
-      "detail": "Email is required",
+      "code": "validation_error",
+      "title": "Validation Failed",
+      "detail": "email is required",
       "source": {
-        "pointer": "/email"
+        "pointer": "/data/attributes/email"
       }
     },
     {
       "status": "422",
-      "code": "invalid_field",
-      "title": "Invalid Field",
-      "detail": "Plan ID does not exist",
+      "code": "validation_error",
+      "title": "Validation Failed",
+      "detail": "name is required",
       "source": {
-        "pointer": "/plan_id"
+        "pointer": "/data/attributes/name"
       }
     }
   ]
 }
 ```
 
-### Quota Exceeded
+### Rate Limited (429)
 
 ```json
 {
   "errors": [{
     "status": "429",
-    "code": "quota_exceeded",
-    "title": "Quota Exceeded",
-    "detail": "Your monthly quota of 10000 requests has been exceeded",
-    "meta": {
-      "quota_limit": 10000,
-      "quota_used": 10001,
-      "resets_at": "2025-02-01T00:00:00Z"
-    }
+    "code": "rate_limit_exceeded",
+    "title": "Too Many Requests",
+    "detail": "Rate limit exceeded. Try again in 15 seconds."
   }]
 }
 ```
 
-### Upstream Timeout
+### Internal Error (500)
 
 ```json
 {
   "errors": [{
-    "status": "504",
-    "code": "upstream_timeout",
-    "title": "Upstream Timeout",
-    "detail": "The upstream service did not respond within 30 seconds",
-    "meta": {
-      "upstream": "api-service",
-      "timeout_ms": 30000
-    }
+    "status": "500",
+    "code": "internal_error",
+    "title": "Internal Server Error",
+    "detail": "An internal error occurred"
   }]
 }
 ```
-
----
-
-## HTTP Status Code Mapping
-
-| Status Code | Category | Common Codes |
-|-------------|----------|--------------|
-| 400 | Bad Request | `invalid_json`, `validation_error` |
-| 401 | Unauthorized | `unauthorized`, `invalid_api_key`, `expired_api_key` |
-| 403 | Forbidden | `forbidden`, `insufficient_scope`, `account_suspended` |
-| 404 | Not Found | `not_found`, `user_not_found`, `route_not_found` |
-| 409 | Conflict | `conflict`, `duplicate_email` |
-| 422 | Unprocessable Entity | `validation_error`, `missing_field`, `invalid_field` |
-| 429 | Too Many Requests | `rate_limited`, `quota_exceeded` |
-| 500 | Internal Server Error | `internal_error` |
-| 502 | Bad Gateway | `upstream_error` |
-| 503 | Service Unavailable | `service_unavailable` |
-| 504 | Gateway Timeout | `upstream_timeout` |
 
 ---
 
@@ -225,6 +194,7 @@ APIGate returns errors in JSON:API format with consistent error codes.
 
 ```python
 import requests
+import time
 
 def api_call(url, api_key):
     response = requests.get(url, headers={'X-API-Key': api_key})
@@ -236,16 +206,16 @@ def api_call(url, api_key):
     error = response.json()['errors'][0]
     code = error['code']
 
-    if code == 'rate_limited':
-        retry_after = error.get('meta', {}).get('retry_after', 60)
-        time.sleep(retry_after)
-        return api_call(url, api_key)  # Retry
+    if code == 'rate_limit_exceeded':
+        # Retry after delay
+        time.sleep(60)
+        return api_call(url, api_key)
 
-    elif code == 'quota_exceeded':
-        raise QuotaExceededError(error['detail'])
-
-    elif code in ['invalid_api_key', 'expired_api_key']:
+    elif code == 'unauthorized':
         raise AuthenticationError(error['detail'])
+
+    elif code == 'validation_error':
+        raise ValidationError(error['detail'], error.get('source'))
 
     else:
         raise APIError(code, error['detail'])
@@ -256,5 +226,5 @@ def api_call(url, api_key):
 ## See Also
 
 - [[JSON-API-Format]] - Response format specification
-- [[Rate-Limiting]] - Rate limit behavior
-- [[Quotas]] - Quota management
+- [[Pagination]] - Collection pagination
+- [[Resource-Types]] - API resource types

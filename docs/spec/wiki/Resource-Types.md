@@ -33,8 +33,6 @@ Represents API customers.
 | Relationship | Type | Description |
 |--------------|------|-------------|
 | `plan` | plans | User's subscription plan |
-| `api_keys` | api_keys[] | User's API keys |
-| `groups` | groups[] | Groups user belongs to |
 
 **Example**:
 
@@ -48,7 +46,8 @@ Represents API customers.
       "name": "John Doe",
       "status": "active",
       "plan_id": "plan_pro",
-      "created_at": "2025-01-19T10:00:00Z"
+      "created_at": "2025-01-19T10:00:00Z",
+      "updated_at": "2025-01-19T10:00:00Z"
     },
     "relationships": {
       "plan": {
@@ -91,6 +90,7 @@ Represents subscription/pricing plans.
 | `is_default` | bool | Default plan for new users |
 | `enabled` | bool | Plan available for selection |
 | `created_at` | timestamp | Creation time |
+| `updated_at` | timestamp | Last update time |
 
 **Example**:
 
@@ -123,8 +123,8 @@ Represents authentication tokens for API access.
 
 **Endpoints**:
 - `GET /admin/keys` - List keys
-- `GET /admin/keys/:id` - Get key
-- `POST /admin/keys` - Create key (returns full key once)
+- `GET /admin/keys?user_id={id}` - List keys for user
+- `POST /admin/keys` - Create key (returns full key in meta, shown once)
 - `DELETE /admin/keys/:id` - Revoke key
 
 **Attributes**:
@@ -133,8 +133,6 @@ Represents authentication tokens for API access.
 |-----------|------|-------------|
 | `name` | string | Key name |
 | `prefix` | string | Key prefix for identification (immutable) |
-| `key` | string | Full key (only on creation) |
-| `scopes` | JSON | Allowed scopes |
 | `expires_at` | timestamp | Expiration time |
 | `last_used` | timestamp | Last usage time |
 | `revoked_at` | timestamp | Revocation time |
@@ -144,11 +142,9 @@ Represents authentication tokens for API access.
 
 | Relationship | Type | Description |
 |--------------|------|-------------|
-| `user` | users | Key owner (if user key) |
-| `group` | groups | Key owner (if group key) |
-| `created_by` | users | User who created the key |
+| `user` | users | Key owner |
 
-**Example** (on creation):
+**Example** (on creation - key in meta):
 
 ```json
 {
@@ -158,14 +154,16 @@ Represents authentication tokens for API access.
     "attributes": {
       "name": "Production Key",
       "prefix": "ak_abc123",
-      "key": "ak_abc123def456789...",
-      "scopes": ["read", "write"],
       "created_at": "2025-01-19T10:00:00Z"
     },
     "relationships": {
       "user": {
         "data": { "type": "users", "id": "usr_abc123" }
       }
+    },
+    "meta": {
+      "key": "ak_abc123def456789...",
+      "note": "Save this key securely. It will not be shown again."
     }
   }
 }
@@ -191,14 +189,16 @@ Represents backend services.
 | Attribute | Type | Description |
 |-----------|------|-------------|
 | `name` | string | Upstream name |
+| `description` | string | Upstream description |
 | `base_url` | string | Backend URL |
-| `timeout_ms` | int | Request timeout |
-| `max_idle_conns` | int | Connection pool size |
+| `timeout_ms` | int | Request timeout (default: 30000) |
+| `max_idle_conns` | int | Connection pool size (default: 100) |
+| `idle_conn_timeout_ms` | int | Idle connection timeout (default: 90000) |
 | `auth_type` | enum | none, bearer, header, basic |
 | `auth_header` | string | Custom auth header name |
-| `health_check_path` | string | Health check endpoint |
 | `enabled` | bool | Upstream active |
 | `created_at` | timestamp | Creation time |
+| `updated_at` | timestamp | Last update time |
 
 **Example**:
 
@@ -209,9 +209,11 @@ Represents backend services.
     "id": "ups_abc123",
     "attributes": {
       "name": "users-service",
+      "description": "User management backend",
       "base_url": "https://api.internal/users",
       "timeout_ms": 30000,
       "max_idle_conns": 100,
+      "idle_conn_timeout_ms": 90000,
       "auth_type": "bearer",
       "enabled": true
     }
@@ -245,12 +247,18 @@ Represents URL routing rules.
 | `path_pattern` | string | URL pattern to match |
 | `match_type` | enum | exact, prefix, regex |
 | `methods` | []string | HTTP methods (empty = all) |
+| `headers` | []object | Header match conditions |
 | `path_rewrite` | string | Path transformation |
-| `protocol` | enum | http, http_stream, sse, websocket |
+| `method_override` | string | Override HTTP method for upstream |
+| `metering_expr` | string | Expression to calculate request cost |
 | `metering_mode` | enum | request, bytes, response_field, custom |
+| `protocol` | enum | http, http_stream, sse, websocket |
 | `priority` | int | Matching priority |
 | `enabled` | bool | Route active |
+| `request_transform` | object | Request header/body transformations |
+| `response_transform` | object | Response header/body transformations |
 | `created_at` | timestamp | Creation time |
+| `updated_at` | timestamp | Last update time |
 
 **Relationships**:
 
@@ -267,64 +275,24 @@ Represents URL routing rules.
     "id": "rte_abc123",
     "attributes": {
       "name": "users-api",
+      "description": "User management API routes",
       "host_pattern": "api.example.com",
       "host_match_type": "exact",
       "path_pattern": "/api/v1/users/*",
       "match_type": "prefix",
       "methods": ["GET", "POST", "PUT", "DELETE"],
       "path_rewrite": "/users/$1",
-      "protocol": "http",
       "metering_mode": "request",
+      "protocol": "http",
       "priority": 100,
-      "enabled": true
+      "enabled": true,
+      "created_at": "2025-01-19T10:00:00Z",
+      "updated_at": "2025-01-19T10:00:00Z"
     },
     "relationships": {
       "upstream": {
         "data": { "type": "upstreams", "id": "ups_abc123" }
       }
-    }
-  }
-}
-```
-
----
-
-## Webhooks
-
-Represents webhook subscriptions.
-
-**Type**: `webhooks`
-
-**Endpoints**:
-- `GET /admin/webhooks` - List webhooks
-- `GET /admin/webhooks/:id` - Get webhook
-- `POST /admin/webhooks` - Create webhook
-- `PUT /admin/webhooks/:id` - Update webhook
-- `DELETE /admin/webhooks/:id` - Delete webhook
-
-**Attributes**:
-
-| Attribute | Type | Description |
-|-----------|------|-------------|
-| `name` | string | Webhook name |
-| `url` | string | Delivery URL |
-| `events` | []string | Subscribed events |
-| `secret` | string | Signing secret |
-| `enabled` | bool | Webhook active |
-| `created_at` | timestamp | Creation time |
-
-**Example**:
-
-```json
-{
-  "data": {
-    "type": "webhooks",
-    "id": "whk_abc123",
-    "attributes": {
-      "name": "Slack Notifications",
-      "url": "https://hooks.slack.com/services/xxx",
-      "events": ["user.created", "quota.exceeded"],
-      "enabled": true
     }
   }
 }

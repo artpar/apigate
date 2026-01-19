@@ -161,10 +161,12 @@ Note: `next` link is omitted on the last page.
     "total": 0,
     "page": 1,
     "per_page": 20,
-    "pages": 0
+    "pages": 1
   },
   "links": {
-    "self": "/api/users?page[number]=1&page[size]=20"
+    "self": "/api/users?page[number]=1&page[size]=20",
+    "first": "/api/users?page[number]=1&page[size]=20",
+    "last": "/api/users?page[number]=1&page[size]=20"
   }
 }
 ```
