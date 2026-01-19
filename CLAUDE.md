@@ -11,10 +11,28 @@ Before making any changes, understand and follow these documents:
 | Document | Purpose | When to Reference |
 |----------|---------|-------------------|
 | **[PROJECT_STANDARDS.md](PROJECT_STANDARDS.md)** | Core principles, release blockers | Every change |
+| **[docs/spec/](docs/spec/)** | API specification (JSON:API, errors, resources) | **Any API change** |
 | **[docs/user_journeys/](docs/user_journeys/)** | User flows, UX requirements | UI/UX changes |
 | **[docs/SYSTEM_ARCHITECTURE.md](docs/SYSTEM_ARCHITECTURE.md)** | Module system, data models | Architectural changes |
 | **[docs/TECHNICAL_FEATURES.md](docs/TECHNICAL_FEATURES.md)** | Feature inventory | Adding features |
 | **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)** | End-user documentation | User-facing changes |
+
+### API Specification (docs/spec/) - Source of Truth
+
+The `docs/spec/` directory contains the **authoritative specification** for all API behavior:
+
+| Spec Document | Governs | Implementation |
+|---------------|---------|----------------|
+| [json-api.md](docs/spec/json-api.md) | Response format, document structure | `pkg/jsonapi/` |
+| [error-codes.md](docs/spec/error-codes.md) | All error codes and HTTP statuses | `pkg/jsonapi/errors.go` |
+| [pagination.md](docs/spec/pagination.md) | Pagination parameters and behavior | `pkg/jsonapi/pagination.go` |
+| [resource-types.md](docs/spec/resource-types.md) | All API resource types and attributes | `adapters/http/admin/` |
+
+**Spec-Code Alignment Rules:**
+- If behavior is in the spec, it MUST be implemented in code
+- If behavior is in code, it MUST be documented in the spec
+- Tests MUST verify behavior matches the specification
+- Wiki is synced from docs/spec/ (not the other way)
 
 ---
 
@@ -64,13 +82,37 @@ Identify where the truth lives:
 
 | Concept | Source of Truth | Derived |
 |---------|-----------------|---------|
+| **API response format** | `docs/spec/json-api.md` | `pkg/jsonapi/` implementation |
+| **Error codes** | `docs/spec/error-codes.md` | `pkg/jsonapi/errors.go` |
+| **Pagination behavior** | `docs/spec/pagination.md` | `pkg/jsonapi/pagination.go` |
+| **Resource types** | `docs/spec/resource-types.md` | Handler implementations |
 | API endpoints | Go handlers | OpenAPI, docs |
 | Module schema | YAML in core/modules/ | UI forms |
-| Error codes | errors.go | Error docs |
 | CLI commands | Cobra definitions | CLI help |
 | Config options | Env var constants | README |
 
 **Never update derived documentation directly - update the source.**
+
+### 4. API Change Workflow
+
+For any API behavior change:
+
+```
+1. UPDATE SPEC FIRST
+   → Edit docs/spec/{relevant-file}.md
+   → Define exact expected behavior
+
+2. IMPLEMENT CODE
+   → Write code that matches spec exactly
+   → Use pkg/jsonapi/ builders
+
+3. WRITE/UPDATE TESTS
+   → Tests verify spec compliance
+   → Include response format assertions
+
+4. SYNC TO WIKI (optional)
+   → gh wiki sync (when ready)
+```
 
 ---
 
@@ -269,14 +311,64 @@ AFTER:
 ### Documentation Locations
 
 ```
+API Specification  → docs/spec/               # Source of truth for API behavior
+  - JSON:API format  → docs/spec/json-api.md
+  - Error codes      → docs/spec/error-codes.md
+  - Pagination       → docs/spec/pagination.md
+  - Resource types   → docs/spec/resource-types.md
+
 User guides        → docs/USER_GUIDE.md
 User journeys      → docs/user_journeys/
-Technical specs    → docs/TECHNICAL_FEATURES.md
+Technical features → docs/TECHNICAL_FEATURES.md
 Architecture       → docs/SYSTEM_ARCHITECTURE.md
 Module schemas     → core/modules/**/*.yaml
-Error codes        → domain/*/errors.go
-API handlers       → web/*.go, api/*.go
+JSON:API impl      → pkg/jsonapi/             # Implements docs/spec/
+API handlers       → adapters/http/admin/     # Uses pkg/jsonapi/
 ```
+
+---
+
+## GitHub Wiki Synchronization
+
+The GitHub wiki mirrors `docs/spec/` for external visibility.
+
+### First-Time Setup
+
+The wiki must be initialized via GitHub UI before git access works:
+1. Go to https://github.com/artpar/apigate/wiki
+2. Click "Create the first page"
+3. Save any content (will be replaced by sync)
+
+### Sync Workflow
+
+```bash
+# Clone wiki (first time only)
+git clone git@github.com:artpar/apigate.wiki.git /tmp/apigate-wiki
+
+# Sync spec to wiki
+cp docs/spec/README.md /tmp/apigate-wiki/Home.md
+cp docs/spec/json-api.md /tmp/apigate-wiki/JSON-API-Format.md
+cp docs/spec/error-codes.md /tmp/apigate-wiki/Error-Codes.md
+cp docs/spec/pagination.md /tmp/apigate-wiki/Pagination.md
+cp docs/spec/resource-types.md /tmp/apigate-wiki/Resource-Types.md
+
+cd /tmp/apigate-wiki
+git add -A
+git commit -m "Sync from docs/spec/"
+git push
+```
+
+### Wiki Structure
+
+| Wiki Page | Source |
+|-----------|--------|
+| Home | `docs/spec/README.md` |
+| JSON:API-Format | `docs/spec/json-api.md` |
+| Error-Codes | `docs/spec/error-codes.md` |
+| Pagination | `docs/spec/pagination.md` |
+| Resource-Types | `docs/spec/resource-types.md` |
+
+**Important**: Always edit `docs/spec/` first, then sync to wiki. Never edit wiki directly.
 
 ---
 
@@ -287,3 +379,5 @@ API handlers       → web/*.go, api/*.go
 > Every code change that affects behavior should update documentation in the same commit.
 >
 > If documentation can become stale, the architecture is wrong.
+>
+> **The spec defines behavior. Code implements the spec. Tests verify the spec.**

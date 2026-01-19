@@ -4,6 +4,17 @@
 
 This document provides a comprehensive technical overview of all features available in APIGate.
 
+### API Specification
+
+All API responses follow the **JSON:API v1.1 specification**. For detailed response format, error codes, and resource types, see:
+
+| Document | Description |
+|----------|-------------|
+| [spec/json-api.md](spec/json-api.md) | Response format, document structure |
+| [spec/error-codes.md](spec/error-codes.md) | All error codes and HTTP statuses |
+| [spec/pagination.md](spec/pagination.md) | Pagination parameters and behavior |
+| [spec/resource-types.md](spec/resource-types.md) | All API resource types |
+
 ---
 
 ## 1. Core Proxy Features
@@ -191,15 +202,20 @@ X-RateLimit-Reset: 1704067200
 
 ### 4.4 Exceeded Response
 
+> See [docs/spec/error-codes.md](spec/error-codes.md) for full error format specification.
+
 ```
 HTTP/1.1 429 Too Many Requests
 Retry-After: 15
-Content-Type: application/json
+Content-Type: application/vnd.api+json
 
 {
-  "error": "rate_limit_exceeded",
-  "message": "Rate limit exceeded. Try again in 15 seconds.",
-  "retry_after": 15
+  "errors": [{
+    "status": "429",
+    "code": "rate_limit_exceeded",
+    "title": "Too Many Requests",
+    "detail": "Rate limit exceeded. Try again in 15 seconds."
+  }]
 }
 ```
 
