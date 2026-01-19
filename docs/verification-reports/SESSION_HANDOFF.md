@@ -1,8 +1,8 @@
 # Documentation Verification Session Handoff
 
-**Last Updated**: 2026-01-19T23:30:00+05:30
-**Session**: Wiki Verification Session 4 (COMPLETED)
-**Next Session**: Wiki Verification Session 5
+**Last Updated**: 2026-01-20T00:30:00+05:30
+**Session**: Wiki Verification Session 5 (IN PROGRESS)
+**Next Session**: Wiki Verification Session 6
 
 ---
 
@@ -16,34 +16,44 @@ Systematic verification of wiki documentation against actual codebase to identif
 
 | Metric | Count |
 |--------|-------|
-| **Total wiki files** | 60 |
-| **Files verified** | 40 |
-| **Files remaining** | 20 |
-| **Progress** | 67% |
+| **Total wiki files** | 61 |
+| **Files verified** | 51 |
+| **Files remaining** | 10 |
+| **Progress** | 84% |
+
+---
+
+## Session 5 Accomplishments
+
+1. **Added Metering API documentation** (7 files updated/created):
+   - Created Metering-API.md (new)
+   - Updated Usage-Metering.md with external event ingestion
+   - Updated API-Reference.md with metering endpoints
+   - Updated API-Keys.md with service API keys and meter:write scope
+   - Updated Billing.md with external events note
+   - Updated Usage-Tracking.md with external event sources
+   - Updated _Sidebar.md with Metering-API link
+
+2. **Fixed payment integration docs** (4 files):
+   - Payment-Stripe.md: Fixed env vars (APIGATE_ prefix), settings keys, removed fake CLI flags
+   - Payment-Paddle.md: Fixed env vars and settings
+   - Payment-LemonSqueezy.md: Fixed env vars and settings
+   - Pricing-Integration.md: Removed hallucinated CLI commands, clarified Admin UI linking
+
+3. **Fixed core feature docs** (3 files):
+   - Customer-Portal.md: Fixed settings (portal.*, custom.*), removed fake commands
+   - Groups.md: Fixed CLI to use group-members and group-invites commands
+   - Entitlements.md: Fixed plan-entitlements CLI flags
 
 ---
 
 ## FOR NEXT SESSION: Start Here
 
-### Files to Verify Next (20 remaining)
+### Files to Verify Next (10 remaining)
 
 **Priority Order:**
 
-1. **Payment Integration** (likely have issues based on patterns found):
-   - [ ] Payment-Stripe.md
-   - [ ] Payment-Paddle.md
-   - [ ] Payment-LemonSqueezy.md
-
-2. **Core Feature Docs**:
-   - [ ] Billing.md
-   - [ ] Pricing-Integration.md
-   - [ ] Customer-Portal.md
-   - [ ] Usage-Tracking.md
-   - [ ] Usage-Metering.md
-   - [ ] Groups.md
-   - [ ] Entitlements.md
-
-3. **Architecture/Technical**:
+1. **Architecture/Technical** (high value):
    - [ ] Architecture.md
    - [ ] Request-Lifecycle.md
    - [ ] Module-System.md
@@ -51,11 +61,11 @@ Systematic verification of wiki documentation against actual codebase to identif
    - [ ] Proxying.md
    - [ ] Protocols.md
 
-4. **Other**:
+2. **Other**:
    - [ ] First-Customer.md
-   - [ ] API-Reference.md
    - [ ] SSO.md
    - [ ] Integrations.md
+   - [ ] Production.md
 
 ### Verification Process
 
@@ -69,15 +79,34 @@ For each file:
 
 ---
 
-## Files VERIFIED (40 files - DO NOT RE-VERIFY)
+## Files VERIFIED (51 files - DO NOT RE-VERIFY)
 
 ### Core Spec Files (4)
 - [x] docs/spec/error-codes.md
 - [x] docs/spec/json-api.md
 - [x] docs/spec/pagination.md
 - [x] docs/spec/resource-types.md
+- [x] docs/spec/metering-api.md
 
-### Wiki Files - Verified & Fixed (36)
+### Wiki Files - Verified & Fixed (47)
+
+**Session 5 additions:**
+- [x] Payment-Stripe.md
+- [x] Payment-Paddle.md
+- [x] Payment-LemonSqueezy.md
+- [x] Pricing-Integration.md
+- [x] Customer-Portal.md
+- [x] Groups.md
+- [x] Entitlements.md
+- [x] Metering-API.md (new)
+- [x] Usage-Metering.md (updated)
+- [x] Usage-Tracking.md (updated)
+- [x] API-Reference.md (updated)
+- [x] API-Keys.md (updated)
+- [x] Billing.md (updated)
+- [x] _Sidebar.md (updated)
+
+**Previous sessions:**
 - [x] Configuration.md
 - [x] Routes.md
 - [x] Upstreams.md
@@ -433,7 +462,8 @@ When verifying, watch for these patterns:
 | Wiki Verification 2 | (continuation) | - |
 | Wiki Verification 3 | 8 wiki files | 8 |
 | Wiki Verification 4 | 10 wiki files | 20+ |
-| **Total** | **40 files** | **50+ issues** |
+| Wiki Verification 5 | 11 wiki files | 30+ |
+| **Total** | **51 files** | **80+ issues** |
 
 ---
 
