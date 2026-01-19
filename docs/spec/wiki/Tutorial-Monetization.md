@@ -68,12 +68,13 @@ The free tier lets users try your API:
 
 ```bash
 apigate plans create \
+  --id free \
   --name "Free" \
   --description "Perfect for testing and small projects" \
   --price 0 \
   --rate-limit 60 \
-  --monthly-quota 1000 \
-  --default true
+  --requests 1000 \
+  --default
 ```
 
 Or via Admin UI:
@@ -88,11 +89,12 @@ For small businesses and side projects:
 
 ```bash
 apigate plans create \
+  --id starter \
   --name "Starter" \
   --description "For growing projects" \
   --price 2900 \
   --rate-limit 300 \
-  --monthly-quota 25000
+  --requests 25000
 ```
 
 ### Pro Plan
@@ -101,12 +103,12 @@ For production applications:
 
 ```bash
 apigate plans create \
+  --id pro \
   --name "Pro" \
   --description "For production workloads" \
   --price 9900 \
   --rate-limit 1000 \
-  --monthly-quota 100000 \
-  --features "priority_support,webhooks,analytics"
+  --requests 100000
 ```
 
 ### Enterprise Plan
@@ -115,81 +117,50 @@ For high-volume customers:
 
 ```bash
 apigate plans create \
+  --id enterprise \
   --name "Enterprise" \
   --description "Custom limits and dedicated support" \
   --price 0 \
   --rate-limit 10000 \
-  --monthly-quota 0 \
-  --features "priority_support,webhooks,analytics,dedicated_account,sla"
+  --requests -1
 ```
 
-Note: Enterprise is $0 because pricing is custom.
+Note: Enterprise is $0 because pricing is custom. Use `--requests -1` for unlimited.
 
 ---
 
-## Step 3: Configure Quota Enforcement
+## Step 3: Quota Behavior
 
-Decide what happens when users exceed quota:
+By default, when users exceed their monthly quota:
+- Requests are rejected with HTTP 429 status
+- Rate limit headers show the quota status
 
-### Hard Limit (Recommended for Free)
-
-Block requests when quota exceeded:
-
-```bash
-apigate plans update Free \
-  --quota-enforcement hard \
-  --quota-grace-percent 0
-```
-
-### Soft Limit (Good for Paid Plans)
-
-Allow overage, potentially charge later:
+For paid plans with overage billing, configure the `--overage` flag when creating plans:
 
 ```bash
-apigate plans update Starter \
-  --quota-enforcement soft \
-  --quota-grace-percent 20
-```
-
-### Warnings Only (Premium Plans)
-
-```bash
-apigate plans update Pro \
-  --quota-enforcement warn \
-  --quota-grace-percent 50
+# Starter plan with overage at $0.001 per request
+apigate plans create \
+  --id starter \
+  --name "Starter" \
+  --price 2900 \
+  --rate-limit 300 \
+  --requests 25000 \
+  --overage 1
 ```
 
 ---
 
-## Step 4: Set Up Quota Warnings
-
-Alert users before they hit limits:
-
-```bash
-apigate settings set quota_warning_thresholds "50,80,95,100"
-apigate settings set quota_notification_email true
-```
-
-Users will receive emails at:
-- 50% - Informational
-- 80% - Warning
-- 95% - Critical warning
-- 100% - Quota reached
-
----
-
-## Step 5: Enable Customer Portal
+## Step 4: Enable Customer Portal
 
 Let customers sign up and manage their subscriptions:
 
 ```bash
 # Enable portal
-apigate settings set portal_enabled true
-apigate settings set portal_registration_enabled true
+apigate settings set portal.enabled true
 
 # Branding
-apigate settings set portal_company_name "Your API Company"
-apigate settings set portal_logo_url "https://yoursite.com/logo.png"
+apigate settings set portal.app_name "Your API Company"
+apigate settings set custom.logo_url "https://yoursite.com/logo.png"
 ```
 
 Now customers can:
@@ -200,24 +171,21 @@ Now customers can:
 
 ---
 
-## Step 6: Add Payment Integration (Optional)
+## Step 5: Add Payment Integration (Optional)
 
 ### Stripe Integration
 
 ```bash
 # Configure Stripe
-apigate settings set payment_provider stripe
-apigate settings set stripe_secret_key "sk_live_xxx"
-apigate settings set stripe_webhook_secret "whsec_xxx"
+apigate settings set payment.provider stripe
+apigate settings set payment.stripe.secret_key "sk_live_xxx" --encrypted
+apigate settings set payment.stripe.webhook_secret "whsec_xxx" --encrypted
 ```
 
-Create Stripe products and link to plans:
-
-```bash
-# Link Stripe price to plan
-apigate plans update Starter --stripe-price-id "price_xxx"
-apigate plans update Pro --stripe-price-id "price_yyy"
-```
+Link Stripe prices to plans via the Admin UI:
+1. Go to **Plans** → Edit plan
+2. Enter the Stripe Price ID
+3. Save
 
 Now customers can subscribe with a credit card through the portal.
 
@@ -226,41 +194,23 @@ Now customers can subscribe with a credit card through the portal.
 You can still monetize manually:
 1. Customer contacts you
 2. You create invoice externally
-3. Manually assign them to paid plan
-
-```bash
-apigate users update customer@example.com --plan Pro
-```
+3. Manually assign them to paid plan via Admin UI
 
 ---
 
-## Step 7: Create Value Tiers
+## Step 6: Create Value Tiers
 
-Differentiate plans with features:
-
-### API Access Levels
-
-```bash
-# Free: Read-only access
-apigate routes update users-api --required-features ""
-apigate routes update users-write --required-features "write_access"
-
-# Create route that requires paid plan
-apigate routes create \
-  --name "analytics-api" \
-  --path "/api/analytics/*" \
-  --required-features "analytics"
-```
+Differentiate plans with rate limits:
 
 ### Rate Limit Tiers
 
-Higher plans get more capacity:
+Each plan has its own rate limit configured via `--rate-limit`:
 
-| Plan | Requests/min | Burst |
-|------|--------------|-------|
-| Free | 60 | 60 |
-| Starter | 300 | 500 |
-| Pro | 1000 | 2000 |
+| Plan | Requests/min | Monthly Quota |
+|------|--------------|---------------|
+| Free | 60 | 1,000 |
+| Starter | 300 | 25,000 |
+| Pro | 1000 | 100,000 |
 
 ### Support Tiers
 
@@ -272,19 +222,22 @@ Document in your pricing page:
 
 ---
 
-## Step 8: Set Up Analytics
+## Step 7: Monitor Usage
 
-Track your business metrics:
+Track usage via the Admin UI:
+
+1. Go to **Analytics** in the sidebar
+2. View overall API usage
+3. Click on individual users to see their usage
+
+Or use the CLI:
 
 ```bash
-# View revenue by plan
-apigate analytics revenue
+# View user usage summary
+apigate usage summary --user user@example.com
 
-# View plan distribution
-apigate analytics plans
-
-# View upgrade funnel
-apigate analytics upgrades
+# View usage history
+apigate usage history --user user@example.com --periods 6
 ```
 
 Key metrics to track:
@@ -295,7 +248,7 @@ Key metrics to track:
 
 ---
 
-## Step 9: Create Pricing Page Content
+## Step 8: Create Pricing Page Content
 
 Add to your website:
 
@@ -321,8 +274,6 @@ $99/month
 - 100,000 requests/month
 - 1,000 requests/minute
 - Priority support
-- Advanced analytics
-- Webhooks
 [Get Started]
 
 ## Enterprise
@@ -336,29 +287,23 @@ Custom pricing
 
 ---
 
-## Step 10: Monitor and Optimize
+## Step 9: Monitor and Optimize
 
 ### Weekly Review
 
-```bash
-# Check plan performance
-apigate analytics weekly
+Use the Admin UI Analytics page to:
+- View usage trends
+- Identify high-usage users
+- Track plan distribution
 
-# Users approaching quota
-apigate users list --quota-percent-gt 80
-
-# Recent upgrades
-apigate analytics upgrades --days 7
-```
-
-### Identify Optimization Opportunities
+### CLI Usage Reports
 
 ```bash
-# High-usage free users (potential upgrades)
-apigate users list --plan Free --quota-percent-gt 50
+# Check individual user usage
+apigate usage summary --user user@example.com
 
-# Low-usage paid users (churn risk)
-apigate users list --plan Starter --quota-percent-lt 10
+# View recent requests
+apigate usage recent --user user@example.com --limit 50
 ```
 
 ---
@@ -402,11 +347,10 @@ You've learned how to:
 
 1. ✅ Design a pricing strategy
 2. ✅ Create multiple pricing plans
-3. ✅ Configure quota enforcement
-4. ✅ Set up usage warnings
-5. ✅ Enable customer self-service
-6. ✅ (Optional) Add payment integration
-7. ✅ Differentiate plan features
-8. ✅ Set up business analytics
+3. ✅ Understand quota behavior
+4. ✅ Enable customer self-service
+5. ✅ (Optional) Add payment integration
+6. ✅ Differentiate plan tiers
+7. ✅ Monitor usage
 
 Your API is now ready to generate revenue!

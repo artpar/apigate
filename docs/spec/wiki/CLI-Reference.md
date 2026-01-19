@@ -165,10 +165,22 @@ apigate routes list
 # Get route details
 apigate routes get <route-id>
 
-# Create route
+# Create route (--name, --path, --upstream are required)
 apigate routes create \
+  --name "API v1" \
   --path "/api/v1/*" \
   --upstream <upstream-id>
+
+# Create with all options
+apigate routes create \
+  --name "API v1" \
+  --path "/api/v1/*" \
+  --upstream <upstream-id> \
+  --match prefix \
+  --methods "GET,POST" \
+  --protocol http \
+  --priority 10 \
+  --rewrite "/v1"
 
 # Enable/disable route
 apigate routes enable <route-id>
@@ -177,6 +189,16 @@ apigate routes disable <route-id>
 # Delete route
 apigate routes delete <route-id>
 ```
+
+**Available flags for `routes create`:**
+- `--name` (required) - Route name
+- `--path` (required) - Path pattern to match
+- `--upstream` (required) - Upstream ID
+- `--match` - Match type: exact, prefix, regex (default: prefix)
+- `--methods` - HTTP methods, comma-separated (empty = all)
+- `--protocol` - Protocol: http, http_stream, sse, websocket (default: http)
+- `--priority` - Route priority, higher matches first (default: 0)
+- `--rewrite` - Path rewrite expression
 
 **Note**: `apigate routes` is deprecated. Use `apigate mod routes` instead.
 
@@ -207,16 +229,27 @@ apigate settings delete <key>
 
 ## Usage Statistics
 
+Usage commands require specifying a user via `--user` or `--email`:
+
 ```bash
 # Usage summary for current period
-apigate usage summary
+apigate usage summary --user <user-id>
+apigate usage summary --email user@example.com
 
-# Usage history
-apigate usage history
+# Usage history (last N periods)
+apigate usage history --user <user-id>
+apigate usage history --user <user-id> --periods 12
 
 # Recent requests
-apigate usage recent
+apigate usage recent --user <user-id>
+apigate usage recent --email user@example.com --limit 50
 ```
+
+**Available flags:**
+- `--user` - User ID
+- `--email` - User email (alternative to --user)
+- `--periods` - Number of periods for history (default: 6)
+- `--limit` - Number of recent requests (default: 20)
 
 ---
 
@@ -225,15 +258,30 @@ apigate usage recent
 The `apigate mod` command provides CRUD operations through the module system:
 
 ```bash
+# List available modules
+apigate mod
+
 # Examples
 apigate mod users list
 apigate mod plans get free
-apigate mod upstreams create --name "API" --base_url "https://api.example.com"
+apigate mod upstreams create --name "API" --url "https://api.example.com"
 apigate mod routes list
 apigate mod api_keys list
+apigate mod groups list
+apigate mod certificates list
 ```
 
-Available modules depend on the loaded configuration.
+**Available modules:**
+- `users` - User accounts
+- `plans` - Pricing plans
+- `routes` - API routes
+- `upstreams` - Backend services
+- `api_keys` - API keys
+- `groups` - Team/organization groups
+- `group_members` - Group memberships
+- `certificates` - TLS certificates
+- `webhooks` - Webhook configurations
+- `settings` - System settings
 
 ---
 

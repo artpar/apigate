@@ -39,18 +39,18 @@ You'll need:
 
 ```bash
 # Set payment provider
-apigate settings set payment_provider stripe
+apigate settings set payment.provider stripe
 
-# Configure API key
-apigate settings set stripe_secret_key "sk_test_xxx"
+# Configure API key (use --encrypted for secrets)
+apigate settings set payment.stripe.secret_key "sk_test_xxx" --encrypted
 
 # (We'll set webhook secret in Step 5)
 ```
 
 Or via environment:
 ```bash
-export APIGATE_PAYMENT_PROVIDER=stripe
-export APIGATE_STRIPE_SECRET_KEY=sk_test_xxx
+export APIGATE_BILLING_MODE=stripe
+export APIGATE_BILLING_STRIPE_KEY=sk_test_xxx
 ```
 
 ---
@@ -106,18 +106,18 @@ stripe prices create \
 
 ## Step 4: Link Stripe Prices to APIGate Plans
 
-```bash
-# Link Starter plan
-apigate plans update Starter --stripe-price-id "price_xxx"
+Link Stripe prices to plans via the Admin UI:
 
-# Link Pro plan
-apigate plans update Pro --stripe-price-id "price_yyy"
-```
+1. Go to **Plans** in the sidebar
+2. Click **Edit** on the Starter plan
+3. Enter the Stripe Price ID: `price_xxx`
+4. Click **Save**
+5. Repeat for Pro plan with `price_yyy`
 
 Verify the link:
 ```bash
-apigate plans get Starter
-# Shows: stripe_price_id: price_xxx
+apigate plans get starter
+# Shows: Stripe Price: price_xxx
 ```
 
 ---
@@ -145,7 +145,7 @@ In Stripe Dashboard → Developers → Webhooks:
 ### Configure Webhook Secret
 
 ```bash
-apigate settings set stripe_webhook_secret "whsec_xxx"
+apigate settings set payment.stripe.webhook_secret "whsec_xxx" --encrypted
 ```
 
 ### Test Webhooks Locally
@@ -240,14 +240,13 @@ APIGate automatically handles these events:
 
 ### Custom Event Handling
 
-Forward events to your system:
+Configure webhooks via the Admin UI:
 
-```bash
-apigate webhooks create \
-  --name "Billing Events" \
-  --url "https://your-backend.com/billing" \
-  --events "subscription.created,subscription.upgraded,subscription.cancelled"
-```
+1. Go to **Webhooks** in the sidebar
+2. Click **Add Webhook**
+3. Enter URL: `https://your-backend.com/billing`
+4. Select events to forward
+5. Save
 
 ---
 
@@ -255,40 +254,21 @@ apigate webhooks create \
 
 ### View Subscription
 
-```bash
-apigate users subscription test@example.com
-```
-
-Output:
-```
-Subscription: sub_xxx
-Plan: Pro
-Status: active
-Current period: 2025-01-19 to 2025-02-19
-Payment method: •••• 4242
-Next invoice: $99.00 on 2025-02-19
-```
+View user subscription details in the Admin UI:
+1. Go to **Users** → Click on a user
+2. View their subscription status and payment details
 
 ### Cancel Subscription
 
-```bash
-# Via portal: User clicks "Cancel Subscription"
-
-# Via API
-curl -X POST http://localhost:8080/admin/users/<id>/cancel-subscription
-
-# Via CLI
-apigate users cancel-subscription test@example.com
-```
+Cancellation options:
+- **Via portal**: User clicks "Cancel Subscription" in their account
+- **Via Admin UI**: Edit user and change their plan to Free
 
 Subscription cancels at end of billing period.
 
 ### Upgrade/Downgrade
 
-```bash
-# Change plan
-apigate users change-plan test@example.com --plan Enterprise
-```
+Users can upgrade/downgrade via the customer portal, or admins can change plans in the Admin UI.
 
 Stripe prorates automatically.
 
@@ -303,8 +283,8 @@ Stripe prorates automatically.
 3. Update APIGate:
 
 ```bash
-apigate settings set stripe_secret_key "sk_live_xxx"
-apigate settings set stripe_webhook_secret "whsec_live_xxx"
+apigate settings set payment.stripe.secret_key "sk_live_xxx" --encrypted
+apigate settings set payment.stripe.webhook_secret "whsec_live_xxx" --encrypted
 ```
 
 4. Create live webhook endpoint in Stripe
@@ -338,11 +318,7 @@ stripe prices create \
 
 ### Report Usage
 
-APIGate reports usage automatically at end of billing period, or you can trigger manually:
-
-```bash
-apigate billing report-usage --period 2025-01
-```
+APIGate reports usage automatically at the end of each billing period.
 
 ---
 
@@ -357,7 +333,7 @@ apigate billing report-usage --period 2025-01
 
 ### User Not Upgraded After Payment
 
-1. Check webhook logs: `apigate logs --filter stripe`
+1. Check APIGate logs for webhook events
 2. Verify `customer.email` matches user email
 3. Check Stripe customer metadata
 

@@ -278,10 +278,8 @@ If you prefer CLI over UI:
 # Start APIGate
 ./apigate serve &
 
-# Complete setup
-./apigate setup \
-  --admin-email admin@example.com \
-  --admin-password "SecurePass123!"
+# Create admin user (you'll be prompted for password)
+./apigate admin create --email admin@example.com
 
 # Create upstream
 ./apigate upstreams create \
@@ -296,17 +294,18 @@ If you prefer CLI over UI:
 
 # Create plan
 ./apigate plans create \
+  --id "free" \
   --name "Free" \
-  --price 0 \
   --rate-limit 60 \
-  --monthly-quota 1000 \
+  --requests 1000 \
+  --price 0 \
   --default
 
 # Create user
 ./apigate users create \
   --email "test@example.com" \
   --name "Test User" \
-  --plan "Free"
+  --plan "free"
 
 # Create API key
 ./apigate keys create \

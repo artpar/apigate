@@ -55,12 +55,17 @@ An **upstream** is your backend API that APIGate will proxy requests to.
 ### Via API
 
 ```bash
-curl -X POST http://localhost:8080/admin/upstreams \
-  -H "Content-Type: application/json" \
+curl -X POST http://localhost:8080/api/upstreams \
+  -H "Content-Type: application/vnd.api+json" \
   -H "Cookie: session=YOUR_SESSION" \
   -d '{
-    "name": "my-api",
-    "base_url": "https://api.example.com"
+    "data": {
+      "type": "upstreams",
+      "attributes": {
+        "name": "my-api",
+        "base_url": "https://api.example.com"
+      }
+    }
   }'
 ```
 

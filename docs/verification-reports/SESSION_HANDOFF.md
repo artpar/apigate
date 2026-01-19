@@ -1,7 +1,8 @@
 # Documentation Verification Session Handoff
 
-**Last Updated**: 2026-01-19T21:00:00+05:30
-**Session**: Wiki Verification Session 3
+**Last Updated**: 2026-01-19T23:30:00+05:30
+**Session**: Wiki Verification Session 4 (COMPLETED)
+**Next Session**: Wiki Verification Session 5
 
 ---
 
@@ -16,14 +17,59 @@ Systematic verification of wiki documentation against actual codebase to identif
 | Metric | Count |
 |--------|-------|
 | **Total wiki files** | 60 |
-| **Files verified** | 30 |
-| **Files remaining** | 30 |
-| **Issues found** | 27 |
-| **Issues fixed** | 26 |
+| **Files verified** | 40 |
+| **Files remaining** | 20 |
+| **Progress** | 67% |
 
 ---
 
-## Files VERIFIED (30 files - DO NOT RE-VERIFY)
+## FOR NEXT SESSION: Start Here
+
+### Files to Verify Next (20 remaining)
+
+**Priority Order:**
+
+1. **Payment Integration** (likely have issues based on patterns found):
+   - [ ] Payment-Stripe.md
+   - [ ] Payment-Paddle.md
+   - [ ] Payment-LemonSqueezy.md
+
+2. **Core Feature Docs**:
+   - [ ] Billing.md
+   - [ ] Pricing-Integration.md
+   - [ ] Customer-Portal.md
+   - [ ] Usage-Tracking.md
+   - [ ] Usage-Metering.md
+   - [ ] Groups.md
+   - [ ] Entitlements.md
+
+3. **Architecture/Technical**:
+   - [ ] Architecture.md
+   - [ ] Request-Lifecycle.md
+   - [ ] Module-System.md
+   - [ ] Transformations.md
+   - [ ] Proxying.md
+   - [ ] Protocols.md
+
+4. **Other**:
+   - [ ] First-Customer.md
+   - [ ] API-Reference.md
+   - [ ] SSO.md
+   - [ ] Integrations.md
+
+### Verification Process
+
+For each file:
+1. Read the wiki file
+2. For each CLI command: verify against `cmd/apigate/*.go` or `core/modules/*.yaml`
+3. For each setting key: verify against `domain/settings/settings.go`
+4. For each env var: verify has `APIGATE_` prefix and exists in `config/config.go`
+5. For feature claims: verify in codebase (PostgreSQL=NO, Redis=NO, Scopes=NO)
+6. Fix or flag issues
+
+---
+
+## Files VERIFIED (40 files - DO NOT RE-VERIFY)
 
 ### Core Spec Files (4)
 - [x] docs/spec/error-codes.md
@@ -31,7 +77,7 @@ Systematic verification of wiki documentation against actual codebase to identif
 - [x] docs/spec/pagination.md
 - [x] docs/spec/resource-types.md
 
-### Wiki Files - Verified & Fixed (26)
+### Wiki Files - Verified & Fixed (36)
 - [x] Configuration.md
 - [x] Routes.md
 - [x] Upstreams.md
@@ -57,54 +103,16 @@ Systematic verification of wiki documentation against actual codebase to identif
 - [x] Certificates.md
 - [x] Troubleshooting.md
 - [x] FAQ.md
+- [x] CLI-Reference.md
+- [x] Installation.md
+- [x] Quick-Start.md
+- [x] Tutorial-Basic-API.md
+- [x] Tutorial-Basic-Setup.md
+- [x] Tutorial-Custom-Portal.md
+- [x] Tutorial-Monetization.md
+- [x] Tutorial-Stripe.md
+- [x] Tutorial-Production.md
 - [x] docs/spec/README.md (has 1 unfixed issue - test references)
-
----
-
-## Files NOT YET VERIFIED (30 files - VERIFY NEXT)
-
-### High Priority (likely have issues based on patterns)
-- [ ] **CLI-Reference.md** - LIKELY HAS MANY HALLUCINATIONS
-- [ ] **Installation.md** - Check commands
-- [ ] **Quick-Start.md** - Check commands
-- [ ] **Production.md** - Check deployment advice
-- [ ] **Tutorial-Basic-API.md** - Check CLI examples
-- [ ] **Tutorial-Basic-Setup.md** - Check CLI examples
-- [ ] **Tutorial-Monetization.md** - Check CLI examples
-- [ ] **Tutorial-Stripe.md** - Check settings/commands
-- [ ] **Tutorial-Production.md** - Check deployment commands
-- [ ] **Tutorial-Custom-Portal.md** - Check customization settings
-
-### Medium Priority
-- [ ] Architecture.md
-- [ ] Request-Lifecycle.md
-- [ ] Module-System.md
-- [ ] Transformations.md
-- [ ] Proxying.md
-- [ ] Protocols.md
-- [ ] Customer-Portal.md
-- [ ] Usage-Tracking.md
-- [ ] Usage-Metering.md
-- [ ] Groups.md
-- [ ] Entitlements.md
-- [ ] Billing.md
-- [ ] Pricing-Integration.md
-- [ ] First-Customer.md
-
-### Payment Integration (check settings/commands)
-- [ ] Payment-Stripe.md
-- [ ] Payment-Paddle.md
-- [ ] Payment-LemonSqueezy.md
-
-### Other
-- [ ] API-Reference.md
-- [ ] JSON-API-Format.md
-- [ ] Error-Codes.md (wiki version)
-- [ ] Pagination.md (wiki version)
-- [ ] Resource-Types.md (wiki version)
-- [ ] SSO.md
-- [ ] Integrations.md
-- [ ] _Sidebar.md
 
 ---
 
@@ -122,31 +130,37 @@ apigate shell
 
 # Settings
 apigate settings set/get/list
+# Use: apigate settings set key.subkey "value"
+# Use --encrypted for secrets
 
 # Plans
 apigate plans list/get/create/delete/enable/disable
-# Flags: --id, --name, --description, --rate-limit, --requests, --price, --overage, --default
+# Flags: --id (required), --name (required), --description, --rate-limit, --requests, --price, --overage, --default
+# NOTE: No --stripe-price-id flag, no --features flag, no --monthly-quota flag
 
 # Routes
 apigate routes list/get/create/update/delete/enable/disable
-# Flags: --name, --path, --upstream, --match, --methods, --protocol, --priority
+# Flags: --name (required), --path (required), --upstream (required), --match, --methods, --protocol, --priority, --rewrite
 
 # Users
 apigate users list/get/create/delete/activate/deactivate/set-password
-# NO: users update, users suspend
+# NO: users update, users suspend, users subscription, users change-plan
 
 # Keys
 apigate keys list/create/revoke
 # Flags: --user, --name, --expires
-# NO: keys get, keys update, api-keys (wrong name)
+# NO: keys get, keys update
+# WRONG NAME: api-keys (correct is: keys)
 
 # Admin
 apigate admin create
 # Flags: --email
+# NO: admin invite, admin invites list/revoke/resend
 
 # Upstreams
 apigate upstreams list/get/create/update/delete/enable/disable
 # Flags: --name, --url, --timeout, --auth-type, --auth-header, --auth-value
+# NO: upstreams health
 
 # Groups
 apigate groups list/list-user/get/create/update/delete/suspend/activate
@@ -159,24 +173,29 @@ apigate group-members list/list-user/create
 # Certificates
 apigate certificates list/get/get-domain/create/delete/revoke/expiring/expired
 # Flags: --domain, --cert-pem, --key-pem, --chain-pem, --expires-at, --days, --reason
+# NO: certificates obtain, certificates renew, certificates export
 
-# Usage
-apigate usage
-# Flags: --user
+# Usage (REQUIRES --user or --email flag)
+apigate usage summary --user <user-id>
+apigate usage summary --email <email>
+apigate usage history --user <user-id> --periods 6
+apigate usage recent --user <user-id> --limit 50
 
-# Generic CRUD
+# Generic CRUD via module system
 apigate mod <module> <action>
+# Modules: users, plans, routes, upstreams, api_keys, groups, group_members, certificates, webhooks, settings
 ```
 
 ### CLI Commands That DO NOT EXIST
 
 ```bash
-# THESE ARE HALLUCINATIONS - DO NOT DOCUMENT
+# HALLUCINATIONS - DO NOT DOCUMENT
 apigate migrate
 apigate doctor
 apigate logs
 apigate analytics
-apigate webhooks
+apigate billing
+apigate webhooks create  # use Admin UI
 apigate webhook-deliveries
 apigate oauth-identities
 apigate oauth-states
@@ -187,85 +206,197 @@ apigate admin invite
 apigate admin invites list/revoke/resend
 apigate upstreams health
 apigate api-keys  # Wrong name - use 'keys'
+apigate users update
+apigate users subscription
+apigate users cancel-subscription
+apigate users change-plan
+apigate billing report-usage
+apigate plans update ... --stripe-price-id  # Use Admin UI
+apigate plans update ... --quota-enforcement
+apigate plans update ... --features
+apigate plans create ... --monthly-quota  # Use --requests
+apigate setup  # Use: apigate admin create
 ```
 
-### Settings Namespaces (use with `apigate settings set`)
+### Settings Namespaces
+
+Use with `apigate settings set <key> <value>`:
 
 ```
-custom.*           - Branding (logo_url, primary_color, support_email, docs_css, portal_css)
-email.*            - Email config (provider, from_address, from_name, smtp.*)
-payment.*          - Payment (provider, stripe.api_key, paddle.*, lemonsqueezy.*)
-oauth.google.*     - Google OAuth
-oauth.github.*     - GitHub OAuth
-oauth.oidc.*       - Generic OIDC
-ratelimit.*        - Rate limiting (burst_tokens)
-tls.*              - TLS/HTTPS (enabled, mode, domain, acme_email, cert_path, key_path, etc.)
+custom.*           - Branding/customization
+  custom.logo_url
+  custom.primary_color
+  custom.support_email
+  custom.support_url
+  custom.footer_html
+  custom.docs_css
+  custom.portal_css
+  custom.docs_hero_title
+  custom.docs_hero_subtitle
+  custom.portal_welcome_html
+  custom.docs_home_html
+
+email.*            - Email configuration
+  email.provider (smtp, mock, none)
+  email.from_address
+  email.from_name
+  email.smtp.host
+  email.smtp.port
+  email.smtp.username
+  email.smtp.password
+  email.smtp.use_tls
+
+payment.*          - Payment providers
+  payment.provider (stripe, paddle, lemonsqueezy, none)
+  payment.stripe.secret_key
+  payment.stripe.public_key
+  payment.stripe.webhook_secret
+  payment.paddle.vendor_id
+  payment.paddle.api_key
+  payment.paddle.public_key
+  payment.paddle.webhook_secret
+  payment.lemonsqueezy.api_key
+  payment.lemonsqueezy.store_id
+  payment.lemonsqueezy.webhook_secret
+
+oauth.*            - OAuth providers
+  oauth.enabled
+  oauth.auto_link_email
+  oauth.allow_registration
+  oauth.google.enabled/client_id/client_secret
+  oauth.github.enabled/client_id/client_secret
+  oauth.oidc.enabled/name/issuer_url/client_id/client_secret/scopes
+
+ratelimit.*        - Rate limiting
+  ratelimit.enabled
+  ratelimit.burst_tokens
+  ratelimit.window_secs
+
+tls.*              - TLS/HTTPS
+  tls.enabled
+  tls.mode (acme, manual, none)
+  tls.domain
+  tls.acme_email
+  tls.cert_path
+  tls.key_path
+  tls.http_redirect
+  tls.min_version
+  tls.acme_staging
+
+portal.*           - Portal settings
+  portal.enabled
+  portal.base_url
+  portal.app_name
+
+groups.*           - Groups feature
+  groups.enabled
+  groups.max_per_user
+  groups.max_members
+  groups.allow_member_keys
+  groups.invite_ttl
+
+auth.*             - Authentication
+  auth.mode
+  auth.header
+  auth.jwt_secret
+  auth.key_prefix
+  auth.session_ttl
+  auth.require_email_verification
+```
+
+### WRONG Settings (DO NOT USE)
+
+```
+branding.*         - WRONG, use custom.*
+portal_enabled     - WRONG, use portal.enabled
+payment_provider   - WRONG, use payment.provider
+stripe_secret_key  - WRONG, use payment.stripe.secret_key
+quota_*            - DO NOT EXIST
 ```
 
 ### Environment Variables
 
-**All must have `APIGATE_` prefix:**
-```
+All must have `APIGATE_` prefix:
+
+```bash
+# Server
 APIGATE_SERVER_HOST
 APIGATE_SERVER_PORT
-APIGATE_ADMIN_PORT
-APIGATE_DATABASE_PATH
+
+# Upstream
+APIGATE_UPSTREAM_URL
+
+# Database
+APIGATE_DATABASE_DSN
+APIGATE_DATABASE_DRIVER
+
+# Logging
 APIGATE_LOG_LEVEL
+APIGATE_LOG_FORMAT
+
+# Auth
+APIGATE_AUTH_MODE
+APIGATE_AUTH_KEY_PREFIX
+
+# Billing
+APIGATE_BILLING_MODE
+APIGATE_BILLING_STRIPE_KEY
+
+# Rate Limit
+APIGATE_RATELIMIT_ENABLED
+APIGATE_RATELIMIT_BURST
+APIGATE_RATELIMIT_WINDOW
+
+# Portal
+APIGATE_PORTAL_ENABLED
+APIGATE_PORTAL_BASE_URL
+APIGATE_PORTAL_APP_NAME
+
+# Email
+APIGATE_EMAIL_PROVIDER
 APIGATE_SMTP_HOST
 APIGATE_SMTP_PORT
 APIGATE_SMTP_USERNAME
 APIGATE_SMTP_PASSWORD
-APIGATE_SMTP_FROM_ADDRESS
+APIGATE_SMTP_FROM
+APIGATE_SMTP_FROM_NAME
 APIGATE_SMTP_USE_TLS
+
+# Features
+APIGATE_METRICS_ENABLED
+APIGATE_METRICS_PATH
+APIGATE_OPENAPI_ENABLED
 ```
 
-**DO NOT document these (hallucinated):**
-- TLS_ACME_* (use settings instead)
-- DATABASE_* without APIGATE_ prefix
-- Any env var without APIGATE_ prefix
-
-### Key Facts
+### Key Facts (IMPORTANT)
 
 | Fact | Truth |
 |------|-------|
-| Database | **SQLite ONLY** - no PostgreSQL |
+| Database | **SQLite ONLY** - PostgreSQL NOT supported |
 | Redis | **NOT SUPPORTED** |
 | API Key Scopes | **DO NOT EXIST** |
 | Migrations | **AUTOMATIC** on startup |
-| Email Providers | smtp, mock, none only |
-| Payment Providers | stripe, paddle, lemonsqueezy, dummy, none |
+| Email Providers | smtp, mock, none ONLY (no sendgrid, ses, etc.) |
+| Payment Providers | stripe, paddle, lemonsqueezy, none |
 | Webhook Retry Count | **3** (not 6) |
-
----
-
-## Verification Process
-
-For each file:
-
-1. **Read the wiki file**
-2. **For each CLI command mentioned:**
-   - Check if it exists in `cmd/apigate/*.go` or module YAML files
-   - Verify flags match actual implementation
-3. **For each environment variable:**
-   - Must have `APIGATE_` prefix
-   - Check `config/config.go` for actual vars
-4. **For each setting key:**
-   - Check `domain/settings/settings.go` for actual keys
-5. **For any feature claims:**
-   - Verify in codebase (PostgreSQL=NO, Redis=NO, Scopes=NO)
-6. **Fix or flag issues**
+| Plan Stripe Price ID | Set via **Admin UI only**, not CLI |
+| Plan Features Flag | **DOES NOT EXIST** |
+| Config File | YAML supported, loaded via `--config` flag |
 
 ---
 
 ## Common Hallucination Patterns Found
 
+When verifying, watch for these patterns:
+
 1. **Wrong command names**: `api-keys` instead of `keys`
-2. **Non-existent subcommands**: `analytics`, `doctor`, `logs`, `migrate`
-3. **Fake flags**: `--rate-limit-burst`, `--monthly-quota`, `--scopes`
+2. **Non-existent subcommands**: `analytics`, `doctor`, `logs`, `migrate`, `billing`
+3. **Fake flags**: `--stripe-price-id`, `--features`, `--monthly-quota`, `--quota-enforcement`
 4. **Wrong env var prefix**: Missing `APIGATE_` prefix
 5. **Non-existent features**: PostgreSQL, Redis, API key scopes
-6. **Wrong setting prefixes**: `branding.*` instead of `custom.*`
-7. **Fake providers**: `sendgrid`, `log` email providers
+6. **Wrong setting prefixes**: `branding.*` instead of `custom.*`, underscores instead of dots
+7. **Fake providers**: `sendgrid`, `ses`, `postmark` email providers
+8. **Hallucinated update commands**: `apigate users update`, `apigate webhooks create`
 
 ---
 
@@ -283,23 +414,12 @@ For each file:
 
 ---
 
-## Outstanding Issue
+## Outstanding Issues
 
-**docs/spec/README.md** references non-existent tests:
-- `TestErrorCodesDocumented`
-- `TestResourceTypesDocumented`
-
-Decision needed: Create these tests or remove references.
-
----
-
-## How to Continue
-
-1. Start with **CLI-Reference.md** - likely has the most issues
-2. Then tutorials (Tutorial-*.md) - check all CLI examples
-3. Then remaining feature docs
-4. Update `verification-state.json` after each file
-5. Create this handoff doc at end of session
+1. **docs/spec/README.md** references non-existent tests:
+   - `TestErrorCodesDocumented`
+   - `TestResourceTypesDocumented`
+   - Decision needed: Create these tests or remove references
 
 ---
 
@@ -312,4 +432,16 @@ Decision needed: Create these tests or remove references.
 | Wiki Verification | 11 wiki files | 10 |
 | Wiki Verification 2 | (continuation) | - |
 | Wiki Verification 3 | 8 wiki files | 8 |
-| **Total** | **30 files** | **26 issues** |
+| Wiki Verification 4 | 10 wiki files | 20+ |
+| **Total** | **40 files** | **50+ issues** |
+
+---
+
+## Next Session Instructions
+
+1. Read this handoff document first
+2. Start with Payment-*.md files (highest priority)
+3. Use the "Critical Knowledge" section to verify commands/settings
+4. Fix issues inline as you find them
+5. Update this handoff document with progress
+6. Goal: Complete remaining 20 files to reach 100%

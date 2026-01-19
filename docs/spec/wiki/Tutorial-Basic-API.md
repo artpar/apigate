@@ -35,8 +35,8 @@ apigate upstreams create \
   --name "My Backend" \
   --url "http://localhost:3000"
 
-# Or set default upstream
-export UPSTREAM_URL=http://localhost:3000
+# Or set default upstream via environment variable
+export APIGATE_UPSTREAM_URL=http://localhost:3000
 ```
 
 ---
@@ -45,10 +45,11 @@ export UPSTREAM_URL=http://localhost:3000
 
 ```bash
 apigate plans create \
+  --id "free" \
   --name "Free" \
   --rate-limit 60 \
-  --requests-per-month 1000 \
-  --is-default true
+  --requests 1000 \
+  --default
 ```
 
 ---
@@ -67,7 +68,7 @@ apigate users create \
 ## Step 5: Create an API Key
 
 ```bash
-apigate api-keys create \
+apigate keys create \
   --user <user-id> \
   --name "Test Key"
 
@@ -94,11 +95,11 @@ curl -H "X-API-Key: ak_abc123..." http://localhost:8080/api/users
 ## Step 7: Check Usage
 
 ```bash
-# View user's usage
-apigate usage get --user <user-id>
+# View user's usage summary
+apigate usage summary --user <user-id>
 
 # View in admin UI
-open http://localhost:9090/admin/users/<user-id>
+open http://localhost:8080/ui/users/<user-id>
 ```
 
 ---

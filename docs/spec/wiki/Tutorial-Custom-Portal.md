@@ -13,51 +13,49 @@ Customize the customer portal for your brand.
 
 ## Step 1: Basic Branding
 
-Set your logo and colors:
+Set your logo and primary color:
 
 ```bash
 # Logo
-apigate settings set branding.logo_url "https://example.com/logo.png"
-apigate settings set branding.favicon_url "https://example.com/favicon.ico"
+apigate settings set custom.logo_url "https://example.com/logo.png"
 
-# Colors
-apigate settings set branding.primary_color "#4F46E5"
-apigate settings set branding.secondary_color "#10B981"
+# Primary brand color (hex)
+apigate settings set custom.primary_color "#4F46E5"
 ```
 
 ---
 
-## Step 2: Company Information
+## Step 2: Contact Information
 
 ```bash
-apigate settings set branding.company_name "Acme API"
-apigate settings set branding.support_email "support@acme.com"
-apigate settings set branding.website_url "https://acme.com"
+apigate settings set custom.support_email "support@acme.com"
+apigate settings set custom.support_url "https://acme.com/support"
 ```
 
 ---
 
-## Step 3: Portal Text
+## Step 3: Portal Content
 
-Customize portal content:
+Customize portal and docs content:
 
 ```bash
-# Welcome message
-apigate settings set portal.welcome_title "Welcome to Acme API"
-apigate settings set portal.welcome_text "The fastest way to integrate with Acme services."
+# Docs hero section
+apigate settings set custom.docs_hero_title "Acme API Documentation"
+apigate settings set custom.docs_hero_subtitle "The fastest way to integrate with Acme services."
 
-# Documentation intro
-apigate settings set docs.intro "Acme API provides RESTful access to our platform."
+# Portal welcome section (HTML supported)
+apigate settings set custom.portal_welcome_html "<h2>Welcome to Acme API</h2><p>Manage your API keys and usage.</p>"
 ```
 
 ---
 
 ## Step 4: Custom CSS
 
-Add custom styling:
+Add custom styling for portal and docs pages:
 
 ```bash
-apigate settings set branding.custom_css "
+# Portal CSS
+apigate settings set custom.portal_css "
   :root {
     --primary: #4F46E5;
     --radius: 8px;
@@ -72,34 +70,42 @@ apigate settings set branding.custom_css "
     font-weight: 600;
   }
 "
+
+# Docs CSS
+apigate settings set custom.docs_css "
+  .docs-header {
+    background: #4F46E5;
+  }
+"
 ```
 
 ---
 
-## Step 5: Custom HTML
+## Step 5: Custom Footer
 
-Add tracking or custom elements:
+Add custom footer content:
 
 ```bash
-# Analytics in head
-apigate settings set branding.head_html '<script async src="https://analytics.example.com/script.js"></script>'
-
-# Footer content
-apigate settings set branding.footer_html '<p>© 2024 Acme Corp. <a href="/terms">Terms</a> | <a href="/privacy">Privacy</a></p>'
+apigate settings set custom.footer_html '<p>© 2024 Acme Corp. <a href="/terms">Terms</a> | <a href="/privacy">Privacy</a></p>'
 ```
 
 ---
 
-## Step 6: Custom Domain
+## Step 6: Custom Domain with TLS
 
-Point your domain to APIGate and configure:
+Point your domain to APIGate and configure TLS:
 
 ```bash
-# Enable custom domain
-apigate settings set portal.custom_domain "api.acme.com"
+# Enable TLS with ACME (Let's Encrypt)
+apigate settings set tls.enabled "true"
+apigate settings set tls.mode "acme"
+apigate settings set tls.domain "api.acme.com"
+apigate settings set tls.acme_email "admin@acme.com"
 
-# Obtain certificate
-apigate certificates obtain --domain api.acme.com
+# Or use manual certificates
+apigate settings set tls.mode "manual"
+apigate settings set tls.cert_path "/path/to/cert.pem"
+apigate settings set tls.key_path "/path/to/key.pem"
 ```
 
 ---
@@ -113,27 +119,38 @@ Visit your portal:
 
 ---
 
-## Advanced Customization
+## Advanced: Full Docs Page Override
 
-### Email Templates
-
-Copy and modify email templates:
+For complete control over the docs home page:
 
 ```bash
-cp -r templates/email custom-templates/email
-# Edit templates...
-apigate settings set email.template_dir "./custom-templates/email"
+apigate settings set custom.docs_home_html '<!DOCTYPE html>
+<html>
+<head><title>API Docs</title></head>
+<body>
+  <h1>Acme API Documentation</h1>
+  <!-- Your custom content -->
+</body>
+</html>'
 ```
 
-### Full Theme Override
+---
 
-For complete customization, override the theme directory:
+## Available Custom Settings
 
-```bash
-cp -r web/static/themes/default custom-theme
-# Edit templates...
-apigate settings set portal.theme_dir "./custom-theme"
-```
+| Setting | Description |
+|---------|-------------|
+| `custom.logo_url` | Logo URL for header |
+| `custom.primary_color` | Primary brand color (hex) |
+| `custom.support_email` | Support email address |
+| `custom.support_url` | Support/help URL |
+| `custom.footer_html` | Custom footer HTML |
+| `custom.docs_css` | CSS injected into docs pages |
+| `custom.portal_css` | CSS injected into portal pages |
+| `custom.docs_hero_title` | Docs hero section title |
+| `custom.docs_hero_subtitle` | Docs hero section subtitle |
+| `custom.portal_welcome_html` | Portal welcome section HTML |
+| `custom.docs_home_html` | Full HTML override for docs home |
 
 ---
 

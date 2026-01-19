@@ -415,23 +415,15 @@ server {
 
 ### Shared Database
 
-For multiple instances, use PostgreSQL (when supported) or shared SQLite via NFS:
+For multiple instances, use shared SQLite via NFS or a network filesystem:
 
 ```yaml
 # Each instance points to same database
 database:
-  path: /mnt/shared/apigate.db
+  dsn: /mnt/shared/apigate.db
 ```
 
-### Session Sharing
-
-For distributed sessions, configure Redis:
-
-```yaml
-session:
-  store: redis
-  redis_url: redis://redis-cluster:6379
-```
+**Note:** SQLite with WAL mode supports multiple readers but only one writer at a time. For very high write loads, consider using sticky sessions at the load balancer level.
 
 ---
 
