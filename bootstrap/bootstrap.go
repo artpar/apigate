@@ -348,7 +348,7 @@ func (a *App) initHTTPServer() error {
 		Logger:  a.Logger,
 	})
 
-	// Create admin handler with cache invalidation callback
+	// Create admin handler with cache invalidation and reload callbacks
 	adminHandler := admin.NewHandler(admin.Deps{
 		Users:         deps.Users,
 		Keys:          deps.Keys,
@@ -359,6 +359,19 @@ func (a *App) initHTTPServer() error {
 		Logger:        a.Logger,
 		Hasher:        bcryptHasher,
 		OnRouteChange: openAPIService.InvalidateCache,
+		ReloadCallback: func(ctx context.Context) error {
+			// Reload routes and upstreams from database
+			if a.routeService != nil {
+				if err := a.routeService.Reload(ctx); err != nil {
+					return fmt.Errorf("reload routes: %w", err)
+				}
+			}
+			// Invalidate OpenAPI cache
+			if openAPIService != nil {
+				openAPIService.InvalidateCache()
+			}
+			return nil
+		},
 	})
 
 	// Create web UI handler

@@ -27,44 +27,47 @@ const (
 
 // Handler provides admin API endpoints.
 type Handler struct {
-	users         ports.UserStore
-	keys          ports.KeyStore
-	usage         ports.UsageStore
-	routes        ports.RouteStore
-	upstreams     ports.UpstreamStore
-	plans         ports.PlanStore
-	logger        zerolog.Logger
-	hasher        ports.Hasher
-	sessions      *SessionStore
-	routesHandler *RoutesHandler
-	meterHandler  *MeterHandler
+	users          ports.UserStore
+	keys           ports.KeyStore
+	usage          ports.UsageStore
+	routes         ports.RouteStore
+	upstreams      ports.UpstreamStore
+	plans          ports.PlanStore
+	logger         zerolog.Logger
+	hasher         ports.Hasher
+	sessions       *SessionStore
+	routesHandler  *RoutesHandler
+	meterHandler   *MeterHandler
+	reloadCallback func(context.Context) error // Called when explicit reload is requested
 }
 
 // Deps contains dependencies for the admin handler.
 type Deps struct {
-	Users         ports.UserStore
-	Keys          ports.KeyStore
-	Usage         ports.UsageStore
-	Routes        ports.RouteStore
-	Upstreams     ports.UpstreamStore
-	Plans         ports.PlanStore
-	Logger        zerolog.Logger
-	Hasher        ports.Hasher
-	OnRouteChange func() // Optional callback when routes/upstreams change (for cache invalidation)
+	Users          ports.UserStore
+	Keys           ports.KeyStore
+	Usage          ports.UsageStore
+	Routes         ports.RouteStore
+	Upstreams      ports.UpstreamStore
+	Plans          ports.PlanStore
+	Logger         zerolog.Logger
+	Hasher         ports.Hasher
+	OnRouteChange  func()                       // Optional callback when routes/upstreams change (for cache invalidation)
+	ReloadCallback func(context.Context) error  // Optional callback for explicit reload (POST /admin/reload)
 }
 
 // NewHandler creates a new admin API handler.
 func NewHandler(deps Deps) *Handler {
 	h := &Handler{
-		users:     deps.Users,
-		keys:      deps.Keys,
-		usage:     deps.Usage,
-		routes:    deps.Routes,
-		upstreams: deps.Upstreams,
-		plans:     deps.Plans,
-		logger:    deps.Logger,
-		hasher:    deps.Hasher,
-		sessions:  NewSessionStore(),
+		users:          deps.Users,
+		keys:           deps.Keys,
+		usage:          deps.Usage,
+		routes:         deps.Routes,
+		upstreams:      deps.Upstreams,
+		plans:          deps.Plans,
+		logger:         deps.Logger,
+		hasher:         deps.Hasher,
+		sessions:       NewSessionStore(),
+		reloadCallback: deps.ReloadCallback,
 	}
 
 	// Create routes handler if stores are provided
@@ -130,6 +133,9 @@ func (h *Handler) Router() chi.Router {
 
 		// Doctor (system health)
 		r.Get("/doctor", h.Doctor)
+
+		// Reload (hot-reload routes, upstreams, and config)
+		r.Post("/reload", h.Reload)
 
 		// Routes and Upstreams (if configured)
 		if h.routesHandler != nil {
@@ -875,6 +881,55 @@ func sessionToResource(s *Session, userID, userEmail string) jsonapi.Resource {
 		BelongsTo("user", TypeUser, userID).
 		Meta("user_email", userEmail).
 		Build()
+}
+
+// -----------------------------------------------------------------------------
+// System Operations
+// -----------------------------------------------------------------------------
+
+// ReloadResponse represents the response from a reload operation.
+type ReloadResponse struct {
+	Status    string `json:"status"`
+	Message   string `json:"message"`
+	Timestamp string `json:"timestamp"`
+}
+
+// Reload triggers a hot-reload of routes, upstreams, and configuration.
+//
+//	@Summary		Reload configuration
+//	@Description	Hot-reload routes, upstreams, and other configuration from database
+//	@Tags			Admin - System
+//	@Produce		json
+//	@Success		200	{object}	ReloadResponse	"Reload successful"
+//	@Failure		500	{object}	ErrorResponse	"Reload failed"
+//	@Security		AdminAuth
+//	@Router			/admin/reload [post]
+func (h *Handler) Reload(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Check if reload callback is configured
+	if h.reloadCallback == nil {
+		jsonapi.WriteInternalError(w, "Reload not configured")
+		return
+	}
+
+	// Execute reload
+	if err := h.reloadCallback(ctx); err != nil {
+		h.logger.Error().Err(err).Msg("reload failed")
+		jsonapi.WriteInternalError(w, "Reload failed: "+err.Error())
+		return
+	}
+
+	h.logger.Info().Msg("configuration reloaded via admin API")
+
+	// Return success response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(ReloadResponse{
+		Status:    "success",
+		Message:   "Routes, upstreams, and configuration reloaded",
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	})
 }
 
 // -----------------------------------------------------------------------------
