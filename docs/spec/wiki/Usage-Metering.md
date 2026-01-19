@@ -111,9 +111,82 @@ apigate plans update <id> \
 
 ---
 
+---
+
+## External Event Ingestion
+
+External services (like downstream applications) can submit usage events directly to APIGate for billing purposes. This enables tracking usage that doesn't pass through the proxy.
+
+### Use Cases
+
+- **Deployment lifecycle** - Track when deployments start/stop
+- **Compute time** - Report compute minutes used
+- **Storage usage** - Report storage GB-hours
+- **Custom resources** - Any billable resource
+
+### API Endpoint
+
+```
+POST /api/v1/meter
+Authorization: Bearer <service-api-key>
+```
+
+External events require a **service API key** with `meter:write` scope. See [[API-Keys#service-api-keys]] for details.
+
+### Event Format
+
+```json
+{
+  "data": [
+    {
+      "type": "usage_events",
+      "attributes": {
+        "id": "evt_abc123",
+        "user_id": "usr_xyz789",
+        "event_type": "deployment.started",
+        "resource_id": "depl_456",
+        "resource_type": "deployment",
+        "quantity": 1,
+        "metadata": {
+          "template_id": "tmpl_789",
+          "region": "us-east-1"
+        },
+        "timestamp": "2026-01-19T12:00:00Z"
+      }
+    }
+  ]
+}
+```
+
+### Event Types
+
+| Event Type | Description |
+|------------|-------------|
+| `api.request` | API request (for external API calls) |
+| `deployment.created` | Deployment created |
+| `deployment.started` | Deployment started running |
+| `deployment.stopped` | Deployment stopped |
+| `compute.minutes` | Compute time in minutes |
+| `storage.gb_hours` | Storage in GB-hours |
+| `bandwidth.gb` | Data transfer in GB |
+| `custom.*` | Custom event types |
+
+### Billing Integration
+
+External events count toward the user's monthly quota:
+- Events are aggregated per billing period
+- `quantity` field multiplied by cost multiplier
+- Total added to user's usage count
+- Quota warnings/enforcement apply as configured
+
+See [[Metering-API]] for full specification.
+
+---
+
 ## See Also
 
 - [[Routes]] - Route configuration
 - [[Quotas]] - Quota enforcement
 - [[Usage-Tracking]] - Usage recording
 - [[Plans]] - Plan metering settings
+- [[Metering-API]] - External event ingestion API

@@ -109,6 +109,8 @@ apigate plans create \
   --overage 1  # $0.01 per request over quota
 ```
 
+> **Note**: Usage includes both proxy requests AND external events submitted via the [[Metering-API]]. External services can report deployments, compute time, storage, and other billable resources.
+
 ### Tiered
 
 Create multiple plans with different limits:

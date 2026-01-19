@@ -28,6 +28,7 @@
 * [[Rate-Limiting]]
 * [[Quotas]]
 * [[Usage-Tracking]]
+* [[Metering-API]]
 * [[Transformations]]
 * [[Webhooks]]
 * [[Customer-Portal]]

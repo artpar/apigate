@@ -276,6 +276,57 @@ Multiple keys for the same user share quota but have separate rate limit buckets
 
 ---
 
+## Service API Keys
+
+Service API keys are special keys for trusted backend services that need to perform operations on behalf of users.
+
+### Use Case
+
+Service keys enable downstream services to:
+- Submit usage events via the [[Metering-API]]
+- Perform admin operations on behalf of users
+- Integrate with APIGate from trusted backends
+
+### Creating Service Keys
+
+```bash
+curl -X POST http://localhost:8080/admin/keys \
+  -H "Content-Type: application/vnd.api+json" \
+  -d '{
+    "data": {
+      "type": "api_keys",
+      "attributes": {
+        "name": "Hoster Metering Service",
+        "scopes": ["meter:write"],
+        "service": true
+      }
+    }
+  }'
+```
+
+### Key Attributes
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `service` | boolean | `true` for service keys |
+| `scopes` | array | Permissions (e.g., `meter:write`) |
+| `source_name` | string | Identifies the service in logs |
+
+### Available Scopes
+
+| Scope | Description |
+|-------|-------------|
+| `meter:write` | Submit usage events via `/api/v1/meter` |
+
+### Security
+
+- Service keys are not tied to a specific user
+- Can submit events on behalf of any user
+- Should only be issued to trusted services
+- Store securely - treat like database credentials
+
+---
+
 ## Troubleshooting
 
 ### Invalid API Key (401)

@@ -104,6 +104,17 @@ See [[Groups]] for schema.
 
 See [[Webhooks]] for schema.
 
+### Metering (External Usage)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/meter` | Submit usage events |
+| GET | `/api/v1/meter` | Query usage events (admin) |
+
+The Metering API allows external services to submit usage events for billing. Requires service API key with `meter:write` scope.
+
+See [[Metering-API]] for full specification.
+
 ---
 
 ## Resource Types

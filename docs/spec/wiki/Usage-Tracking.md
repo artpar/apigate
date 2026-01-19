@@ -1,12 +1,17 @@
 # Usage Tracking
 
-**Usage tracking** records every API request for analytics, billing, and monitoring.
+**Usage tracking** records API requests and external events for analytics, billing, and monitoring.
 
 ---
 
 ## Overview
 
-Every request through APIGate is tracked:
+Usage events come from two sources:
+
+1. **Proxy Requests** - Every request through APIGate is automatically tracked
+2. **External Services** - Downstream services can submit events via the [[Metering-API]]
+
+### Proxy Request Tracking
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
@@ -430,9 +435,42 @@ APIGATE_USAGE_DATABASE_PATH=/data/usage.db
 
 ---
 
+---
+
+## External Event Tracking
+
+External services can submit usage events directly via the Metering API:
+
+```
+POST /api/v1/meter
+```
+
+### External Event Attributes
+
+| Field | Description |
+|-------|-------------|
+| `event_type` | Event category (e.g., `deployment.started`) |
+| `resource_id` | What was used |
+| `resource_type` | Resource category |
+| `quantity` | Units consumed |
+| `metadata` | Arbitrary context |
+| `source` | Service that submitted the event |
+
+### Unified Billing
+
+Both proxy requests and external events contribute to:
+- User's monthly quota
+- Overage calculations
+- Usage analytics
+
+See [[Metering-API]] for the full specification.
+
+---
+
 ## See Also
 
 - [[Quotas]] - Monthly limits
 - [[Rate-Limiting]] - Request frequency
 - [[Analytics]] - Dashboards and reports
 - [[Billing]] - Usage-based billing
+- [[Metering-API]] - External event ingestion
