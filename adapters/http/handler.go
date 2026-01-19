@@ -551,6 +551,7 @@ type RouterConfig struct {
 	DocsHandler           http.Handler // Optional developer documentation portal handler
 	ModuleHandler         http.Handler // Optional declarative module handler (mounted at /api/v2)
 	PaymentWebhookHandler http.Handler // Optional payment webhook handler for Stripe/Paddle/LemonSqueezy
+	MeterHandler          http.Handler // Optional metering API handler (mounted at /api/v1/meter)
 }
 
 // NewRouter creates the main HTTP router.
@@ -630,6 +631,12 @@ func NewRouterWithConfig(proxyHandler *ProxyHandler, healthHandler *HealthHandle
 	// They are NOT authenticated - signature verification happens inside the handler
 	if cfg.PaymentWebhookHandler != nil {
 		r.Mount("/payment-webhooks", cfg.PaymentWebhookHandler)
+	}
+
+	// Metering API (for external usage event submission)
+	// Mounted at /api/v1/meter for service account access
+	if cfg.MeterHandler != nil {
+		r.Mount("/api/v1/meter", cfg.MeterHandler)
 	}
 
 	// Web UI (if enabled) - pass through specific paths to the web handler

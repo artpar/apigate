@@ -504,8 +504,12 @@ func (a *App) initHTTPServer() error {
 		PortalHandler:         portalRouter,
 		DocsHandler:           docsRouter,
 		PaymentWebhookHandler: paymentWebhookHandler,
+		MeterHandler:          adminHandler.MeterRouter(),
 	}
 	a.Logger.Info().Msg("payment webhook endpoints enabled at /payment-webhooks/{stripe,paddle,lemonsqueezy}")
+	if adminHandler.MeterRouter() != nil {
+		a.Logger.Info().Msg("metering API enabled at /api/v1/meter")
+	}
 
 	// Add module handler if runtime is initialized
 	if a.ModuleRuntime != nil {

@@ -37,6 +37,7 @@ type Handler struct {
 	hasher        ports.Hasher
 	sessions      *SessionStore
 	routesHandler *RoutesHandler
+	meterHandler  *MeterHandler
 }
 
 // Deps contains dependencies for the admin handler.
@@ -73,6 +74,15 @@ func NewHandler(deps Deps) *Handler {
 			Upstreams:     deps.Upstreams,
 			Logger:        deps.Logger,
 			OnRouteChange: deps.OnRouteChange,
+		})
+	}
+
+	// Create meter handler if usage store is provided
+	if deps.Usage != nil {
+		h.meterHandler = NewMeterHandler(MeterHandlerConfig{
+			Usage:  deps.Usage,
+			Users:  deps.Users,
+			Logger: deps.Logger,
 		})
 	}
 
@@ -125,9 +135,23 @@ func (h *Handler) Router() chi.Router {
 		if h.routesHandler != nil {
 			h.routesHandler.RegisterRoutes(r)
 		}
+
+		// Metering API (if configured)
+		if h.meterHandler != nil {
+			r.Mount("/meter", h.meterHandler.Router())
+		}
 	})
 
 	return r
+}
+
+// MeterRouter returns the meter handler's router for external mounting.
+// This allows the metering API to be mounted at /api/v1/meter for service account access.
+func (h *Handler) MeterRouter() chi.Router {
+	if h.meterHandler == nil {
+		return nil
+	}
+	return h.meterHandler.Router()
 }
 
 // -----------------------------------------------------------------------------
