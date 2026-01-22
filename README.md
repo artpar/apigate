@@ -72,6 +72,7 @@ Customers → APIGate → Your API
 | **Real-Time Dashboard** | Users, keys, requests, MRR at a glance |
 | **Usage Analytics** | See who's using what, and how much |
 | **Email Notifications** | SMTP or SendGrid for transactional emails |
+| **Configurable Web UI** | Disable UI or mount at custom path for headless/integration scenarios |
 
 ### For Your Customers (API Buyers)
 
@@ -255,6 +256,22 @@ server {
 | `APIGATE_SERVER_HOST` | Bind address | `0.0.0.0` |
 | `APIGATE_LOG_LEVEL` | Log level (debug, info, warn, error) | `info` |
 | `APIGATE_LOG_FORMAT` | Log format (json, text) | `json` |
+| `APIGATE_WEBUI_ENABLED` | Enable/disable admin web UI | `true` |
+| `APIGATE_WEBUI_BASE_PATH` | Custom path to mount UI (e.g., `/admin-ui`) | `""` (root) |
+
+**Web UI Configuration Examples:**
+
+```bash
+# API-only mode (no web UI)
+export APIGATE_WEBUI_ENABLED=false
+./apigate
+
+# Custom UI path (e.g., for integrating with Hoster or other frontend)
+export APIGATE_WEBUI_BASE_PATH=/admin-ui
+./apigate
+# Access UI at: http://localhost:8080/admin-ui/
+# Root path available for custom frontend via priority routing
+```
 
 Payment and email providers are configured via the Admin Dashboard settings.
 

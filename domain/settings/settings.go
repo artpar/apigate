@@ -76,6 +76,10 @@ const (
 	KeyPortalBaseURL = "portal.base_url"
 	KeyPortalAppName = "portal.app_name"
 
+	// Web UI settings
+	KeyWebUIEnabled  = "webui.enabled"   // Enable/disable web UI entirely
+	KeyWebUIBasePath = "webui.base_path" // Base path to mount UI (empty = root)
+
 	// Customization settings (HTML/CSS for branding)
 	KeyCustomDocsHomeHTML     = "custom.docs_home_html"      // Full HTML override for docs home page
 	KeyCustomDocsCSS          = "custom.docs_css"            // Custom CSS injected into all docs pages
@@ -218,6 +222,8 @@ func Defaults() Settings {
 		KeyServerWriteTimeout:           "60s",
 		KeyPortalEnabled:                "true",
 		KeyPortalAppName:                "APIGate",
+		KeyWebUIEnabled:                 "true", // Web UI enabled by default (backward compatible)
+		KeyWebUIBasePath:                "",     // Empty = root mount (backward compatible)
 		KeyAuthRequireEmailVerification: "false",
 		KeyEmailProvider:       "none",
 		KeyPaymentProvider:     "none",

@@ -738,7 +738,64 @@ hooks:
 | GET | `/portal/plans` | Available plans |
 | GET | `/portal/settings` | Account settings |
 
-### 14.4 Documentation Endpoints
+### 14.4 Web UI Configuration
+
+APIGate's admin web UI can be configured or disabled entirely for API-only deployments.
+
+**Settings:**
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `webui.enabled` | `true` | Enable/disable web UI entirely |
+| `webui.base_path` | `""` (root) | Custom base path to mount UI (e.g., `/admin-ui`) |
+
+**Environment Variables:**
+
+```bash
+APIGATE_WEBUI_ENABLED=true|false    # Enable/disable web UI
+APIGATE_WEBUI_BASE_PATH=/admin-ui   # Custom base path
+```
+
+**Configuration Modes:**
+
+| Mode | Configuration | Result |
+|------|---------------|--------|
+| Default | `webui.enabled=true`, `base_path=""` | UI at root `/` (backward compatible) |
+| Custom Path | `webui.enabled=true`, `base_path="/admin-ui"` | UI at `/admin-ui/*` |
+| API-Only | `webui.enabled=false` | No web UI, admin JSON API still accessible |
+
+**Use Cases:**
+
+- **Default**: Standard deployment with UI at root
+- **Custom Path**: Run Hoster/custom frontend at root, APIGate UI at `/admin-ui`
+- **API-Only**: Headless deployment, manage via API or CLI only
+
+**Important Notes:**
+
+- Admin JSON API at `/admin/*` is **always accessible** regardless of UI configuration
+- Custom base path works for direct URL access, but internal navigation links require template updates (future enhancement)
+- Health, metrics, and version endpoints always accessible at root paths
+- Portal and docs handlers respect their own mount points
+
+**Integration with Priority Routing:**
+
+Combine with priority routing (routes with `priority > 0`) to serve custom frontends:
+
+```sql
+-- Mount Hoster at root
+INSERT INTO routes (id, name, path_pattern, upstream_id, priority, enabled)
+VALUES ('hoster', 'Hoster Frontend', '/*', 'hoster-upstream', 10, 1);
+
+-- Set Web UI at custom path
+UPDATE settings SET value = '/apigate-admin' WHERE key = 'webui.base_path';
+```
+
+Result:
+- `http://localhost:8082/` → Hoster frontend
+- `http://localhost:8082/apigate-admin/` → APIGate admin UI
+- `http://localhost:8082/admin/*` → APIGate admin JSON API
+
+### 14.5 Documentation Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -749,7 +806,7 @@ hooks:
 | GET | `/docs/examples` | Code examples |
 | GET | `/docs/try-it` | Interactive tester |
 
-### 14.5 System Endpoints
+### 14.6 System Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|

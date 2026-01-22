@@ -62,6 +62,10 @@ const (
 	EnvTLSHTTPRedirect = "APIGATE_TLS_HTTP_REDIRECT"
 	EnvTLSMinVersion   = "APIGATE_TLS_MIN_VERSION"
 	EnvTLSACMEStaging  = "APIGATE_TLS_ACME_STAGING"
+
+	// Web UI environment variables (synced to database settings)
+	EnvWebUIEnabled  = "APIGATE_WEBUI_ENABLED"
+	EnvWebUIBasePath = "APIGATE_WEBUI_BASE_PATH"
 )
 
 // App represents the running application.
@@ -169,6 +173,12 @@ func NewWithConfig(cfg Config) (*App, error) {
 	// This allows configuring TLS via APIGATE_TLS_* env vars
 	if err := a.syncTLSEnvToSettings(context.Background()); err != nil {
 		logger.Warn().Err(err).Msg("failed to sync TLS env vars to settings")
+	}
+
+	// Sync Web UI environment variables to database settings
+	// This allows configuring Web UI via APIGATE_WEBUI_* env vars
+	if err := a.syncWebUIEnvToSettings(context.Background()); err != nil {
+		logger.Warn().Err(err).Msg("failed to sync Web UI env vars to settings")
 	}
 
 	// Initialize TLS configuration (after HTTP server configured)
@@ -532,6 +542,8 @@ func (a *App) initHTTPServer() error {
 		EnableOpenAPI:         s.GetBool("openapi.enabled"),
 		AdminHandler:          adminHandler.Router(),
 		WebHandler:            webHandler.Router(),
+		WebUIEnabled:          s.GetBool(settings.KeyWebUIEnabled),
+		WebUIBasePath:         s.Get(settings.KeyWebUIBasePath),
 		PortalHandler:         portalRouter,
 		DocsHandler:           docsRouter,
 		PaymentWebhookHandler: paymentWebhookHandler,
@@ -636,6 +648,44 @@ func (a *App) syncTLSEnvToSettings(ctx context.Context) error {
 	}
 
 	a.Logger.Info().Int("count", len(batch)).Msg("TLS settings synced from environment")
+	return nil
+}
+
+// syncWebUIEnvToSettings syncs Web UI environment variables to database settings.
+// This allows users to configure the Web UI via environment variables, which are then
+// persisted to the database. Environment variables take precedence over existing
+// database values when set.
+func (a *App) syncWebUIEnvToSettings(ctx context.Context) error {
+	batch := make(settings.Settings)
+
+	// Map environment variables to settings keys
+	envToSettingMap := map[string]string{
+		EnvWebUIEnabled:  settings.KeyWebUIEnabled,
+		EnvWebUIBasePath: settings.KeyWebUIBasePath,
+	}
+
+	for envVar, settingKey := range envToSettingMap {
+		if v := os.Getenv(envVar); v != "" {
+			batch[settingKey] = v
+			a.Logger.Debug().Str("env", envVar).Str("setting", settingKey).Msg("syncing Web UI env to setting")
+		}
+	}
+
+	if len(batch) == 0 {
+		return nil
+	}
+
+	// Save to database
+	if err := a.Settings.SetBatch(ctx, batch); err != nil {
+		return fmt.Errorf("sync Web UI settings: %w", err)
+	}
+
+	// Reload settings to pick up changes
+	if err := a.Settings.Load(ctx); err != nil {
+		return fmt.Errorf("reload settings: %w", err)
+	}
+
+	a.Logger.Info().Int("count", len(batch)).Msg("Web UI settings synced from environment")
 	return nil
 }
 

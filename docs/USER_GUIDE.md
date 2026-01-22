@@ -180,6 +180,33 @@ Configure global platform settings:
 - API keys and webhooks
 - Currency settings
 
+#### Web UI
+- Enable/disable admin web UI
+- Configure custom base path for UI mounting
+- API-only mode for headless deployments
+
+**Configuration Options:**
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `webui.enabled` | `true` | Enable or disable the admin web UI entirely |
+| `webui.base_path` | `""` | Custom path to mount the UI (e.g., `/admin-ui`) |
+
+**Environment Variables:**
+
+```bash
+export APIGATE_WEBUI_ENABLED=true
+export APIGATE_WEBUI_BASE_PATH="/admin-ui"
+```
+
+**Use Cases:**
+
+- **Standard Deployment**: Leave defaults for UI at root path
+- **Custom Frontend Integration**: Mount UI at custom path (e.g., `/admin-ui`) to serve your own frontend at root
+- **Headless/API-Only**: Disable UI entirely and manage via API or CLI only
+
+**Note**: Admin JSON API at `/admin/*` is always accessible regardless of UI settings.
+
 ---
 
 ## Part 2: For API Customers (Users)

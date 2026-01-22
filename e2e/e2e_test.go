@@ -672,3 +672,204 @@ func waitForServer(t *testing.T, addr string) {
 
 	t.Fatalf("server at %s did not become ready", addr)
 }
+
+// TestE2E_WebUIDefault tests default Web UI behavior (enabled at root).
+func TestE2E_WebUIDefault(t *testing.T) {
+	// Create a simple upstream
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		w.Write([]byte("upstream response"))
+	}))
+	defer upstream.Close()
+
+	// Setup app WITHOUT custom Web UI settings (should use defaults)
+	dir := t.TempDir()
+	dbPath := dir + "/test.db"
+
+	db, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	ctx := context.Background()
+	db.DB.ExecContext(ctx, "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", "upstream.url", upstream.URL)
+	db.Close()
+
+	os.Setenv(bootstrap.EnvDatabaseDSN, dbPath)
+	os.Setenv(bootstrap.EnvLogLevel, "error")
+
+	app, err := bootstrap.New()
+	if err != nil {
+		t.Fatalf("create app: %v", err)
+	}
+	defer app.Shutdown()
+
+	serverAddr := startServer(t, app)
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	// Test 1: Root path should redirect to portal (unauthenticated)
+	resp, err := client.Get("http://" + serverAddr + "/")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Should either get 200 (portal page) or redirect to /portal
+	if resp.StatusCode != 200 && resp.StatusCode != 302 {
+		t.Errorf("GET / status = %d, want 200 or 302", resp.StatusCode)
+	}
+}
+
+// TestE2E_WebUICustomBasePath tests Web UI mounted at custom base path.
+func TestE2E_WebUICustomBasePath(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		w.Write([]byte("upstream response"))
+	}))
+	defer upstream.Close()
+
+	dir := t.TempDir()
+	dbPath := dir + "/test.db"
+
+	db, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	ctx := context.Background()
+	db.DB.ExecContext(ctx, "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", "upstream.url", upstream.URL)
+	// Set custom base path
+	db.DB.ExecContext(ctx, "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", "webui.base_path", "/admin-ui")
+	db.Close()
+
+	os.Setenv(bootstrap.EnvDatabaseDSN, dbPath)
+	os.Setenv(bootstrap.EnvLogLevel, "info")
+
+	app, err := bootstrap.New()
+	if err != nil {
+		t.Fatalf("create app: %v", err)
+	}
+	defer app.Shutdown()
+
+	serverAddr := startServer(t, app)
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse // Don't follow redirects
+		},
+	}
+
+	// Test 1: Web UI should be accessible at /admin-ui/
+	resp, err := client.Get("http://" + serverAddr + "/admin-ui/")
+	if err != nil {
+		t.Fatalf("request /admin-ui/ failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Should get 200 (UI page) or redirect
+	if resp.StatusCode != 200 && resp.StatusCode != 302 {
+		body, _ := io.ReadAll(resp.Body)
+		t.Errorf("GET /admin-ui/ status = %d, want 200 or 302, body: %s", resp.StatusCode, body)
+	}
+
+	// Test 2: Root path should NOT serve UI (should go to upstream or 404)
+	resp2, err := client.Get("http://" + serverAddr + "/")
+	if err != nil {
+		t.Fatalf("request / failed: %v", err)
+	}
+	defer resp2.Body.Close()
+
+	// Root should NOT redirect to portal since UI is not at root
+	// It should either 404 or go to upstream
+	if resp2.StatusCode == 302 {
+		location := resp2.Header.Get("Location")
+		if location == "/portal" {
+			t.Errorf("GET / redirected to /portal, but Web UI is at /admin-ui (should not redirect)")
+		}
+	}
+
+	t.Logf("Root path status: %d (expected: not redirecting to /portal)", resp2.StatusCode)
+}
+
+// TestE2E_WebUIDisabled tests Web UI completely disabled (API-only mode).
+func TestE2E_WebUIDisabled(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		w.Write([]byte("upstream response"))
+	}))
+	defer upstream.Close()
+
+	dir := t.TempDir()
+	dbPath := dir + "/test.db"
+
+	db, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	ctx := context.Background()
+	db.DB.ExecContext(ctx, "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", "upstream.url", upstream.URL)
+	// Disable Web UI
+	db.DB.ExecContext(ctx, "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", "webui.enabled", "false")
+	db.Close()
+
+	os.Setenv(bootstrap.EnvDatabaseDSN, dbPath)
+	os.Setenv(bootstrap.EnvLogLevel, "info")
+
+	app, err := bootstrap.New()
+	if err != nil {
+		t.Fatalf("create app: %v", err)
+	}
+	defer app.Shutdown()
+
+	serverAddr := startServer(t, app)
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	// Test 1: Web UI routes should NOT be accessible
+	resp, err := client.Get("http://" + serverAddr + "/login")
+	if err != nil {
+		t.Fatalf("request /login failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Should NOT get 200 (UI should be disabled)
+	// Expect 404 or similar
+	if resp.StatusCode == 200 {
+		body, _ := io.ReadAll(resp.Body)
+		t.Errorf("GET /login status = 200, but Web UI is disabled, body: %s", body)
+	}
+
+	// Test 2: Admin JSON API should still be accessible
+	resp2, err := client.Get("http://" + serverAddr + "/admin/users")
+	if err != nil {
+		t.Fatalf("request /admin/users failed: %v", err)
+	}
+	defer resp2.Body.Close()
+
+	// Admin API should respond (likely 401 unauthorized without auth, but not 404)
+	if resp2.StatusCode == 404 {
+		t.Errorf("GET /admin/users status = 404, admin API should be accessible even when Web UI is disabled")
+	}
+
+	t.Logf("Admin API status: %d (expected: not 404)", resp2.StatusCode)
+
+	// Test 3: Health endpoint should work
+	resp3, err := client.Get("http://" + serverAddr + "/health")
+	if err != nil {
+		t.Fatalf("request /health failed: %v", err)
+	}
+	defer resp3.Body.Close()
+
+	if resp3.StatusCode != 200 {
+		t.Errorf("GET /health status = %d, want 200", resp3.StatusCode)
+	}
+}

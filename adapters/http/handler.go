@@ -546,6 +546,8 @@ type RouterConfig struct {
 	EnableOpenAPI         bool
 	AdminHandler          http.Handler  // Optional admin API handler
 	WebHandler            http.Handler  // Optional web UI handler
+	WebUIEnabled          bool          // Whether to enable web UI (default: true)
+	WebUIBasePath         string        // Base path to mount web UI (default: "" = root)
 	PortalHandler         http.Handler  // Optional user portal handler
 	PortalAuthHandler     http.Handler  // Optional JSON API auth handler (mounted at /api/portal/auth for SPA frontends)
 	DocsHandler           http.Handler  // Optional developer documentation portal handler
@@ -653,22 +655,51 @@ func NewRouterWithConfig(proxyHandler *ProxyHandler, healthHandler *HealthHandle
 	}
 
 	// Web UI (if enabled) - pass through specific paths to the web handler
-	if cfg.WebHandler != nil {
-		// Use a group that routes to the web handler
-		webHandler := cfg.WebHandler
+	if cfg.WebHandler != nil && cfg.WebUIEnabled {
+		// Normalize base path
+		basePath := strings.TrimSuffix(cfg.WebUIBasePath, "/")
+		if basePath != "" && !strings.HasPrefix(basePath, "/") {
+			basePath = "/" + basePath
+		}
 
-		// Root URL: redirect to portal for unauthenticated users (self-onboarding)
-		// If portal is enabled, new users should land there to sign up
-		r.Get("/", func(w http.ResponseWriter, req *http.Request) {
-			// Check if user has admin session cookie
-			if _, err := req.Cookie("admin_session"); err != nil && cfg.PortalHandler != nil {
-				// No admin session and portal is enabled - redirect to portal
-				http.Redirect(w, req, "/portal", http.StatusFound)
-				return
-			}
-			// Has session or no portal - go to admin UI
-			webHandler.ServeHTTP(w, req)
-		})
+		if basePath == "" {
+			// Mount at root (backward compatible)
+			mountWebUIAtRoot(r, cfg.WebHandler, cfg.PortalHandler, logger)
+		} else {
+			// Mount at custom base path
+			logger.Info().
+				Str("base_path", basePath).
+				Msg("mounting web UI at custom base path")
+			r.Mount(basePath, cfg.WebHandler)
+		}
+	} else if cfg.WebHandler != nil && !cfg.WebUIEnabled {
+		logger.Info().Msg("web UI disabled (API-only mode)")
+	}
+
+	// Proxy handles /api/* and catch-all for unmatched routes
+	r.HandleFunc("/api/*", proxyHandler.ServeHTTP)
+
+	// Catch-all for proxy: routes not matched by web UI or other handlers
+	// This allows dynamic routes (from database) to work as a fallback
+	r.NotFound(proxyHandler.ServeHTTP)
+
+	return r
+}
+
+// mountWebUIAtRoot mounts the web UI at root path (backward compatible behavior).
+func mountWebUIAtRoot(r chi.Router, webHandler http.Handler, portalHandler http.Handler, logger zerolog.Logger) {
+	// Root URL: redirect to portal for unauthenticated users (self-onboarding)
+	// If portal is enabled, new users should land there to sign up
+	r.Get("/", func(w http.ResponseWriter, req *http.Request) {
+		// Check if user has admin session cookie
+		if _, err := req.Cookie("admin_session"); err != nil && portalHandler != nil {
+			// No admin session and portal is enabled - redirect to portal
+			http.Redirect(w, req, "/portal", http.StatusFound)
+			return
+		}
+		// Has session or no portal - go to admin UI
+		webHandler.ServeHTTP(w, req)
+	})
 
 		// Signup/register redirects to portal (UX: common URLs users might try)
 		r.Get("/signup", func(w http.ResponseWriter, req *http.Request) {
@@ -758,15 +789,6 @@ func NewRouterWithConfig(proxyHandler *ProxyHandler, healthHandler *HealthHandle
 		r.Handle("/static/*", webHandler)
 	}
 
-	// Proxy handles /api/* and catch-all for unmatched routes
-	r.HandleFunc("/api/*", proxyHandler.ServeHTTP)
-
-	// Catch-all for proxy: routes not matched by web UI or other handlers
-	// This allows dynamic routes (from database) to work as a fallback
-	r.NotFound(proxyHandler.ServeHTTP)
-
-	return r
-}
 
 // NewMetricsMiddleware creates middleware that records request metrics.
 func NewMetricsMiddleware(m *metrics.Collector) func(next http.Handler) http.Handler {
