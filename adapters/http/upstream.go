@@ -112,6 +112,13 @@ func (u *UpstreamClient) Forward(ctx context.Context, req proxy.Request) (proxy.
 		httpReq.Header.Set(k, v)
 	}
 
+	// Preserve original Host header for virtual hosting
+	// Note: httpReq.Host is set to the URL's host by NewRequestWithContext,
+	// and httpReq.Header.Set("Host", v) does NOT override httpReq.Host
+	if host, ok := req.Headers["Host"]; ok && host != "" {
+		httpReq.Host = host
+	}
+
 	// Add forwarding headers
 	httpReq.Header.Set("X-Forwarded-For", req.RemoteIP)
 	httpReq.Header.Set("X-Forwarded-Proto", "https")
@@ -188,6 +195,11 @@ func (u *UpstreamClient) ForwardTo(ctx context.Context, req proxy.Request, upstr
 	// Copy headers
 	for k, v := range req.Headers {
 		httpReq.Header.Set(k, v)
+	}
+
+	// Preserve original Host header for virtual hosting
+	if host, ok := req.Headers["Host"]; ok && host != "" {
+		httpReq.Host = host
 	}
 
 	// Add forwarding headers
@@ -296,6 +308,11 @@ func (u *UpstreamClient) ForwardStreaming(ctx context.Context, req proxy.Request
 		httpReq.Header.Set(k, v)
 	}
 
+	// Preserve original Host header for virtual hosting
+	if host, ok := req.Headers["Host"]; ok && host != "" {
+		httpReq.Host = host
+	}
+
 	// Add forwarding headers
 	httpReq.Header.Set("X-Forwarded-For", req.RemoteIP)
 	httpReq.Header.Set("X-Forwarded-Proto", "https")
@@ -368,6 +385,11 @@ func (u *UpstreamClient) ForwardStreamingTo(ctx context.Context, req proxy.Reque
 	// Copy headers
 	for k, v := range req.Headers {
 		httpReq.Header.Set(k, v)
+	}
+
+	// Preserve original Host header for virtual hosting
+	if host, ok := req.Headers["Host"]; ok && host != "" {
+		httpReq.Host = host
 	}
 
 	// Add forwarding headers

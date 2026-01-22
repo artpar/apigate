@@ -413,8 +413,16 @@ func extractAPIKey(r *http.Request) string {
 }
 
 // extractHeaders extracts relevant headers from the request.
+// Note: Go stores the Host header in r.Host, not r.Header["Host"], so we extract it explicitly.
 func extractHeaders(r *http.Request) map[string]string {
 	headers := make(map[string]string)
+
+	// Add Host header from r.Host (Go stores it separately from r.Header)
+	// This is critical for host-based routing (e.g., *.apps.localhost patterns)
+	if r.Host != "" {
+		headers["Host"] = r.Host
+	}
+
 	for k, v := range r.Header {
 		// Skip sensitive and hop-by-hop headers
 		lower := strings.ToLower(k)
