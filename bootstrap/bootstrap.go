@@ -537,12 +537,15 @@ func (a *App) initHTTPServer() error {
 	a.Logger.Info().Msg("developer documentation portal enabled at /docs")
 
 	// Create router
+	// Create pointer for WebUIEnabled to distinguish between "not set" and "explicitly false"
+	webUIEnabled := s.GetBool(settings.KeyWebUIEnabled)
+
 	routerCfg := apihttp.RouterConfig{
 		Metrics:               a.Metrics,
 		EnableOpenAPI:         s.GetBool("openapi.enabled"),
 		AdminHandler:          adminHandler.Router(),
 		WebHandler:            webHandler.Router(),
-		WebUIEnabled:          s.GetBool(settings.KeyWebUIEnabled),
+		WebUIEnabled:          &webUIEnabled,
 		WebUIBasePath:         s.Get(settings.KeyWebUIBasePath),
 		PortalHandler:         portalRouter,
 		DocsHandler:           docsRouter,

@@ -69,6 +69,7 @@ func (h *RoutesHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/routes", h.CreateRoute)
 	r.Get("/routes/{id}", h.GetRoute)
 	r.Put("/routes/{id}", h.UpdateRoute)
+	r.Patch("/routes/{id}", h.UpdateRoute)
 	r.Delete("/routes/{id}", h.DeleteRoute)
 
 	// Upstreams
@@ -76,6 +77,7 @@ func (h *RoutesHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/upstreams", h.CreateUpstream)
 	r.Get("/upstreams/{id}", h.GetUpstream)
 	r.Put("/upstreams/{id}", h.UpdateUpstream)
+	r.Patch("/upstreams/{id}", h.UpdateUpstream)
 	r.Delete("/upstreams/{id}", h.DeleteUpstream)
 }
 
@@ -329,6 +331,7 @@ func (h *RoutesHandler) GetRoute(w http.ResponseWriter, r *http.Request) {
 //	@Failure		500		{object}	ErrorResponse		"Internal server error"
 //	@Security		BearerAuth
 //	@Router			/admin/routes/{id} [put]
+//	@Router			/admin/routes/{id} [patch]
 func (h *RoutesHandler) UpdateRoute(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
@@ -631,6 +634,7 @@ func (h *RoutesHandler) GetUpstream(w http.ResponseWriter, r *http.Request) {
 //	@Failure		500			{object}	ErrorResponse			"Internal server error"
 //	@Security		BearerAuth
 //	@Router			/admin/upstreams/{id} [put]
+//	@Router			/admin/upstreams/{id} [patch]
 func (h *RoutesHandler) UpdateUpstream(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 

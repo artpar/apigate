@@ -41,6 +41,7 @@ func (h *Handler) RouteNewPage(w http.ResponseWriter, r *http.Request) {
 			MeteringExpr: "1",
 			Priority:     0,
 			Enabled:      true,
+			AuthRequired: true,
 		},
 		Upstreams: upstreams,
 		IsNew:     true,
@@ -74,6 +75,7 @@ func (h *Handler) RouteCreate(w http.ResponseWriter, r *http.Request) {
 		Protocol:        route.Protocol(r.FormValue("protocol")),
 		Priority:        parseInt(r.FormValue("priority")),
 		Enabled:         r.FormValue("enabled") == "on",
+		AuthRequired:    r.FormValue("auth_required") == "on",
 		CreatedAt:       time.Now(),
 		UpdatedAt:       time.Now(),
 	}
@@ -152,6 +154,7 @@ func (h *Handler) RouteUpdate(w http.ResponseWriter, r *http.Request) {
 		Protocol:        route.Protocol(r.FormValue("protocol")),
 		Priority:        parseInt(r.FormValue("priority")),
 		Enabled:         r.FormValue("enabled") == "on",
+		AuthRequired:    r.FormValue("auth_required") == "on",
 		CreatedAt:       existing.CreatedAt,
 		UpdatedAt:       time.Now(),
 	}

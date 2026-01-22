@@ -27,7 +27,14 @@ to manage routes, upstreams, API keys, and view usage.
 Examples:
   apigate admin list
   apigate admin create --email=admin@example.com
-  apigate admin reset-password admin@example.com`,
+  apigate admin reset-password admin@example.com
+
+For local dev without a config file, use --db to specify the database directly:
+  apigate admin reset-password --db apigate.db admin@example.com
+  apigate admin list --db apigate.db
+
+Or set the APIGATE_DATABASE_PATH environment variable:
+  APIGATE_DATABASE_PATH=apigate.db apigate admin list`,
 }
 
 var adminListCmd = &cobra.Command{
@@ -82,6 +89,9 @@ func init() {
 	adminCmd.AddCommand(adminCreateCmd)
 	adminCmd.AddCommand(adminResetPasswordCmd)
 	adminCmd.AddCommand(adminDeleteCmd)
+
+	// Add --db persistent flag to admin command (works with all subcommands)
+	adminCmd.PersistentFlags().StringVar(&dbPath, "db", "", "database file path (bypasses config file)")
 
 	adminCreateCmd.Flags().StringVar(&adminEmail, "email", "", "admin email (required)")
 	adminCreateCmd.Flags().StringVar(&adminPassword, "password", "", "admin password (will prompt if not provided)")

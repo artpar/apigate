@@ -83,6 +83,23 @@ func WriteNotFound(w http.ResponseWriter, resourceType string) {
 	WriteError(w, ErrNotFound(resourceType))
 }
 
+// WriteMethodNotAllowed is a convenience for 405 errors.
+// It sets the Allow header per RFC 7231 and includes allowed methods in the error body.
+func WriteMethodNotAllowed(w http.ResponseWriter, method string, allowedMethods []string) {
+	// Set Allow header per RFC 7231
+	if len(allowedMethods) > 0 {
+		allowHeader := ""
+		for i, m := range allowedMethods {
+			if i > 0 {
+				allowHeader += ", "
+			}
+			allowHeader += m
+		}
+		w.Header().Set("Allow", allowHeader)
+	}
+	WriteError(w, ErrMethodNotAllowed(method, allowedMethods))
+}
+
 // WriteConflict is a convenience for 409 errors.
 func WriteConflict(w http.ResponseWriter, detail string) {
 	WriteError(w, ErrConflict(detail))

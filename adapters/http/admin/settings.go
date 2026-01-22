@@ -153,6 +153,7 @@ func (h *Handler) GetSettings(w http.ResponseWriter, r *http.Request) {
 //	@Success		501		{object}	ErrorResponse			"Not yet implemented"
 //	@Security		AdminAuth
 //	@Router			/admin/settings [put]
+//	@Router			/admin/settings [patch]
 func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	// Settings are now managed via the database settings domain.
 	// Use the web UI settings page for configuration changes.

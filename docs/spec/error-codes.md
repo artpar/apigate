@@ -173,8 +173,17 @@ Response:
 
 ### Method Not Allowed (405)
 
+The HTTP `Allow` header is set per RFC 7231 to indicate which methods are supported.
+
 ```go
-jsonapi.ErrMethodNotAllowed("DELETE")
+jsonapi.WriteMethodNotAllowed(w, "PATCH", []string{"GET", "PUT", "DELETE"})
+```
+
+HTTP Headers:
+```
+HTTP/1.1 405 Method Not Allowed
+Allow: GET, PUT, DELETE
+Content-Type: application/vnd.api+json
 ```
 
 Response:
@@ -184,10 +193,16 @@ Response:
     "status": "405",
     "code": "method_not_allowed",
     "title": "Method Not Allowed",
-    "detail": "The DELETE method is not allowed for this resource"
+    "detail": "PATCH is not supported. Use one of: GET, PUT, DELETE",
+    "meta": {
+      "requested_method": "PATCH",
+      "allowed_methods": ["GET", "PUT", "DELETE"]
+    }
   }]
 }
 ```
+
+**Self-Service**: The error response tells you exactly which methods ARE supported, not just what's wrong. Check the `Allow` header or `meta.allowed_methods` to see your options.
 
 ### Conflict (409)
 

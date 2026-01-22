@@ -108,6 +108,11 @@
                             <input type="checkbox" name="enabled" {{if .Route.Enabled}}checked{{end}}>
                             <span>Route Enabled</span>
                         </label>
+                        <label class="form-checkbox" style="margin-top: 10px;">
+                            <input type="checkbox" name="auth_required" {{if .Route.AuthRequired}}checked{{end}}>
+                            <span>Authentication Required</span>
+                            <span class="info-tooltip" data-tip="When unchecked, requests to this route don't require an API key (public route). Use for serving static content or public APIs.">i</span>
+                        </label>
                     </div>
                 </div>
             </div>

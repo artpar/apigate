@@ -134,10 +134,31 @@ func ErrNotFoundWithID(resourceType, id string) Error {
 }
 
 // ErrMethodNotAllowed creates a 405 Method Not Allowed error.
-func ErrMethodNotAllowed(method string) Error {
-	return NewError(405, "method_not_allowed", "Method Not Allowed").
-		Detailf("The %s method is not allowed for this resource", method).
-		Build()
+// The allowed parameter specifies which HTTP methods ARE supported.
+func ErrMethodNotAllowed(method string, allowed []string) Error {
+	builder := NewError(405, "method_not_allowed", "Method Not Allowed").
+		Meta("requested_method", method).
+		Meta("allowed_methods", allowed)
+
+	if len(allowed) > 0 {
+		// Build helpful detail message
+		methodList := ""
+		for i, m := range allowed {
+			if i > 0 {
+				if i == len(allowed)-1 {
+					methodList += ", "
+				} else {
+					methodList += ", "
+				}
+			}
+			methodList += m
+		}
+		builder.Detailf("%s is not supported. Use one of: %s", method, methodList)
+	} else {
+		builder.Detailf("The %s method is not allowed for this resource", method)
+	}
+
+	return builder.Build()
 }
 
 // ErrConflict creates a 409 Conflict error.

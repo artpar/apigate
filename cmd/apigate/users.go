@@ -211,11 +211,32 @@ func runUsersDelete(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// dbPath is the direct database path flag (set via --db flag on admin command)
+var dbPath string
+
 func openDatabase() (*sqlite.DB, error) {
-	// Load config to get database path
+	// Priority 1: Direct --db flag
+	if dbPath != "" {
+		db, err := sqlite.Open(dbPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open database %s: %w", dbPath, err)
+		}
+		return db, nil
+	}
+
+	// Priority 2: APIGATE_DATABASE_PATH environment variable
+	if envDB := os.Getenv("APIGATE_DATABASE_PATH"); envDB != "" {
+		db, err := sqlite.Open(envDB)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open database %s: %w", envDB, err)
+		}
+		return db, nil
+	}
+
+	// Priority 3: Load from config file
 	cfg, err := config.Load(cfgFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load config: %w", err)
+		return nil, fmt.Errorf("failed to load config: %w\n\nTip: Use --db flag to specify database directly:\n  apigate admin reset-password --db apigate.db admin@example.com\n\nOr set APIGATE_DATABASE_PATH environment variable:\n  APIGATE_DATABASE_PATH=apigate.db apigate admin reset-password admin@example.com", err)
 	}
 
 	db, err := sqlite.Open(cfg.Database.DSN)

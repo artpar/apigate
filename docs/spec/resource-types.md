@@ -77,7 +77,8 @@ This document defines all JSON:API resource types used in the APIGate API.
 | GET | `/admin/users` | List users (paginated) |
 | POST | `/admin/users` | Create user |
 | GET | `/admin/users/{id}` | Get user |
-| PUT | `/admin/users/{id}` | Update user |
+| PUT | `/admin/users/{id}` | Update user (full) |
+| PATCH | `/admin/users/{id}` | Update user (partial) |
 | DELETE | `/admin/users/{id}` | Delete user |
 
 **Implementation**: `adapters/http/admin/admin.go:646-660`
@@ -267,7 +268,8 @@ Keys in list don't include the full key:
 | GET | `/admin/plans` | List plans |
 | POST | `/admin/plans` | Create plan |
 | GET | `/admin/plans/{id}` | Get plan |
-| PUT | `/admin/plans/{id}` | Update plan |
+| PUT | `/admin/plans/{id}` | Update plan (full) |
+| PATCH | `/admin/plans/{id}` | Update plan (partial) |
 | DELETE | `/admin/plans/{id}` | Delete plan |
 
 **Implementation**: `adapters/http/admin/plans.go:324-343`
@@ -399,7 +401,8 @@ For reverse proxy scenarios where the upstream handles its own authentication:
 | GET | `/admin/routes` | List routes |
 | POST | `/admin/routes` | Create route |
 | GET | `/admin/routes/{id}` | Get route |
-| PUT | `/admin/routes/{id}` | Update route |
+| PUT | `/admin/routes/{id}` | Update route (full) |
+| PATCH | `/admin/routes/{id}` | Update route (partial) |
 | DELETE | `/admin/routes/{id}` | Delete route |
 
 **Implementation**: `adapters/http/admin/routes.go:699-729`
@@ -467,7 +470,8 @@ For reverse proxy scenarios where the upstream handles its own authentication:
 | GET | `/admin/upstreams` | List upstreams |
 | POST | `/admin/upstreams` | Create upstream |
 | GET | `/admin/upstreams/{id}` | Get upstream |
-| PUT | `/admin/upstreams/{id}` | Update upstream |
+| PUT | `/admin/upstreams/{id}` | Update upstream (full) |
+| PATCH | `/admin/upstreams/{id}` | Update upstream (partial) |
 | DELETE | `/admin/upstreams/{id}` | Delete upstream |
 
 **Implementation**: `adapters/http/admin/routes.go:731-744`
@@ -603,3 +607,151 @@ External usage events submitted via the Metering API.
 **Implementation**: `adapters/http/admin/meter.go`
 
 See [Metering API Specification](metering-api.md) for full details.
+
+---
+
+## Portal Authentication Endpoints
+
+> **Note**: These endpoints use plain JSON format (not JSON:API) for simplicity with SPA frontends.
+> They do NOT require API key authentication.
+
+**Implementation**: `core/channel/http/auth.go`
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/portal/auth/login` | Authenticate user |
+| POST | `/api/portal/auth/register` | Register new user |
+| POST | `/api/portal/auth/logout` | End session |
+| GET | `/api/portal/auth/me` | Get current user |
+| GET | `/api/portal/auth/setup-required` | Check if first-time setup needed |
+| POST | `/api/portal/auth/setup` | First-time admin setup |
+
+### Session Management
+
+- **Cookie Name**: `apigate_session`
+- **Cookie Attributes**: `HttpOnly`, `SameSite=Lax`
+- **Session Duration**: 7 days
+- **Cookie Content**: Base64-encoded JSON with `user_id`, `email`, `name`, `expires_at`
+
+### Login Request
+
+```json
+POST /api/portal/auth/login
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "password": "password123"
+}
+```
+
+### Login Response (Success)
+
+```json
+{
+  "success": true,
+  "user": {
+    "id": "usr_abc123",
+    "email": "user@example.com",
+    "name": "John Doe"
+  }
+}
+```
+
+### Register Request
+
+```json
+POST /api/portal/auth/register
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "password": "password123",
+  "name": "John Doe"
+}
+```
+
+### Register Response (Success)
+
+HTTP 201 Created
+
+```json
+{
+  "success": true,
+  "user": {
+    "id": "usr_abc123",
+    "email": "user@example.com",
+    "name": "John Doe"
+  }
+}
+```
+
+### Get Current User
+
+```json
+GET /api/portal/auth/me
+Cookie: apigate_session=...
+
+Response:
+{
+  "user": {
+    "id": "usr_abc123",
+    "email": "user@example.com",
+    "name": "John Doe",
+    "status": "active",
+    "plan_id": "free"
+  }
+}
+```
+
+### Error Response
+
+```json
+{
+  "error": "invalid email or password"
+}
+```
+
+### Password Requirements
+
+- Minimum 8 characters
+- Must contain: uppercase letter, lowercase letter, digit
+
+### Validation Errors
+
+| Error | Condition |
+|-------|-----------|
+| `email is required` | Missing email field |
+| `invalid email format` | Email doesn't contain `@` |
+| `password is required` | Missing password field |
+| `password must be at least 8 characters` | Password too short |
+| `email already registered` | Duplicate email on register |
+| `invalid email or password` | Login credentials invalid |
+| `account is {status}` | User account not active |
+
+### SPA Integration Example
+
+```javascript
+// Login
+const response = await fetch('/api/portal/auth/login', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ email, password }),
+  credentials: 'include'  // Required for cookies
+});
+
+// Check authentication
+const me = await fetch('/api/portal/auth/me', {
+  credentials: 'include'
+});
+if (me.ok) {
+  const { user } = await me.json();
+  // User is authenticated
+}
+```
+
+### Alternate Path
+
+These endpoints are also available at `/mod/auth/*` via the module system.

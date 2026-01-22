@@ -206,6 +206,7 @@ func (h *Handler) CreatePlan(w http.ResponseWriter, r *http.Request) {
 //	@Failure		404		{object}	ErrorResponse		"Plan not found"
 //	@Security		AdminAuth
 //	@Router			/admin/plans/{id} [put]
+//	@Router			/admin/plans/{id} [patch]
 func (h *Handler) UpdatePlan(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := chi.URLParam(r, "id")

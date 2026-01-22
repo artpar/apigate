@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/artpar/apigate/adapters/auth"
 	"github.com/artpar/apigate/domain/key"
 	"github.com/artpar/apigate/pkg/jsonapi"
 	"github.com/artpar/apigate/ports"
@@ -36,6 +37,7 @@ type Handler struct {
 	logger         zerolog.Logger
 	hasher         ports.Hasher
 	sessions       *SessionStore
+	tokens         *auth.TokenService // JWT token service for Web UI session validation
 	routesHandler  *RoutesHandler
 	meterHandler   *MeterHandler
 	reloadCallback func(context.Context) error // Called when explicit reload is requested
@@ -51,6 +53,7 @@ type Deps struct {
 	Plans          ports.PlanStore
 	Logger         zerolog.Logger
 	Hasher         ports.Hasher
+	JWTSecret      string                       // Optional JWT secret for Web UI session validation
 	OnRouteChange  func()                       // Optional callback when routes/upstreams change (for cache invalidation)
 	ReloadCallback func(context.Context) error  // Optional callback for explicit reload (POST /admin/reload)
 }
@@ -68,6 +71,11 @@ func NewHandler(deps Deps) *Handler {
 		hasher:         deps.Hasher,
 		sessions:       NewSessionStore(),
 		reloadCallback: deps.ReloadCallback,
+	}
+
+	// Create token service for Web UI session validation (if JWT secret provided)
+	if deps.JWTSecret != "" {
+		h.tokens = auth.NewTokenService(deps.JWTSecret, 24*time.Hour)
 	}
 
 	// Create routes handler if stores are provided
@@ -110,6 +118,7 @@ func (h *Handler) Router() chi.Router {
 		r.Post("/users", h.CreateUser)
 		r.Get("/users/{id}", h.GetUser)
 		r.Put("/users/{id}", h.UpdateUser)
+		r.Patch("/users/{id}", h.UpdateUser)
 		r.Delete("/users/{id}", h.DeleteUser)
 
 		// Keys
@@ -122,6 +131,7 @@ func (h *Handler) Router() chi.Router {
 		r.Post("/plans", h.CreatePlan)
 		r.Get("/plans/{id}", h.GetPlan)
 		r.Put("/plans/{id}", h.UpdatePlan)
+		r.Patch("/plans/{id}", h.UpdatePlan)
 		r.Delete("/plans/{id}", h.DeletePlan)
 
 		// Usage
@@ -130,6 +140,7 @@ func (h *Handler) Router() chi.Router {
 		// Settings
 		r.Get("/settings", h.GetSettings)
 		r.Put("/settings", h.UpdateSettings)
+		r.Patch("/settings", h.UpdateSettings)
 
 		// Doctor (system health)
 		r.Get("/doctor", h.Doctor)
@@ -368,7 +379,7 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 // AuthMiddleware validates admin authentication.
 func (h *Handler) AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Try session cookie first
+		// Try Admin API session cookie first
 		if cookie, err := r.Cookie("session_id"); err == nil {
 			if session := h.sessions.Get(cookie.Value); session != nil {
 				ctx := context.WithValue(r.Context(), ctxSessionKey, session.ID)
@@ -378,10 +389,23 @@ func (h *Handler) AuthMiddleware(next http.Handler) http.Handler {
 			}
 		}
 
+		// Try Web UI JWT token cookie (enables Admin UI to make Admin API calls)
+		if h.tokens != nil {
+			if cookie, err := r.Cookie("token"); err == nil {
+				if claims, err := h.tokens.ValidateToken(cookie.Value); err == nil {
+					// JWT token is valid - allow access
+					ctx := context.WithValue(r.Context(), ctxSessionKey, "jwt_token")
+					ctx = context.WithValue(ctx, ctxUserIDKey, claims.UserID)
+					next.ServeHTTP(w, r.WithContext(ctx))
+					return
+				}
+			}
+		}
+
 		// Try Authorization header (Bearer session_id or API key)
-		auth := r.Header.Get("Authorization")
-		if auth != "" {
-			token := strings.TrimPrefix(auth, "Bearer ")
+		authHeader := r.Header.Get("Authorization")
+		if authHeader != "" {
+			token := strings.TrimPrefix(authHeader, "Bearer ")
 
 			// Check if it's a session ID
 			if session := h.sessions.Get(token); session != nil {
@@ -590,6 +614,7 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 //	@Failure		404		{object}	ErrorResponse		"User not found"
 //	@Security		AdminAuth
 //	@Router			/admin/users/{id} [put]
+//	@Router			/admin/users/{id} [patch]
 func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 

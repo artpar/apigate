@@ -892,3 +892,87 @@ func TestNewRoutesHandlerWithConfig_NoCallback(t *testing.T) {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusCreated)
 	}
 }
+
+// ============================================================================
+// PATCH Method Tests
+// ============================================================================
+
+func TestRoutesHandler_UpdateRoute_Patch(t *testing.T) {
+	handler, routeStore, _ := setupRoutesHandler()
+	router := createRouter(handler)
+
+	routeStore.Create(context.Background(), route.Route{
+		ID:          "rt1",
+		Name:        "Original Name",
+		PathPattern: "/api/*",
+		MatchType:   route.MatchPrefix,
+		Priority:    5,
+		Enabled:     true,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	})
+
+	body := `{"name": "Patched Name", "priority": 150}`
+
+	req := httptest.NewRequest("PATCH", "/routes/rt1", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+
+	// JSON:API format
+	name := getJSONAPIResourceAttr(resp, "name")
+	priority, _ := getJSONAPIResourceAttr(resp, "priority").(float64)
+
+	if name != "Patched Name" {
+		t.Errorf("name = %v, want Patched Name", name)
+	}
+	if int(priority) != 150 {
+		t.Errorf("priority = %v, want 150", priority)
+	}
+}
+
+func TestRoutesHandler_UpdateUpstream_Patch(t *testing.T) {
+	handler, _, upstreamStore := setupRoutesHandler()
+	router := createRouter(handler)
+
+	upstreamStore.Create(context.Background(), route.Upstream{
+		ID:        "up1",
+		Name:      "Original Upstream",
+		BaseURL:   "https://api.example.com",
+		Timeout:   30,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	})
+
+	body := `{"name": "Patched Upstream", "timeout_ms": 60000}`
+
+	req := httptest.NewRequest("PATCH", "/upstreams/up1", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+
+	// JSON:API format
+	name := getJSONAPIResourceAttr(resp, "name")
+	timeoutMs, _ := getJSONAPIResourceAttr(resp, "timeout_ms").(float64)
+
+	if name != "Patched Upstream" {
+		t.Errorf("name = %v, want Patched Upstream", name)
+	}
+	if int(timeoutMs) != 60000 {
+		t.Errorf("timeout_ms = %v, want 60000", timeoutMs)
+	}
+}

@@ -545,8 +545,8 @@ type RouterConfig struct {
 	MetricsHandler        http.Handler  // Optional metrics exporter handler (for /metrics endpoint)
 	EnableOpenAPI         bool
 	AdminHandler          http.Handler  // Optional admin API handler
-	WebHandler            http.Handler  // Optional web UI handler
-	WebUIEnabled          bool          // Whether to enable web UI (default: true)
+	WebHandler            http.Handler  // Optional web UI handler (enabled by default if provided, unless WebUIEnabled is set to false)
+	WebUIEnabled          *bool         // Whether to enable web UI (default: true if WebHandler provided, false otherwise). Use pointer to distinguish between "not set" and "explicitly false"
 	WebUIBasePath         string        // Base path to mount web UI (default: "" = root)
 	PortalHandler         http.Handler  // Optional user portal handler
 	PortalAuthHandler     http.Handler  // Optional JSON API auth handler (mounted at /api/portal/auth for SPA frontends)
@@ -655,7 +655,10 @@ func NewRouterWithConfig(proxyHandler *ProxyHandler, healthHandler *HealthHandle
 	}
 
 	// Web UI (if enabled) - pass through specific paths to the web handler
-	if cfg.WebHandler != nil && cfg.WebUIEnabled {
+	// Default behavior: if WebHandler is provided, it's enabled (backward compatible)
+	// Explicit disable: set WebUIEnabled to false pointer
+	webUIEnabled := cfg.WebUIEnabled == nil || *cfg.WebUIEnabled // nil means "not set" -> default to true
+	if cfg.WebHandler != nil && webUIEnabled {
 		// Normalize base path
 		basePath := strings.TrimSuffix(cfg.WebUIBasePath, "/")
 		if basePath != "" && !strings.HasPrefix(basePath, "/") {
@@ -672,7 +675,7 @@ func NewRouterWithConfig(proxyHandler *ProxyHandler, healthHandler *HealthHandle
 				Msg("mounting web UI at custom base path")
 			r.Mount(basePath, cfg.WebHandler)
 		}
-	} else if cfg.WebHandler != nil && !cfg.WebUIEnabled {
+	} else if cfg.WebHandler != nil && !webUIEnabled {
 		logger.Info().Msg("web UI disabled (API-only mode)")
 	}
 

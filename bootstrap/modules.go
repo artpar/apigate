@@ -205,6 +205,12 @@ func (mr *ModuleRuntime) MetricsHandler() http.Handler {
 	return exporters[0].Handler()
 }
 
+// AuthHandler returns the auth routes handler for mounting at additional paths.
+// This enables SPA frontends to access auth at /api/portal/auth/*.
+func (mr *ModuleRuntime) AuthHandler() http.Handler {
+	return mr.HTTP.AuthRoutes()
+}
+
 // Start starts the module runtime (channels, hooks, etc.).
 func (mr *ModuleRuntime) Start(ctx context.Context) error {
 	return mr.Runtime.Start(ctx)

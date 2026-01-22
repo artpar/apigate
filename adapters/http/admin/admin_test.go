@@ -2260,6 +2260,74 @@ func (s *mockUpstreamStore) Create(ctx context.Context, u route.Upstream) error 
 	return nil
 }
 
+// ============================================================================
+// PATCH Method Tests
+// ============================================================================
+
+func TestUpdateUser_Patch(t *testing.T) {
+	h, rawKey := setupHandler(t)
+
+	// Create a user
+	createBody := map[string]string{"email": "patch@test.com"}
+	createResp := doRequest(t, h, "POST", "/users", createBody, rawKey)
+
+	var created map[string]any
+	json.NewDecoder(createResp.Body).Decode(&created)
+	userID := getResourceID(created)
+
+	// Update the user using PATCH
+	updateBody := map[string]string{"plan_id": "enterprise", "name": "Patched Name"}
+	resp := doRequest(t, h, "PATCH", "/users/"+userID, updateBody, rawKey)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", resp.StatusCode)
+	}
+
+	var result map[string]any
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	// plan_id is a relationship, not an attribute
+	if getRelationshipID(result, "plan") != "enterprise" {
+		t.Errorf("Expected plan relationship id=enterprise, got %s", getRelationshipID(result, "plan"))
+	}
+	if getResourceAttr(result, "name") != "Patched Name" {
+		t.Errorf("Expected name=Patched Name, got %s", getResourceAttr(result, "name"))
+	}
+}
+
+func TestUpdatePlan_Patch(t *testing.T) {
+	h, rawKey := setupHandler(t)
+
+	body := map[string]any{
+		"name":                  "Free Patched",
+		"rate_limit_per_minute": 130,
+		"price_monthly":         8.99,
+	}
+
+	resp := doRequest(t, h, "PATCH", "/plans/free", body, rawKey)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", resp.StatusCode)
+	}
+
+	var result map[string]any
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	if name := getResourceAttr(result, "name"); name != "Free Patched" {
+		t.Errorf("Expected name='Free Patched', got %v", name)
+	}
+	if rateLimit := getResourceAttr(result, "rate_limit_per_minute"); rateLimit != nil {
+		if int(rateLimit.(float64)) != 130 {
+			t.Errorf("Expected rate_limit_per_minute=130, got %v", rateLimit)
+		}
+	}
+	if price := getResourceAttr(result, "price_monthly"); price != nil {
+		if price.(float64) != 8.99 {
+			t.Errorf("Expected price_monthly=8.99, got %v", price)
+		}
+	}
+}
+
 func (s *mockUpstreamStore) Update(ctx context.Context, u route.Upstream) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

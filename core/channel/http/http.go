@@ -77,6 +77,12 @@ func (c *Channel) Handler() http.Handler {
 	return c.router
 }
 
+// AuthRoutes returns the auth router for mounting at additional paths.
+// This enables SPA frontends to access auth endpoints at /api/portal/auth/*.
+func (c *Channel) AuthRoutes() chi.Router {
+	return c.authHandler.Routes()
+}
+
 // Register registers a module with the HTTP channel.
 func (c *Channel) Register(mod convention.Derived) error {
 	// Check if HTTP is enabled for this module
