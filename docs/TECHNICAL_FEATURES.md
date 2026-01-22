@@ -62,6 +62,7 @@ upstream:
 | Method Filtering | Match specific HTTP methods |
 | Header Conditions | Route based on header values |
 | Priority | Control match order with priority scores |
+| Priority Override | Routes with priority > 0 override built-in admin routes |
 | Path Rewriting | Transform paths before forwarding |
 | Method Override | Change HTTP method for upstream |
 
@@ -77,6 +78,33 @@ route:
   priority: 100
   enabled: true
 ```
+
+**Priority-Based Route Override:**
+
+Database routes with `priority > 0` take precedence over built-in admin routes (like `/login`, `/portal`, `/dashboard`). This allows you to serve custom applications at root paths:
+
+```yaml
+# Example: Serve custom frontend at root path
+route:
+  name: "custom-frontend"
+  path_pattern: "/*"
+  match_type: prefix
+  upstream_id: "my-frontend"
+  priority: 10        # > 0 enables override
+  auth_required: false # Public access
+  enabled: true
+```
+
+**How Priority Routing Works:**
+1. For each request, APIGate checks database routes first
+2. If a matching route has `priority > 0`, it's served immediately
+3. Otherwise, the request falls through to built-in admin routes
+4. This enables using APIGate as a full reverse proxy while maintaining admin access at `/admin/`
+
+**Priority Levels:**
+- `0` (default): Standard route, does not override built-in routes
+- `1-99`: Low priority, suitable for general custom routes
+- `100+`: High priority, for critical path overrides
 
 ---
 
@@ -122,6 +150,32 @@ route:
 | Authenticated | Valid API key or session |
 | Self or Admin | User can access own resources, admin all |
 | Admin Only | Requires admin role |
+
+**Route-Level Authentication:**
+
+Each route can be configured with the `auth_required` field to control whether API key authentication is required:
+
+```yaml
+# Public route - no API key required
+route:
+  name: "public-docs"
+  path_pattern: "/docs/*"
+  auth_required: false  # Skip API key validation
+  enabled: true
+
+# Protected route - requires API key (default)
+route:
+  name: "api-endpoint"
+  path_pattern: "/api/*"
+  auth_required: true   # Require valid API key
+  enabled: true
+```
+
+**Default Behavior:**
+- `auth_required: true` (default): Route requires valid API key in `X-API-Key` header or `Authorization: Bearer` header
+- `auth_required: false`: Route is publicly accessible without authentication
+- Public routes skip rate limiting and quota enforcement
+- Useful for serving static content, public frontends, or webhooks
 
 ### 2.4 Security Features
 

@@ -336,6 +336,123 @@ func TestE2E_BearerAuth(t *testing.T) {
 	}
 }
 
+// TestE2E_PriorityRouting tests that database routes with priority > 0 override built-in routes.
+// This addresses issue #39: Custom routes with path /* should override built-in admin routes.
+func TestE2E_PriorityRouting(t *testing.T) {
+	// 1. Create custom upstream that serves a simple response
+	customUpstreamCalled := false
+	customUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		customUpstreamCalled = true
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(200)
+		w.Write([]byte("<html><body>Custom Frontend</body></html>"))
+	}))
+	defer customUpstream.Close()
+
+	// 2. Setup test app
+	dir := t.TempDir()
+	dbPath := dir + "/test.db"
+
+	db, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// Insert basic settings
+	db.DB.ExecContext(ctx, "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", "ratelimit.burst_tokens", "2")
+	db.DB.ExecContext(ctx, "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", "ratelimit.window_secs", "60")
+
+	// 3. Create custom upstream in database
+	_, err = db.DB.ExecContext(ctx,
+		"INSERT INTO upstreams (id, name, base_url, timeout_ms, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
+		"upstream-custom", "Custom Frontend", customUpstream.URL, 30000, 1)
+	if err != nil {
+		t.Fatalf("create upstream: %v", err)
+	}
+
+	// 4. Create route with priority > 0 for root path
+	// This route should override the built-in admin route at /
+	_, err = db.DB.ExecContext(ctx,
+		"INSERT INTO routes (id, name, path_pattern, match_type, upstream_id, priority, auth_required, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
+		"route-custom-root", "Custom Root", "/", "exact", "upstream-custom", 10, 0, 1)
+	if err != nil {
+		t.Fatalf("create route: %v", err)
+	}
+
+	db.Close()
+
+	// 5. Bootstrap app
+	os.Setenv(bootstrap.EnvDatabaseDSN, dbPath)
+	os.Setenv(bootstrap.EnvLogLevel, "debug")
+	os.Setenv(bootstrap.EnvLogFormat, "json")
+
+	app, err := bootstrap.New()
+	if err != nil {
+		t.Fatalf("create app: %v", err)
+	}
+	defer app.Shutdown()
+	defer os.Unsetenv(bootstrap.EnvDatabaseDSN)
+	defer os.Unsetenv(bootstrap.EnvLogLevel)
+	defer os.Unsetenv(bootstrap.EnvLogFormat)
+
+	// 6. Start server
+	serverAddr := startServer(t, app)
+
+	// 7. Test that / routes to custom upstream (not admin interface)
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			// Don't follow redirects - if we get redirected to /login, the test should fail
+			return http.ErrUseLastResponse
+		},
+	}
+
+	resp, err := client.Get("http://" + serverAddr + "/")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// 8. Verify response
+	if resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusMovedPermanently {
+		location := resp.Header.Get("Location")
+		t.Fatalf("got redirect to %s, expected custom route to be served", location)
+	}
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200, body: %s", resp.StatusCode, body)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	bodyStr := string(body)
+	if !contains(bodyStr, "Custom Frontend") {
+		t.Errorf("body = %s, want to contain 'Custom Frontend'", bodyStr)
+	}
+
+	if !customUpstreamCalled {
+		t.Error("custom upstream was not called - priority route did not override built-in route")
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(substr) == 0 || indexOf(s, substr) >= 0)
+}
+
+func indexOf(s, substr string) int {
+	for i := 0; i+len(substr) <= len(s); i++ {
+		if s[i:i+len(substr)] == substr {
+			return i
+		}
+	}
+	return -1
+}
+
 // Helper functions
 
 func setupTestApp(t *testing.T, upstreamURL string) (*bootstrap.App, string, func()) {

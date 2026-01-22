@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -100,11 +101,9 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Extract API key from header or query
+	// Note: Empty API key is allowed for public routes (AuthRequired=false)
+	// The proxy service will validate based on route configuration
 	apiKey := extractAPIKey(r)
-	if apiKey == "" {
-		writeError(w, &proxy.ErrMissingKey)
-		return
-	}
 
 	// Read request body
 	var body []byte
@@ -543,15 +542,17 @@ func Version(w http.ResponseWriter, r *http.Request) {
 // RouterConfig holds optional configuration for the router.
 type RouterConfig struct {
 	Metrics               *metrics.Collector
-	MetricsHandler        http.Handler // Optional metrics exporter handler (for /metrics endpoint)
+	MetricsHandler        http.Handler  // Optional metrics exporter handler (for /metrics endpoint)
 	EnableOpenAPI         bool
-	AdminHandler          http.Handler // Optional admin API handler
-	WebHandler            http.Handler // Optional web UI handler
-	PortalHandler         http.Handler // Optional user portal handler
-	DocsHandler           http.Handler // Optional developer documentation portal handler
-	ModuleHandler         http.Handler // Optional declarative module handler (mounted at /api/v2)
-	PaymentWebhookHandler http.Handler // Optional payment webhook handler for Stripe/Paddle/LemonSqueezy
-	MeterHandler          http.Handler // Optional metering API handler (mounted at /api/v1/meter)
+	AdminHandler          http.Handler  // Optional admin API handler
+	WebHandler            http.Handler  // Optional web UI handler
+	PortalHandler         http.Handler  // Optional user portal handler
+	PortalAuthHandler     http.Handler  // Optional JSON API auth handler (mounted at /api/portal/auth for SPA frontends)
+	DocsHandler           http.Handler  // Optional developer documentation portal handler
+	ModuleHandler         http.Handler  // Optional declarative module handler (mounted at /api/v2)
+	PaymentWebhookHandler http.Handler  // Optional payment webhook handler for Stripe/Paddle/LemonSqueezy
+	MeterHandler          http.Handler  // Optional metering API handler (mounted at /api/v1/meter)
+	RouteService          interface{}   // Optional route service for priority-based routing (uses reflection to avoid circular dependency)
 }
 
 // NewRouter creates the main HTTP router.
@@ -573,6 +574,12 @@ func NewRouterWithConfig(proxyHandler *ProxyHandler, healthHandler *HealthHandle
 	// Metrics middleware (if enabled)
 	if cfg.Metrics != nil {
 		r.Use(NewMetricsMiddleware(cfg.Metrics))
+	}
+
+	// Priority route middleware (if enabled)
+	// This allows database routes with priority > 0 to override built-in routes
+	if cfg.RouteService != nil {
+		r.Use(NewPriorityRouteMiddleware(proxyHandler, cfg.RouteService, logger))
 	}
 
 	// Health endpoints (no auth required)
@@ -613,6 +620,12 @@ func NewRouterWithConfig(proxyHandler *ProxyHandler, healthHandler *HealthHandle
 	// User portal (if enabled)
 	if cfg.PortalHandler != nil {
 		r.Mount("/portal", cfg.PortalHandler)
+	}
+
+	// Portal JSON API auth endpoints (for SPA frontends)
+	// Enables login/register/logout/me at /api/portal/auth/* without API key
+	if cfg.PortalAuthHandler != nil {
+		r.Mount("/api/portal/auth", cfg.PortalAuthHandler)
 	}
 
 	// Developer documentation portal (if enabled)
@@ -796,6 +809,110 @@ func statusLabel(status int) string {
 		return "2xx"
 	default:
 		return "other"
+	}
+}
+
+// MatchResult represents a route match result (to avoid circular imports).
+type MatchResult interface {
+	GetRoute() RouteInfo
+}
+
+// RouteInfo provides access to route information needed for priority checking.
+type RouteInfo interface {
+	GetPriority() int
+}
+
+// RouteService interface for middleware to access route matching.
+type RouteService interface {
+	Match(method, path string, headers map[string]string) *routeMatchResult
+}
+
+// routeMatchResult wraps the actual domain/route.MatchResult for the middleware.
+// This is needed because we can't directly import domain/route here without circular dependency.
+type routeMatchResult struct {
+	Route      *routeInfo
+	PathParams map[string]string
+}
+
+type routeInfo struct {
+	Priority int
+}
+
+func (r *routeInfo) GetPriority() int {
+	return r.Priority
+}
+
+func (m *routeMatchResult) GetRoute() RouteInfo {
+	return m.Route
+}
+
+// NewPriorityRouteMiddleware creates middleware that checks database routes before chi routing.
+// This allows database routes with priority > 0 to override built-in routes.
+func NewPriorityRouteMiddleware(proxyHandler *ProxyHandler, routeService interface{}, logger zerolog.Logger) func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Skip health and metrics endpoints - these should always use built-in handlers
+			if strings.HasPrefix(r.URL.Path, "/health") || r.URL.Path == "/metrics" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Skip admin API endpoints - these should always use built-in handlers
+			if strings.HasPrefix(r.URL.Path, "/admin/") {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Check if there's a matching database route
+			if routeService != nil {
+				headers := extractHeaders(r)
+
+				// Use reflection to call Match method on route service
+				// This avoids circular dependency on domain/route package
+				rsVal := reflect.ValueOf(routeService)
+				matchMethod := rsVal.MethodByName("Match")
+
+				if matchMethod.IsValid() {
+					args := []reflect.Value{
+						reflect.ValueOf(r.Method),
+						reflect.ValueOf(r.URL.Path),
+						reflect.ValueOf(headers),
+					}
+
+					results := matchMethod.Call(args)
+					if len(results) > 0 && !results[0].IsNil() {
+						matchResult := results[0]
+
+						// Extract Route field
+						routeField := matchResult.Elem().FieldByName("Route")
+						if routeField.IsValid() && !routeField.IsNil() {
+							route := routeField.Elem()
+
+							// Extract Priority field
+							priorityField := route.FieldByName("Priority")
+							if priorityField.IsValid() && priorityField.Kind() == reflect.Int {
+								priority := int(priorityField.Int())
+
+								// If priority > 0, this route should override built-in routes
+								if priority > 0 {
+									logger.Debug().
+										Str("path", r.URL.Path).
+										Int("priority", priority).
+										Msg("routing to high-priority database route")
+
+									// Handle via proxy (which will respect AuthRequired)
+									proxyHandler.ServeHTTP(w, r)
+									return
+								}
+							}
+						}
+					}
+				}
+			}
+
+			// No high-priority route found, continue to chi router (built-in routes)
+			next.ServeHTTP(w, r)
+		})
 	}
 }
 

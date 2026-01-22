@@ -164,19 +164,24 @@ func (s *ProxyService) Handle(ctx context.Context, req proxy.Request) HandleResu
 		return s.handlePublicRoute(ctx, req, matchedRoute, pathParams, originalPath, dynCfg)
 	}
 
-	// 3. Validate API key format (PURE)
+	// 3. Check for missing API key (before format validation)
+	if req.APIKey == "" {
+		return HandleResult{Error: &proxy.ErrMissingKey}
+	}
+
+	// 4. Validate API key format (PURE)
 	prefix, valid := key.ValidateFormat(req.APIKey, s.keyPrefix)
 	if !valid {
 		return HandleResult{Error: &proxy.ErrInvalidKey}
 	}
 
-	// 4. Lookup key (I/O)
+	// 5. Lookup key (I/O)
 	keys, err := s.keys.Get(ctx, prefix)
 	if err != nil || len(keys) == 0 {
 		return HandleResult{Error: &proxy.ErrInvalidKey}
 	}
 
-	// 5. Find matching key by comparing hash (PURE comparison, I/O lookup)
+	// 6. Find matching key by comparing hash (PURE comparison, I/O lookup)
 	var matchedKey key.Key
 	found := false
 	for _, k := range keys {
@@ -190,7 +195,7 @@ func (s *ProxyService) Handle(ctx context.Context, req proxy.Request) HandleResu
 		return HandleResult{Error: &proxy.ErrInvalidKey}
 	}
 
-	// 6. Validate key (PURE)
+	// 7. Validate key (PURE)
 	validation := key.Validate(matchedKey, now)
 	if !validation.Valid {
 		return HandleResult{Error: &proxy.ErrorResponse{
@@ -200,7 +205,7 @@ func (s *ProxyService) Handle(ctx context.Context, req proxy.Request) HandleResu
 		}}
 	}
 
-	// 7. Get user and check status (I/O)
+	// 8. Get user and check status (I/O)
 	user, err := s.users.Get(ctx, matchedKey.UserID)
 	if err != nil {
 		return HandleResult{Error: &proxy.ErrInvalidKey}
@@ -213,7 +218,7 @@ func (s *ProxyService) Handle(ctx context.Context, req proxy.Request) HandleResu
 		}}
 	}
 
-	// 8. Get plan and rate limit config (PURE) - uses dynamic config
+	// 9. Get plan and rate limit config (PURE) - uses dynamic config
 	userPlan, _ := plan.FindPlan(dynCfg.Plans, user.PlanID)
 	rlConfig := ratelimit.Config{
 		Limit:       userPlan.RateLimitPerMinute,

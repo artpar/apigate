@@ -375,6 +375,7 @@ func (a *App) initHTTPServer() error {
 		Plans:         planStore,
 		Logger:        a.Logger,
 		Hasher:        bcryptHasher,
+		JWTSecret:     s.Get(settings.KeyAuthJWTSecret), // Enables Web UI session to authenticate Admin API calls
 		OnRouteChange: openAPIService.InvalidateCache,
 		ReloadCallback: func(ctx context.Context) error {
 			// Reload routes and upstreams from database
@@ -535,6 +536,13 @@ func (a *App) initHTTPServer() error {
 		DocsHandler:           docsRouter,
 		PaymentWebhookHandler: paymentWebhookHandler,
 		MeterHandler:          adminHandler.MeterRouter(),
+		RouteService:          a.routeService, // Enable priority-based routing
+	}
+
+	// Add portal auth handler for SPA frontends (if module runtime is initialized)
+	if a.ModuleRuntime != nil {
+		routerCfg.PortalAuthHandler = a.ModuleRuntime.AuthHandler()
+		a.Logger.Info().Msg("portal JSON API auth endpoints enabled at /api/portal/auth")
 	}
 	a.Logger.Info().Msg("payment webhook endpoints enabled at /payment-webhooks/{stripe,paddle,lemonsqueezy}")
 	if adminHandler.MeterRouter() != nil {
