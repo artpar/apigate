@@ -100,13 +100,10 @@ func (h *ProxyHandler) SetStreamingUpstream(upstream ports.StreamingUpstream) {
 func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	// Extract API key from header or query
-	// Note: Empty API key is allowed for public routes (AuthRequired=false)
-	// The proxy service will validate based on route configuration
-	apiKey := extractAPIKey(r)
-
-	// Extract session token from cookie (for session-based auth)
-	sessionToken := extractSessionToken(r)
+	// Extract auth token from header or query
+	// Note: Empty token is allowed for public routes (AuthRequired=false)
+	// The proxy service will detect if it's an API key or JWT session token by format
+	authToken := extractAPIKey(r)
 
 	// Read request body
 	var body []byte
@@ -126,8 +123,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Build proxy request
 	req := proxy.Request{
-		APIKey:       apiKey,
-		SessionToken: sessionToken,
+		APIKey: authToken,
 		Method:       r.Method,
 		Path:         r.URL.Path,
 		Query:        r.URL.RawQuery,
@@ -416,15 +412,6 @@ func extractAPIKey(r *http.Request) string {
 	return ""
 }
 
-// extractSessionToken extracts the JWT session token from cookies.
-// This enables session-based authentication for users logged in via the portal.
-func extractSessionToken(r *http.Request) string {
-	// Try "token" cookie (JWT from portal login)
-	if cookie, err := r.Cookie("token"); err == nil {
-		return cookie.Value
-	}
-	return ""
-}
 
 // extractHeaders extracts relevant headers from the request.
 // Note: Go stores the Host header in r.Host, not r.Header["Host"], so we extract it explicitly.

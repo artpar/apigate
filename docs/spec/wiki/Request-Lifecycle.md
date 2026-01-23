@@ -33,14 +33,14 @@ APIGate processes requests differently based on whether the matched route requir
 │          │ Yes               └─────────────────────────┘       │
 │          ▼                                                      │
 │   ┌─────────────┐                                               │
-│   │ 2. Try      │  Check 'token' cookie for JWT session        │
-│   │    Session  │  If valid, skip to step 7                    │
+│   │ 2. Extract  │  Authorization Bearer or X-API-Key header    │
+│   │    Token    │                                               │
 │   └──────┬──────┘                                               │
-│          │ No session                                           │
+│          │                                                      │
 │          ▼                                                      │
 │   ┌─────────────┐                                               │
-│   │ 3. Extract  │  X-API-Key header or Authorization Bearer    │
-│   │    API Key  │                                               │
+│   │ 3. Detect   │  API key (has prefix) or JWT (no prefix)     │
+│   │    Type     │  JWT valid? Skip to step 9                   │
 │   └──────┬──────┘                                               │
 │          │                                                      │
 │          ▼                                                      │
@@ -154,36 +154,40 @@ Routes are matched by:
 
 **If the matched route has `auth_required: false`, skip to step 11 (Transform Request).**
 
-### 2. Try Session Authentication
+### 2. Extract Auth Token
 
-If a JWT session token is present in the `token` cookie (from portal login), validate it first:
-
-```go
-// From app/proxy.go
-if s.tokens != nil && req.SessionToken != "" {
-    claims, err = s.tokens.ValidateToken(req.SessionToken)
-    if err == nil {
-        user, err = s.users.Get(ctx, claims.UserID)
-        if err == nil && user.Status == "active" {
-            authViaSession = true
-        }
-    }
-}
-```
-
-**If session is valid, skip to step 8 (Check Quota).**
-
-### 3. Extract API Key
-
-If no valid session, extract API key from (in order):
-1. `X-API-Key` header
-2. `Authorization: Bearer {key}` header
+Extract authentication token from (in order):
+1. `Authorization: Bearer {token}` header
+2. `X-API-Key` header
 3. `api_key` query parameter (if enabled)
+
+The token can be either an **API key** or a **JWT session token**. Detection is automatic based on format.
 
 ```go
 // From adapters/http/handler.go
-apiKey := extractAPIKey(r)
+authToken := extractAPIKey(r)
 ```
+
+### 3. Detect Token Type & Authenticate
+
+APIGate detects the token type by checking if it starts with the API key prefix (e.g., `ak_`):
+
+- **Starts with prefix** → API key authentication (steps 4-7)
+- **Doesn't start with prefix** → JWT session token validation
+
+```go
+// From app/proxy.go
+_, isAPIKeyFormat := key.ValidateFormat(req.APIKey, s.keyPrefix)
+if !isAPIKeyFormat && s.tokens != nil {
+    // Try JWT validation
+    claims, err = s.tokens.ValidateToken(req.APIKey)
+    // ... authenticate via JWT
+} else {
+    // API key authentication flow
+}
+```
+
+**If JWT is valid, skip to step 9 (Check Quota).**
 
 ### 4. Validate Format
 

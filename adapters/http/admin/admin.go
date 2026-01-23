@@ -286,12 +286,14 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			// For API key auth without email, create a session for "admin"
 			session := h.sessions.Create("admin", "admin@apigate", 24*time.Hour)
-			jsonapi.WriteResource(w, http.StatusOK, sessionToResource(session, "admin", "admin@apigate"))
+			token := h.generateTokenIfAvailable("admin", "admin@apigate")
+			jsonapi.WriteResource(w, http.StatusOK, sessionToResource(session, "admin", "admin@apigate", token))
 			return
 		}
 
 		session := h.sessions.Create(user.ID, user.Email, 24*time.Hour)
-		jsonapi.WriteResource(w, http.StatusOK, sessionToResource(session, user.ID, user.Email))
+		token := h.generateTokenIfAvailable(user.ID, user.Email)
+		jsonapi.WriteResource(w, http.StatusOK, sessionToResource(session, user.ID, user.Email, token))
 		return
 	}
 
@@ -331,9 +333,22 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create session
+	// Create session and generate JWT token
 	session := h.sessions.Create(user.ID, user.Email, 24*time.Hour)
-	jsonapi.WriteResource(w, http.StatusOK, sessionToResource(session, user.ID, user.Email))
+	token := h.generateTokenIfAvailable(user.ID, user.Email)
+	jsonapi.WriteResource(w, http.StatusOK, sessionToResource(session, user.ID, user.Email, token))
+}
+
+// generateTokenIfAvailable generates a JWT token if the token service is configured.
+func (h *Handler) generateTokenIfAvailable(userID, email string) string {
+	if h.tokens == nil {
+		return ""
+	}
+	token, _, err := h.tokens.GenerateToken(userID, email, "admin")
+	if err != nil {
+		return ""
+	}
+	return token
 }
 
 func (h *Handler) authenticateByAPIKey(ctx context.Context, apiKey string) error {
@@ -899,13 +914,17 @@ func keyToResource(k key.Key) jsonapi.Resource {
 }
 
 // sessionToResource converts a Session to a JSON:API Resource.
-func sessionToResource(s *Session, userID, userEmail string) jsonapi.Resource {
-	return jsonapi.NewResource(TypeSession, s.ID).
+// If token is provided, it's included in the response for API authentication.
+func sessionToResource(s *Session, userID, userEmail, token string) jsonapi.Resource {
+	rb := jsonapi.NewResource(TypeSession, s.ID).
 		Attr("expires_at", s.ExpiresAt.Format(time.RFC3339)).
 		Attr("created_at", s.CreatedAt.Format(time.RFC3339)).
 		BelongsTo("user", TypeUser, userID).
-		Meta("user_email", userEmail).
-		Build()
+		Meta("user_email", userEmail)
+	if token != "" {
+		rb.Attr("token", token)
+	}
+	return rb.Build()
 }
 
 // -----------------------------------------------------------------------------

@@ -175,38 +175,47 @@ func (s *ProxyService) Handle(ctx context.Context, req proxy.Request) HandleResu
 		return s.handlePublicRoute(ctx, req, matchedRoute, pathParams, originalPath, dynCfg)
 	}
 
-	// 3. Authenticate via session token OR API key
+	// 3. Authenticate via JWT session token OR API key
+	// Detection: API keys start with configured prefix (e.g., "ak_"), JWTs don't
 	var user ports.User
 	var matchedKey key.Key
-	var authViaSession bool
 	var err error
 
-	// 3a. Try session token first (if token service configured)
-	if s.tokens != nil && req.SessionToken != "" {
+	if req.APIKey == "" {
+		return HandleResult{Error: &proxy.ErrMissingKey}
+	}
+
+	// Check if token looks like an API key (has the expected prefix)
+	_, isAPIKeyFormat := key.ValidateFormat(req.APIKey, s.keyPrefix)
+
+	if !isAPIKeyFormat && s.tokens != nil {
+		// Token doesn't look like an API key - try JWT validation
 		var claims *auth.Claims
-		claims, err = s.tokens.ValidateToken(req.SessionToken)
+		claims, err = s.tokens.ValidateToken(req.APIKey)
 		if err == nil {
-			// Session token is valid - get user directly
+			// JWT is valid - get user directly
 			user, err = s.users.Get(ctx, claims.UserID)
 			if err == nil && user.Status == "active" {
-				authViaSession = true
 				// Create a synthetic key for tracking (no actual key exists)
 				matchedKey = key.Key{
 					ID:     "session:" + claims.UserID,
 					UserID: claims.UserID,
 				}
+			} else if err != nil {
+				return HandleResult{Error: &proxy.ErrInvalidKey}
+			} else {
+				return HandleResult{Error: &proxy.ErrorResponse{
+					Status:  403,
+					Code:    "user_suspended",
+					Message: "Account is suspended",
+				}}
 			}
+		} else {
+			// JWT validation failed
+			return HandleResult{Error: &proxy.ErrInvalidKey}
 		}
-	}
-
-	// 3b. If session auth failed or not attempted, try API key
-	if !authViaSession {
-		// Check for missing API key
-		if req.APIKey == "" {
-			return HandleResult{Error: &proxy.ErrMissingKey}
-		}
-
-		// Validate API key format (PURE)
+	} else {
+		// Token looks like an API key - use API key auth flow
 		prefix, valid := key.ValidateFormat(req.APIKey, s.keyPrefix)
 		if !valid {
 			return HandleResult{Error: &proxy.ErrInvalidKey}
@@ -801,38 +810,47 @@ func (s *ProxyService) HandleStreaming(ctx context.Context, req proxy.Request, s
 		return s.handlePublicStreamingRoute(ctx, req, matchedRoute, pathParams, originalPath, dynCfg)
 	}
 
-	// 3. Authenticate via session token OR API key
+	// 3. Authenticate via JWT session token OR API key
+	// Detection: API keys start with configured prefix (e.g., "ak_"), JWTs don't
 	var user ports.User
 	var matchedKey key.Key
-	var authViaSession bool
 	var err error
 
-	// 3a. Try session token first (if token service configured)
-	if s.tokens != nil && req.SessionToken != "" {
+	if req.APIKey == "" {
+		return StreamingHandleResult{Error: &proxy.ErrMissingKey}
+	}
+
+	// Check if token looks like an API key (has the expected prefix)
+	_, isAPIKeyFormat := key.ValidateFormat(req.APIKey, s.keyPrefix)
+
+	if !isAPIKeyFormat && s.tokens != nil {
+		// Token doesn't look like an API key - try JWT validation
 		var claims *auth.Claims
-		claims, err = s.tokens.ValidateToken(req.SessionToken)
+		claims, err = s.tokens.ValidateToken(req.APIKey)
 		if err == nil {
-			// Session token is valid - get user directly
+			// JWT is valid - get user directly
 			user, err = s.users.Get(ctx, claims.UserID)
 			if err == nil && user.Status == "active" {
-				authViaSession = true
 				// Create a synthetic key for tracking (no actual key exists)
 				matchedKey = key.Key{
 					ID:     "session:" + claims.UserID,
 					UserID: claims.UserID,
 				}
+			} else if err != nil {
+				return StreamingHandleResult{Error: &proxy.ErrInvalidKey}
+			} else {
+				return StreamingHandleResult{Error: &proxy.ErrorResponse{
+					Status:  403,
+					Code:    "user_suspended",
+					Message: "Account is suspended",
+				}}
 			}
+		} else {
+			// JWT validation failed
+			return StreamingHandleResult{Error: &proxy.ErrInvalidKey}
 		}
-	}
-
-	// 3b. If session auth failed or not attempted, try API key
-	if !authViaSession {
-		// Check for missing API key
-		if req.APIKey == "" {
-			return StreamingHandleResult{Error: &proxy.ErrMissingKey}
-		}
-
-		// Validate API key format
+	} else {
+		// Token looks like an API key - use API key auth flow
 		prefix, valid := key.ValidateFormat(req.APIKey, s.keyPrefix)
 		if !valid {
 			return StreamingHandleResult{Error: &proxy.ErrInvalidKey}

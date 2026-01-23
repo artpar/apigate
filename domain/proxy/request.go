@@ -6,9 +6,9 @@ import "time"
 // Request represents an incoming proxy request (value type).
 // This is extracted from HTTP and passed to pure functions.
 type Request struct {
-	// Authentication (API key or session token - at least one required for auth routes)
-	APIKey       string
-	SessionToken string // JWT token from portal session cookie
+	// Authentication token (API key or JWT - at least one required for auth routes)
+	// The proxy service detects the type by format: API keys start with prefix (e.g., "ak_")
+	APIKey string
 
 	// HTTP request details
 	Method  string
