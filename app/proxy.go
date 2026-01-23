@@ -746,22 +746,29 @@ func (s *ProxyService) HandleStreaming(ctx context.Context, req proxy.Request, s
 
 	// 1. Route matching FIRST - determines if auth is required
 	var matchedRoute *route.Route
+	var pathParams map[string]string
 	var routeUpstream *route.Upstream
 	originalPath := req.Path
 
 	if s.routeService != nil {
 		if match := s.routeService.Match(req.Method, req.Path, req.Headers); match != nil {
 			matchedRoute = match.Route
-
-			// 2. Check if this is a public route (no auth required)
-			if !matchedRoute.AuthRequired {
-				// Public streaming route - skip auth and rate limiting
-				return s.handlePublicStreamingRoute(ctx, req, matchedRoute, match.PathParams, originalPath, dynCfg)
-			}
+			pathParams = match.PathParams
 		}
 	}
 
-	// 3. Validate API key format
+	// 2. Check if this is a public route (no auth required)
+	if matchedRoute != nil && !matchedRoute.AuthRequired {
+		// Public streaming route - skip auth and rate limiting
+		return s.handlePublicStreamingRoute(ctx, req, matchedRoute, pathParams, originalPath, dynCfg)
+	}
+
+	// 3. Check for missing API key (before format validation)
+	if req.APIKey == "" {
+		return StreamingHandleResult{Error: &proxy.ErrMissingKey}
+	}
+
+	// 4. Validate API key format
 	prefix, valid := key.ValidateFormat(req.APIKey, s.keyPrefix)
 	if !valid {
 		return StreamingHandleResult{Error: &proxy.ErrInvalidKey}

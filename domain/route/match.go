@@ -168,8 +168,18 @@ func compilePattern(r Route, routeIdx int) (compiledPattern, error) {
 
 // compileHostPattern compiles the host pattern into the compiledPattern struct.
 func compileHostPattern(cp *compiledPattern, hostPattern string, hostMatchType HostMatchType) error {
-	if hostPattern == "" || hostMatchType == HostMatchNone {
+	if hostPattern == "" {
 		return nil // No host matching
+	}
+
+	// Infer match type from pattern if not specified
+	// This ensures host patterns are always respected even if match type is empty
+	if hostMatchType == HostMatchNone {
+		if strings.HasPrefix(hostPattern, "*.") {
+			hostMatchType = HostMatchWildcard
+		} else {
+			hostMatchType = HostMatchExact
+		}
 	}
 
 	switch hostMatchType {

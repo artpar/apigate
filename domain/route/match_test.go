@@ -1387,6 +1387,101 @@ func TestMatcher_HostMatchNone_BackwardCompatible(t *testing.T) {
 	}
 }
 
+// TestMatcher_HostPatternWithoutMatchType tests that host patterns are respected
+// even when host_match_type is not explicitly set (inferred from pattern).
+func TestMatcher_HostPatternWithoutMatchType(t *testing.T) {
+	routes := []route.Route{
+		{
+			ID:            "r1",
+			Name:          "wildcard-apps",
+			HostPattern:   "*.apps.example.com", // Wildcard pattern, no match type
+			HostMatchType: "",                   // Empty = should infer wildcard
+			PathPattern:   "/*",
+			MatchType:     route.MatchPrefix,
+			Priority:      100,
+			UpstreamID:    "up1",
+			Enabled:       true,
+		},
+		{
+			ID:            "r2",
+			Name:          "exact-host",
+			HostPattern:   "api.example.com", // Exact pattern, no match type
+			HostMatchType: "",                // Empty = should infer exact
+			PathPattern:   "/*",
+			MatchType:     route.MatchPrefix,
+			Priority:      50,
+			UpstreamID:    "up2",
+			Enabled:       true,
+		},
+		{
+			ID:          "r3",
+			Name:        "fallback",
+			PathPattern: "/*",
+			MatchType:   route.MatchPrefix,
+			Priority:    10,
+			UpstreamID:  "up3",
+			Enabled:     true,
+			// No host pattern = matches any host
+		},
+	}
+
+	matcher, err := route.NewMatcher(routes)
+	if err != nil {
+		t.Fatalf("NewMatcher failed: %v", err)
+	}
+
+	tests := []struct {
+		name       string
+		host       string
+		wantRoute  string
+		wantReason string
+	}{
+		{
+			name:       "wildcard matches subdomain",
+			host:       "tenant1.apps.example.com",
+			wantRoute:  "r1",
+			wantReason: "wildcard pattern should match single subdomain",
+		},
+		{
+			name:       "wildcard does not match bare domain",
+			host:       "example.com",
+			wantRoute:  "r3",
+			wantReason: "bare domain should fall through to fallback",
+		},
+		{
+			name:       "wildcard does not match different domain",
+			host:       "other.com",
+			wantRoute:  "r3",
+			wantReason: "different domain should fall through to fallback",
+		},
+		{
+			name:       "exact matches specified host",
+			host:       "api.example.com",
+			wantRoute:  "r2",
+			wantReason: "exact pattern should match specified host",
+		},
+		{
+			name:       "exact does not match subdomain",
+			host:       "www.api.example.com",
+			wantRoute:  "r3",
+			wantReason: "subdomain should not match exact pattern",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			headers := map[string]string{"Host": tt.host}
+			result := matcher.Match("GET", "/test", headers)
+			if result == nil {
+				t.Fatalf("expected a match for host %s", tt.host)
+			}
+			if result.Route.ID != tt.wantRoute {
+				t.Errorf("route = %s, want %s (%s)", result.Route.ID, tt.wantRoute, tt.wantReason)
+			}
+		})
+	}
+}
+
 func TestMatcher_HostPriority(t *testing.T) {
 	routes := []route.Route{
 		{
