@@ -643,6 +643,45 @@ When a request hits a public route (`auth_required: false`):
 
 ---
 
+## Design Notes
+
+### Field Coupling: host_pattern and host_match_type
+
+These two fields have **implicit coupling** - they must be considered together:
+
+| `host_pattern` | `host_match_type` | Behavior |
+|----------------|-------------------|----------|
+| empty | any | Match any host |
+| set | `exact` | Exact host match |
+| set | `wildcard` | Wildcard match (e.g., `*.example.com`) |
+| set | `regex` | Regex match |
+| set | empty | **Inferred** from pattern (see below) |
+
+**Match Type Inference**: When `host_pattern` is set but `host_match_type` is empty:
+- Patterns starting with `*.` → wildcard match
+- Other patterns → exact match
+
+This defensive behavior ensures host patterns are always respected.
+
+### Why This Matters
+
+A previous bug occurred when:
+1. Route A had `host_pattern = *.apps.example.com` but empty `host_match_type`
+2. The empty match type caused the host pattern to be **ignored**
+3. Route A matched **all hosts** instead of just `*.apps.example.com`
+4. This caused higher-priority routes to intercept requests meant for lower-priority routes
+
+**Lesson**: When two fields work together (like `host_pattern` + `host_match_type`), the spec must define behavior for ALL combinations, including edge cases where one is set and the other isn't.
+
+### Validation Rules
+
+The API enforces:
+- If `host_pattern` is set and starts with `*.`, `host_match_type` should be `wildcard` (or empty for inference)
+- If `host_match_type` is `wildcard`, `host_pattern` must start with `*.`
+- If `host_match_type` is `regex`, `host_pattern` must be valid regex
+
+---
+
 ## See Also
 
 - [[Upstreams]] - Configure backend services
