@@ -33,91 +33,97 @@ APIGate processes requests differently based on whether the matched route requir
 │          │ Yes               └─────────────────────────┘       │
 │          ▼                                                      │
 │   ┌─────────────┐                                               │
-│   │ 2. Extract  │  X-API-Key header or Authorization Bearer    │
+│   │ 2. Try      │  Check 'token' cookie for JWT session        │
+│   │    Session  │  If valid, skip to step 7                    │
+│   └──────┬──────┘                                               │
+│          │ No session                                           │
+│          ▼                                                      │
+│   ┌─────────────┐                                               │
+│   │ 3. Extract  │  X-API-Key header or Authorization Bearer    │
 │   │    API Key  │                                               │
 │   └──────┬──────┘                                               │
 │          │                                                      │
 │          ▼                                                      │
 │   ┌─────────────┐                                               │
-│   │ 3. Validate │  Check prefix format                         │
+│   │ 4. Validate │  Check prefix format                         │
 │   │    Format   │                                               │
 │   └──────┬──────┘                                               │
 │          │                                                      │
 │          ▼                                                      │
 │   ┌─────────────┐                                               │
-│   │ 4. Lookup   │  Find key by prefix in store                 │
+│   │ 5. Lookup   │  Find key by prefix in store                 │
 │   │    Key      │                                               │
 │   └──────┬──────┘                                               │
 │          │                                                      │
 │          ▼                                                      │
 │   ┌─────────────┐                                               │
-│   │ 5. Verify   │  bcrypt hash comparison                      │
+│   │ 6. Verify   │  bcrypt hash comparison                      │
 │   │    Hash     │                                               │
 │   └──────┬──────┘                                               │
 │          │                                                      │
 │          ▼                                                      │
 │   ┌─────────────┐                                               │
-│   │ 6. Validate │  Check expiry, revocation                    │
+│   │ 7. Validate │  Check expiry, revocation                    │
 │   │    Key      │                                               │
 │   └──────┬──────┘                                               │
 │          │                                                      │
 │          ▼                                                      │
 │   ┌─────────────┐                                               │
-│   │ 7. Check    │  Verify user status is active                │
+│   │ 8. Check    │  Verify user status is active                │
 │   │    User     │                                               │
 │   └──────┬──────┘                                               │
 │          │                                                      │
 │          ▼                                                      │
 │   ┌─────────────┐                                               │
-│   │ 8. Check    │  Monthly request/compute limits              │
+│   │ 9. Check    │  Monthly request/compute limits              │
 │   │    Quota    │                                               │
 │   └──────┬──────┘                                               │
 │          │                                                      │
 │          ▼                                                      │
 │   ┌─────────────┐                                               │
-│   │ 9. Check    │  Token bucket rate limiting                  │
+│   │10. Check    │  Token bucket rate limiting                  │
 │   │    Rate     │                                               │
 │   └──────┬──────┘                                               │
 │          │                                                      │
 │          ▼                                                      │
 │   ┌─────────────┐                                               │
-│   │10. Resolve  │  Add X-Entitlement-* headers                 │
+│   │11. Resolve  │  Add X-Entitlement-* headers                 │
 │   │ Entitlements│                                               │
 │   └──────┬──────┘                                               │
 │          │                                                      │
 │          ▼                                                      │
 │   ┌─────────────┐                                               │
-│   │11. Transform│  Apply request_transform rules               │
+│   │12. Transform│  Apply request_transform rules               │
 │   │    Request  │                                               │
 │   └──────┬──────┘                                               │
 │          │                                                      │
 │          ▼                                                      │
 │   ┌─────────────┐                                               │
-│   │12. Rewrite  │  Apply path_rewrite expression               │
+│   │13. Rewrite  │  Apply path_rewrite expression               │
 │   │    Path     │                                               │
 │   └──────┬──────┘                                               │
 │          │                                                      │
 │          ▼                                                      │
 │   ┌─────────────┐                                               │
-│   │13. Forward  │  Send to upstream (route or default)         │
+│   │14. Forward  │  Send to upstream (route or default)         │
 │   │    Upstream │                                               │
 │   └──────┬──────┘                                               │
 │          │                                                      │
 │          ▼                                                      │
 │   ┌─────────────┐                                               │
-│   │14. Transform│  Apply response_transform rules              │
+│   │15. Transform│  Apply response_transform rules              │
 │   │    Response │                                               │
 │   └──────┬──────┘                                               │
 │          │                                                      │
 │          ▼                                                      │
 │   ┌─────────────┐                                               │
-│   │15. Calculate│  Evaluate metering_expr                      │
+│   │16. Calculate│  Evaluate metering_expr                      │
 │   │    Cost     │                                               │
 │   └──────┬──────┘                                               │
 │          │                                                      │
 │          ▼                                                      │
 │   ┌─────────────┐                                               │
-│   │16. Record   │  Store usage event                           │
+│   │17. Record   │  Store usage event                           │
 │   │    Usage    │                                               │
 │   └──────┬──────┘                                               │
 │          │                                                      │
@@ -148,9 +154,28 @@ Routes are matched by:
 
 **If the matched route has `auth_required: false`, skip to step 11 (Transform Request).**
 
-### 2. Extract API Key
+### 2. Try Session Authentication
 
-API key is extracted from (in order):
+If a JWT session token is present in the `token` cookie (from portal login), validate it first:
+
+```go
+// From app/proxy.go
+if s.tokens != nil && req.SessionToken != "" {
+    claims, err = s.tokens.ValidateToken(req.SessionToken)
+    if err == nil {
+        user, err = s.users.Get(ctx, claims.UserID)
+        if err == nil && user.Status == "active" {
+            authViaSession = true
+        }
+    }
+}
+```
+
+**If session is valid, skip to step 8 (Check Quota).**
+
+### 3. Extract API Key
+
+If no valid session, extract API key from (in order):
 1. `X-API-Key` header
 2. `Authorization: Bearer {key}` header
 3. `api_key` query parameter (if enabled)
@@ -160,7 +185,7 @@ API key is extracted from (in order):
 apiKey := extractAPIKey(r)
 ```
 
-### 3. Validate Format
+### 4. Validate Format
 
 Check key matches expected prefix format:
 
@@ -171,7 +196,7 @@ prefix, valid := key.ValidateFormat(req.APIKey, s.keyPrefix)
 
 Keys must start with configured prefix (default: `ak_`).
 
-### 4. Lookup Key
+### 5. Lookup Key
 
 Find key record by prefix in store:
 
@@ -181,7 +206,7 @@ keys, err := s.keys.Get(ctx, prefix)
 
 Uses indexed prefix lookup for efficiency.
 
-### 5. Verify Hash
+### 6. Verify Hash
 
 Compare provided key against stored bcrypt hash:
 
@@ -189,7 +214,7 @@ Compare provided key against stored bcrypt hash:
 bcrypt.CompareHashAndPassword(k.Hash, []byte(req.APIKey))
 ```
 
-### 6. Validate Key
+### 7. Validate Key
 
 Check key is not expired or revoked:
 
@@ -198,7 +223,7 @@ validation := key.Validate(matchedKey, now)
 // Checks: expires_at, revoked_at
 ```
 
-### 7. Check User
+### 8. Check User
 
 Load user and verify status is `active`:
 
@@ -209,7 +234,7 @@ if user.Status != "active" {
 }
 ```
 
-### 8. Check Quota
+### 9. Check Quota
 
 Monthly quota check with grace period:
 
@@ -223,7 +248,7 @@ Supports meter types:
 
 Returns headers: `X-Quota-Used`, `X-Quota-Limit`, `X-Quota-Reset`
 
-### 9. Check Rate Limit
+### 10. Check Rate Limit
 
 Token bucket rate limiting:
 
@@ -235,7 +260,7 @@ Based on plan's `rate_limit_per_minute` setting.
 
 Returns headers: `X-RateLimit-Remaining`, `X-RateLimit-Reset`, `Retry-After`
 
-### 10. Resolve Entitlements
+### 11. Resolve Entitlements
 
 Add entitlement headers based on user's plan:
 
@@ -250,7 +275,7 @@ entitlementHeaders := entitlement.ToHeaders(userEntitlements)
 
 Adds headers like `X-Entitlement-Webhooks: true`.
 
-### 11. Transform Request
+### 12. Transform Request
 
 Apply request transformations if route defines them:
 
@@ -260,7 +285,7 @@ req, err = s.transformService.TransformRequest(ctx, req, matchedRoute.RequestTra
 
 Can modify headers, body, add authentication.
 
-### 12. Rewrite Path
+### 13. Rewrite Path
 
 Apply path rewriting expression:
 
@@ -270,7 +295,7 @@ newPath, err := s.transformService.EvalString(ctx, matchedRoute.PathRewrite, rew
 
 Context includes `path`, `pathParams`, `method`.
 
-### 13. Forward to Upstream
+### 14. Forward to Upstream
 
 Send request to backend service:
 
@@ -283,7 +308,7 @@ if routeUpstream != nil {
 }
 ```
 
-### 14. Transform Response
+### 15. Transform Response
 
 Apply response transformations:
 
@@ -293,7 +318,7 @@ resp, err = s.transformService.TransformResponse(ctx, resp, matchedRoute.Respons
 
 Can modify headers, body, status code.
 
-### 15. Calculate Cost
+### 16. Calculate Cost
 
 Evaluate metering expression:
 
@@ -307,7 +332,7 @@ Context includes:
 - `requestBytes` - Request body size
 - `respBody` - Parsed JSON response (if applicable)
 
-### 16. Record Usage
+### 17. Record Usage
 
 Store usage event for billing/analytics:
 
@@ -333,20 +358,20 @@ When a route has `auth_required: false`, the request follows a shortened path:
 1. Match Route
    └── auth_required = false
        ▼
-11. Transform Request
-12. Rewrite Path
-13. Forward to Upstream
-14. Transform Response
-15. Calculate Cost
-16. Record Usage (with anonymous user/key)
+12. Transform Request
+13. Rewrite Path
+14. Forward to Upstream
+15. Transform Response
+16. Calculate Cost
+17. Record Usage (with anonymous user/key)
 ```
 
 **What's skipped for public routes:**
-- API key extraction and validation (steps 2-6)
-- User lookup and status check (step 7)
-- Quota enforcement (step 8)
-- Rate limiting (step 9)
-- Entitlement headers (step 10)
+- Session auth and API key extraction/validation (steps 2-7)
+- User lookup and status check (step 8)
+- Quota enforcement (step 9)
+- Rate limiting (step 10)
+- Entitlement headers (step 11)
 
 **What still applies:**
 - Request/response transformations

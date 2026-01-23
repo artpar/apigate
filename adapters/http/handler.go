@@ -105,6 +105,9 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// The proxy service will validate based on route configuration
 	apiKey := extractAPIKey(r)
 
+	// Extract session token from cookie (for session-based auth)
+	sessionToken := extractSessionToken(r)
+
 	// Read request body
 	var body []byte
 	if r.Body != nil {
@@ -123,15 +126,16 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Build proxy request
 	req := proxy.Request{
-		APIKey:    apiKey,
-		Method:    r.Method,
-		Path:      r.URL.Path,
-		Query:     r.URL.RawQuery,
-		Headers:   extractHeaders(r),
-		Body:      body,
-		RemoteIP:  extractIP(r),
-		UserAgent: r.UserAgent(),
-		TraceID:   middleware.GetReqID(ctx),
+		APIKey:       apiKey,
+		SessionToken: sessionToken,
+		Method:       r.Method,
+		Path:         r.URL.Path,
+		Query:        r.URL.RawQuery,
+		Headers:      extractHeaders(r),
+		Body:         body,
+		RemoteIP:     extractIP(r),
+		UserAgent:    r.UserAgent(),
+		TraceID:      middleware.GetReqID(ctx),
 	}
 
 	// Check if this should be a streaming request
@@ -409,6 +413,16 @@ func extractAPIKey(r *http.Request) string {
 		return key
 	}
 
+	return ""
+}
+
+// extractSessionToken extracts the JWT session token from cookies.
+// This enables session-based authentication for users logged in via the portal.
+func extractSessionToken(r *http.Request) string {
+	// Try "token" cookie (JWT from portal login)
+	if cookie, err := r.Cookie("token"); err == nil {
+		return cookie.Value
+	}
 	return ""
 }
 

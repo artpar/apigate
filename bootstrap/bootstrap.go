@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/artpar/apigate/adapters/auth"
 	"github.com/artpar/apigate/adapters/clock"
 	"github.com/artpar/apigate/adapters/email"
 	"github.com/artpar/apigate/adapters/hasher"
@@ -305,6 +306,12 @@ func (a *App) initHTTPServer() error {
 	// Create and wire transform service
 	a.transformService = app.NewTransformService()
 	a.proxyService.SetTransformService(a.transformService)
+
+	// Wire token service for session-based authentication on proxy routes
+	if jwtSecret := s.Get(settings.KeyAuthJWTSecret); jwtSecret != "" {
+		tokenService := auth.NewTokenService(jwtSecret, 7*24*time.Hour)
+		a.proxyService.SetTokenService(tokenService)
+	}
 
 	a.Logger.Info().Msg("route and transform services initialized")
 

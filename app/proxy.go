@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/artpar/apigate/adapters/auth"
 	"github.com/artpar/apigate/domain/entitlement"
 	"github.com/artpar/apigate/domain/key"
 	"github.com/artpar/apigate/domain/plan"
@@ -36,6 +37,9 @@ type ProxyService struct {
 	// Route and transform services (optional - nil for simple proxy mode)
 	routeService     *RouteService
 	transformService *TransformService
+
+	// Token service for session authentication (optional - nil disables session auth)
+	tokens *auth.TokenService
 
 	// Static configuration (requires restart)
 	keyPrefix string
@@ -112,6 +116,13 @@ func (s *ProxyService) SetTransformService(transformService *TransformService) {
 	s.transformService = transformService
 }
 
+// SetTokenService sets the token service for session-based authentication.
+// This enables users to access API routes using JWT session tokens (from portal login)
+// in addition to API keys.
+func (s *ProxyService) SetTokenService(tokens *auth.TokenService) {
+	s.tokens = tokens
+}
+
 // UpdateConfig updates the hot-reloadable configuration.
 // This is thread-safe and can be called while handling requests.
 func (s *ProxyService) UpdateConfig(plans []plan.Plan, endpoints []plan.Endpoint, rateBurst, rateWindow int, ents []entitlement.Entitlement, planEnts []entitlement.PlanEntitlement) {
@@ -164,58 +175,85 @@ func (s *ProxyService) Handle(ctx context.Context, req proxy.Request) HandleResu
 		return s.handlePublicRoute(ctx, req, matchedRoute, pathParams, originalPath, dynCfg)
 	}
 
-	// 3. Check for missing API key (before format validation)
-	if req.APIKey == "" {
-		return HandleResult{Error: &proxy.ErrMissingKey}
-	}
-
-	// 4. Validate API key format (PURE)
-	prefix, valid := key.ValidateFormat(req.APIKey, s.keyPrefix)
-	if !valid {
-		return HandleResult{Error: &proxy.ErrInvalidKey}
-	}
-
-	// 5. Lookup key (I/O)
-	keys, err := s.keys.Get(ctx, prefix)
-	if err != nil || len(keys) == 0 {
-		return HandleResult{Error: &proxy.ErrInvalidKey}
-	}
-
-	// 6. Find matching key by comparing hash (PURE comparison, I/O lookup)
+	// 3. Authenticate via session token OR API key
+	var user ports.User
 	var matchedKey key.Key
-	found := false
-	for _, k := range keys {
-		if bcrypt.CompareHashAndPassword(k.Hash, []byte(req.APIKey)) == nil {
-			matchedKey = k
-			found = true
-			break
+	var authViaSession bool
+	var err error
+
+	// 3a. Try session token first (if token service configured)
+	if s.tokens != nil && req.SessionToken != "" {
+		var claims *auth.Claims
+		claims, err = s.tokens.ValidateToken(req.SessionToken)
+		if err == nil {
+			// Session token is valid - get user directly
+			user, err = s.users.Get(ctx, claims.UserID)
+			if err == nil && user.Status == "active" {
+				authViaSession = true
+				// Create a synthetic key for tracking (no actual key exists)
+				matchedKey = key.Key{
+					ID:     "session:" + claims.UserID,
+					UserID: claims.UserID,
+				}
+			}
 		}
 	}
-	if !found {
-		return HandleResult{Error: &proxy.ErrInvalidKey}
-	}
 
-	// 7. Validate key (PURE)
-	validation := key.Validate(matchedKey, now)
-	if !validation.Valid {
-		return HandleResult{Error: &proxy.ErrorResponse{
-			Status:  401,
-			Code:    validation.Reason,
-			Message: reasonToMessage(validation.Reason),
-		}}
-	}
+	// 3b. If session auth failed or not attempted, try API key
+	if !authViaSession {
+		// Check for missing API key
+		if req.APIKey == "" {
+			return HandleResult{Error: &proxy.ErrMissingKey}
+		}
 
-	// 8. Get user and check status (I/O)
-	user, err := s.users.Get(ctx, matchedKey.UserID)
-	if err != nil {
-		return HandleResult{Error: &proxy.ErrInvalidKey}
-	}
-	if user.Status != "active" {
-		return HandleResult{Error: &proxy.ErrorResponse{
-			Status:  403,
-			Code:    "user_suspended",
-			Message: "Account is suspended",
-		}}
+		// Validate API key format (PURE)
+		prefix, valid := key.ValidateFormat(req.APIKey, s.keyPrefix)
+		if !valid {
+			return HandleResult{Error: &proxy.ErrInvalidKey}
+		}
+
+		// Lookup key (I/O)
+		var keys []key.Key
+		keys, err = s.keys.Get(ctx, prefix)
+		if err != nil || len(keys) == 0 {
+			return HandleResult{Error: &proxy.ErrInvalidKey}
+		}
+
+		// Find matching key by comparing hash (PURE comparison, I/O lookup)
+		found := false
+		for _, k := range keys {
+			if bcrypt.CompareHashAndPassword(k.Hash, []byte(req.APIKey)) == nil {
+				matchedKey = k
+				found = true
+				break
+			}
+		}
+		if !found {
+			return HandleResult{Error: &proxy.ErrInvalidKey}
+		}
+
+		// Validate key (PURE)
+		validation := key.Validate(matchedKey, now)
+		if !validation.Valid {
+			return HandleResult{Error: &proxy.ErrorResponse{
+				Status:  401,
+				Code:    validation.Reason,
+				Message: reasonToMessage(validation.Reason),
+			}}
+		}
+
+		// Get user and check status (I/O)
+		user, err = s.users.Get(ctx, matchedKey.UserID)
+		if err != nil {
+			return HandleResult{Error: &proxy.ErrInvalidKey}
+		}
+		if user.Status != "active" {
+			return HandleResult{Error: &proxy.ErrorResponse{
+				Status:  403,
+				Code:    "user_suspended",
+				Message: "Account is suspended",
+			}}
+		}
 	}
 
 	// 9. Get plan and rate limit config (PURE) - uses dynamic config
@@ -763,58 +801,85 @@ func (s *ProxyService) HandleStreaming(ctx context.Context, req proxy.Request, s
 		return s.handlePublicStreamingRoute(ctx, req, matchedRoute, pathParams, originalPath, dynCfg)
 	}
 
-	// 3. Check for missing API key (before format validation)
-	if req.APIKey == "" {
-		return StreamingHandleResult{Error: &proxy.ErrMissingKey}
-	}
-
-	// 4. Validate API key format
-	prefix, valid := key.ValidateFormat(req.APIKey, s.keyPrefix)
-	if !valid {
-		return StreamingHandleResult{Error: &proxy.ErrInvalidKey}
-	}
-
-	// 4. Lookup key
-	keys, err := s.keys.Get(ctx, prefix)
-	if err != nil || len(keys) == 0 {
-		return StreamingHandleResult{Error: &proxy.ErrInvalidKey}
-	}
-
-	// 5. Find matching key
+	// 3. Authenticate via session token OR API key
+	var user ports.User
 	var matchedKey key.Key
-	found := false
-	for _, k := range keys {
-		if bcrypt.CompareHashAndPassword(k.Hash, []byte(req.APIKey)) == nil {
-			matchedKey = k
-			found = true
-			break
+	var authViaSession bool
+	var err error
+
+	// 3a. Try session token first (if token service configured)
+	if s.tokens != nil && req.SessionToken != "" {
+		var claims *auth.Claims
+		claims, err = s.tokens.ValidateToken(req.SessionToken)
+		if err == nil {
+			// Session token is valid - get user directly
+			user, err = s.users.Get(ctx, claims.UserID)
+			if err == nil && user.Status == "active" {
+				authViaSession = true
+				// Create a synthetic key for tracking (no actual key exists)
+				matchedKey = key.Key{
+					ID:     "session:" + claims.UserID,
+					UserID: claims.UserID,
+				}
+			}
 		}
 	}
-	if !found {
-		return StreamingHandleResult{Error: &proxy.ErrInvalidKey}
-	}
 
-	// 6. Validate key
-	validation := key.Validate(matchedKey, now)
-	if !validation.Valid {
-		return StreamingHandleResult{Error: &proxy.ErrorResponse{
-			Status:  401,
-			Code:    validation.Reason,
-			Message: reasonToMessage(validation.Reason),
-		}}
-	}
+	// 3b. If session auth failed or not attempted, try API key
+	if !authViaSession {
+		// Check for missing API key
+		if req.APIKey == "" {
+			return StreamingHandleResult{Error: &proxy.ErrMissingKey}
+		}
 
-	// 7. Get user and check status
-	user, err := s.users.Get(ctx, matchedKey.UserID)
-	if err != nil {
-		return StreamingHandleResult{Error: &proxy.ErrInvalidKey}
-	}
-	if user.Status != "active" {
-		return StreamingHandleResult{Error: &proxy.ErrorResponse{
-			Status:  403,
-			Code:    "user_suspended",
-			Message: "Account is suspended",
-		}}
+		// Validate API key format
+		prefix, valid := key.ValidateFormat(req.APIKey, s.keyPrefix)
+		if !valid {
+			return StreamingHandleResult{Error: &proxy.ErrInvalidKey}
+		}
+
+		// Lookup key
+		var keys []key.Key
+		keys, err = s.keys.Get(ctx, prefix)
+		if err != nil || len(keys) == 0 {
+			return StreamingHandleResult{Error: &proxy.ErrInvalidKey}
+		}
+
+		// Find matching key
+		found := false
+		for _, k := range keys {
+			if bcrypt.CompareHashAndPassword(k.Hash, []byte(req.APIKey)) == nil {
+				matchedKey = k
+				found = true
+				break
+			}
+		}
+		if !found {
+			return StreamingHandleResult{Error: &proxy.ErrInvalidKey}
+		}
+
+		// Validate key
+		validation := key.Validate(matchedKey, now)
+		if !validation.Valid {
+			return StreamingHandleResult{Error: &proxy.ErrorResponse{
+				Status:  401,
+				Code:    validation.Reason,
+				Message: reasonToMessage(validation.Reason),
+			}}
+		}
+
+		// Get user and check status
+		user, err = s.users.Get(ctx, matchedKey.UserID)
+		if err != nil {
+			return StreamingHandleResult{Error: &proxy.ErrInvalidKey}
+		}
+		if user.Status != "active" {
+			return StreamingHandleResult{Error: &proxy.ErrorResponse{
+				Status:  403,
+				Code:    "user_suspended",
+				Message: "Account is suspended",
+			}}
+		}
 	}
 
 	// 8. Get plan and rate limit config
