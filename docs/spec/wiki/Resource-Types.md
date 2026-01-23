@@ -243,7 +243,7 @@ Represents URL routing rules.
 | `name` | string | Route name |
 | `description` | string | Route description |
 | `host_pattern` | string | Host/domain pattern to match |
-| `host_match_type` | enum | exact, wildcard, regex, or empty (any host) |
+| `host_match_type` | enum | exact, wildcard, regex, or empty (inferred from pattern if host_pattern set, otherwise any host) |
 | `path_pattern` | string | URL pattern to match |
 | `match_type` | enum | exact, prefix, regex |
 | `methods` | []string | HTTP methods (empty = all) |

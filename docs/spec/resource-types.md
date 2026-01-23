@@ -286,7 +286,7 @@ Keys in list don't include the full key:
 |-----------|------|-------------|---------|
 | `name` | string | Route name | Yes |
 | `host_pattern` | string | Host/domain pattern to match | Yes |
-| `host_match_type` | enum | How to match host | Yes |
+| `host_match_type` | enum | How to match host (exact, wildcard, regex). If empty but host_pattern set, inferred from pattern | Yes |
 | `path_pattern` | string | URL pattern to match | Yes |
 | `match_type` | enum | Pattern match type | Yes |
 | `methods` | []string | HTTP methods | Yes |

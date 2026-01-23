@@ -349,6 +349,17 @@ Request to `other.example.com/anything` matches Route 3.
 
 Routes without `host_pattern` (or with empty `host_pattern`) match **any host**. This ensures existing routes continue to work unchanged.
 
+### Match Type Inference
+
+When `host_pattern` is set but `host_match_type` is empty, the match type is **inferred from the pattern**:
+
+| Pattern | Inferred Match Type |
+|---------|---------------------|
+| `*.example.com` | `wildcard` |
+| `api.example.com` | `exact` |
+
+This ensures host patterns are always respected, even if the match type wasn't explicitly configured.
+
 ---
 
 ## Route Priority
