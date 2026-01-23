@@ -554,6 +554,7 @@ type RouterConfig struct {
 	MetricsHandler        http.Handler  // Optional metrics exporter handler (for /metrics endpoint)
 	EnableOpenAPI         bool
 	AdminHandler          http.Handler  // Optional admin API handler
+	AuthHandler           http.Handler  // Optional auth API handler (mounted at /auth as alias for /admin auth endpoints)
 	WebHandler            http.Handler  // Optional web UI handler (enabled by default if provided, unless WebUIEnabled is set to false)
 	WebUIEnabled          *bool         // Whether to enable web UI (default: true if WebHandler provided, false otherwise). Use pointer to distinguish between "not set" and "explicitly false"
 	WebUIBasePath         string        // Base path to mount web UI (default: "" = root)
@@ -626,6 +627,11 @@ func NewRouterWithConfig(proxyHandler *ProxyHandler, healthHandler *HealthHandle
 	// Admin API (if enabled)
 	if cfg.AdminHandler != nil {
 		r.Mount("/admin", cfg.AdminHandler)
+	}
+
+	// Auth API alias (if enabled) - maps /auth/* to admin auth endpoints
+	if cfg.AuthHandler != nil {
+		r.Mount("/auth", cfg.AuthHandler)
 	}
 
 	// User portal (if enabled)

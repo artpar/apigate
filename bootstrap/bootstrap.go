@@ -551,6 +551,7 @@ func (a *App) initHTTPServer() error {
 		Metrics:               a.Metrics,
 		EnableOpenAPI:         s.GetBool("openapi.enabled"),
 		AdminHandler:          adminHandler.Router(),
+		AuthHandler:           adminHandler.AuthRouter(),
 		WebHandler:            webHandler.Router(),
 		WebUIEnabled:          &webUIEnabled,
 		WebUIBasePath:         s.Get(settings.KeyWebUIBasePath),

@@ -106,11 +106,13 @@ func (h *Handler) Router() chi.Router {
 
 	// Public endpoints (no auth required)
 	r.Post("/login", h.Login)
+	r.Post("/register", h.Register)
 
 	// Protected endpoints (require auth)
 	r.Group(func(r chi.Router) {
 		r.Use(h.AuthMiddleware)
 
+		r.Get("/me", h.Me)
 		r.Post("/logout", h.Logout)
 
 		// Users
@@ -391,6 +393,138 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	jsonapi.WriteMeta(w, http.StatusOK, jsonapi.Meta{"status": "logged_out"})
 }
 
+// Me returns the current authenticated user's information.
+//
+//	@Summary		Get current user
+//	@Description	Returns information about the currently authenticated user
+//	@Tags			Admin
+//	@Produce		json
+//	@Success		200	{object}	jsonapi.Document	"Current user"
+//	@Failure		401	{object}	ErrorResponse		"Not authenticated"
+//	@Security		AdminAuth
+//	@Router			/admin/me [get]
+func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
+	userID := r.Context().Value(ctxUserIDKey).(string)
+
+	// If it's an API key auth, return minimal admin info
+	if userID == "admin" {
+		jsonapi.WriteResource(w, http.StatusOK, jsonapi.NewResource(TypeUser, "admin").
+			Attr("email", "admin@apigate").
+			Attr("role", "admin").
+			Build())
+		return
+	}
+
+	// Get user from store
+	user, err := h.users.Get(r.Context(), userID)
+	if err != nil {
+		jsonapi.WriteNotFound(w, "User not found")
+		return
+	}
+
+	jsonapi.WriteResource(w, http.StatusOK, userToResource(user))
+}
+
+// RegisterRequest represents a registration request.
+type RegisterRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+	Name     string `json:"name,omitempty"`
+}
+
+// Register creates a new user account.
+//
+//	@Summary		Register new user
+//	@Description	Create a new user account (if registration is enabled)
+//	@Tags			Admin
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body		RegisterRequest	true	"Registration details"
+//	@Success		201		{object}	jsonapi.Document	"User created"
+//	@Failure		400		{object}	ErrorResponse		"Invalid request"
+//	@Failure		409		{object}	ErrorResponse		"Email already exists"
+//	@Router			/admin/register [post]
+func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
+	var req RegisterRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonapi.WriteBadRequest(w, "Invalid JSON body")
+		return
+	}
+
+	if req.Email == "" {
+		jsonapi.WriteValidationError(w, "email", "Email is required")
+		return
+	}
+
+	if req.Password == "" {
+		jsonapi.WriteValidationError(w, "password", "Password is required")
+		return
+	}
+
+	// Check if user already exists
+	if _, err := h.users.GetByEmail(r.Context(), req.Email); err == nil {
+		jsonapi.WriteConflict(w, "Email already registered")
+		return
+	}
+
+	// Hash password
+	passwordHash, err := h.hasher.Hash(req.Password)
+	if err != nil {
+		jsonapi.WriteInternalError(w, "Failed to hash password")
+		return
+	}
+
+	// Create user
+	user := ports.User{
+		ID:           generateUserID(),
+		Email:        req.Email,
+		Name:         req.Name,
+		PasswordHash: passwordHash,
+		Status:       "active",
+		PlanID:       "free", // Default plan
+		CreatedAt:    time.Now(),
+	}
+
+	if err := h.users.Create(r.Context(), user); err != nil {
+		jsonapi.WriteInternalError(w, "Failed to create user")
+		return
+	}
+
+	// Generate JWT token for immediate login
+	token := h.generateTokenIfAvailable(user.ID, user.Email)
+
+	// Return user with token
+	rb := jsonapi.NewResource(TypeUser, user.ID).
+		Attr("email", user.Email).
+		Attr("name", user.Name).
+		Attr("status", user.Status).
+		Attr("plan_id", user.PlanID).
+		Attr("created_at", user.CreatedAt.Format(time.RFC3339))
+	if token != "" {
+		rb.Attr("token", token)
+	}
+	jsonapi.WriteResource(w, http.StatusCreated, rb.Build())
+}
+
+// AuthRouter returns a router with only auth-related endpoints.
+// This is mounted at /auth/* as an alias for /admin/* auth endpoints.
+func (h *Handler) AuthRouter() chi.Router {
+	r := chi.NewRouter()
+
+	// Public auth endpoints
+	r.Post("/login", h.Login)
+	r.Post("/register", h.Register)
+
+	// Protected auth endpoints
+	r.Group(func(r chi.Router) {
+		r.Use(h.AuthMiddleware)
+		r.Get("/me", h.Me)
+		r.Post("/logout", h.Logout)
+	})
+
+	return r
+}
+
 // AuthMiddleware validates admin authentication.
 func (h *Handler) AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -417,10 +551,20 @@ func (h *Handler) AuthMiddleware(next http.Handler) http.Handler {
 			}
 		}
 
-		// Try Authorization header (Bearer session_id or API key)
+		// Try Authorization header (Bearer JWT, session_id, or API key)
 		authHeader := r.Header.Get("Authorization")
 		if authHeader != "" {
 			token := strings.TrimPrefix(authHeader, "Bearer ")
+
+			// Try JWT validation first (if token service configured)
+			if h.tokens != nil {
+				if claims, err := h.tokens.ValidateToken(token); err == nil {
+					ctx := context.WithValue(r.Context(), ctxSessionKey, "jwt_token")
+					ctx = context.WithValue(ctx, ctxUserIDKey, claims.UserID)
+					next.ServeHTTP(w, r.WithContext(ctx))
+					return
+				}
+			}
 
 			// Check if it's a session ID
 			if session := h.sessions.Get(token); session != nil {
