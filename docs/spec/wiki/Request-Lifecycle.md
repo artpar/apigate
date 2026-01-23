@@ -6,6 +6,12 @@ This page describes the complete journey of an API request through APIGate.
 
 ## Overview
 
+APIGate processes requests differently based on whether the matched route requires authentication.
+
+### Route Matching First
+
+**Important**: Route matching happens FIRST to determine if authentication is required.
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                      Request Lifecycle                          │
@@ -15,62 +21,68 @@ This page describes the complete journey of an API request through APIGate.
 │        │                                                        │
 │        ▼                                                        │
 │   ┌─────────────┐                                               │
-│   │ 1. Extract  │  X-API-Key header or Authorization Bearer    │
+│   │ 1. Match    │  Find matching route by host/path/method     │
+│   │    Route    │                                               │
+│   └──────┬──────┘                                               │
+│          │                                                      │
+│          ▼                                                      │
+│   ┌─────────────┐     No     ┌─────────────────────────┐       │
+│   │auth_required├───────────►│ PUBLIC ROUTE PATH       │       │
+│   │   = true?   │            │ Skip to step 10         │       │
+│   └──────┬──────┘            │ (Transform & Forward)   │       │
+│          │ Yes               └─────────────────────────┘       │
+│          ▼                                                      │
+│   ┌─────────────┐                                               │
+│   │ 2. Extract  │  X-API-Key header or Authorization Bearer    │
 │   │    API Key  │                                               │
 │   └──────┬──────┘                                               │
 │          │                                                      │
 │          ▼                                                      │
 │   ┌─────────────┐                                               │
-│   │ 2. Validate │  Check prefix format                         │
+│   │ 3. Validate │  Check prefix format                         │
 │   │    Format   │                                               │
 │   └──────┬──────┘                                               │
 │          │                                                      │
 │          ▼                                                      │
 │   ┌─────────────┐                                               │
-│   │ 3. Lookup   │  Find key by prefix in store                 │
+│   │ 4. Lookup   │  Find key by prefix in store                 │
 │   │    Key      │                                               │
 │   └──────┬──────┘                                               │
 │          │                                                      │
 │          ▼                                                      │
 │   ┌─────────────┐                                               │
-│   │ 4. Verify   │  bcrypt hash comparison                      │
+│   │ 5. Verify   │  bcrypt hash comparison                      │
 │   │    Hash     │                                               │
 │   └──────┬──────┘                                               │
 │          │                                                      │
 │          ▼                                                      │
 │   ┌─────────────┐                                               │
-│   │ 5. Validate │  Check expiry, revocation                    │
+│   │ 6. Validate │  Check expiry, revocation                    │
 │   │    Key      │                                               │
 │   └──────┬──────┘                                               │
 │          │                                                      │
 │          ▼                                                      │
 │   ┌─────────────┐                                               │
-│   │ 6. Check    │  Verify user status is active                │
+│   │ 7. Check    │  Verify user status is active                │
 │   │    User     │                                               │
 │   └──────┬──────┘                                               │
 │          │                                                      │
 │          ▼                                                      │
 │   ┌─────────────┐                                               │
-│   │ 7. Check    │  Monthly request/compute limits              │
+│   │ 8. Check    │  Monthly request/compute limits              │
 │   │    Quota    │                                               │
 │   └──────┬──────┘                                               │
 │          │                                                      │
 │          ▼                                                      │
 │   ┌─────────────┐                                               │
-│   │ 8. Check    │  Token bucket rate limiting                  │
+│   │ 9. Check    │  Token bucket rate limiting                  │
 │   │    Rate     │                                               │
 │   └──────┬──────┘                                               │
 │          │                                                      │
 │          ▼                                                      │
 │   ┌─────────────┐                                               │
-│   │ 9. Resolve  │  Add X-Entitlement-* headers                 │
+│   │10. Resolve  │  Add X-Entitlement-* headers                 │
 │   │ Entitlements│                                               │
-│   └──────┬──────┘                                               │
-│          │                                                      │
-│          ▼                                                      │
-│   ┌─────────────┐                                               │
-│   │10. Match    │  Find matching route by path/method          │
-│   │    Route    │                                               │
 │   └──────┬──────┘                                               │
 │          │                                                      │
 │          ▼                                                      │
@@ -119,7 +131,24 @@ This page describes the complete journey of an API request through APIGate.
 
 ## Step Details
 
-### 1. Extract API Key
+### 1. Match Route
+
+Find matching route by host, path, method, and headers:
+
+```go
+match := s.routeService.Match(req.Method, req.Path, req.Headers)
+```
+
+Routes are matched by:
+- `host_pattern` with `host_match_type` (exact, wildcard, regex)
+- `path_pattern` with `match_type` (exact, prefix, regex)
+- `methods` array
+- `headers` conditions
+- `priority` (higher matches first)
+
+**If the matched route has `auth_required: false`, skip to step 11 (Transform Request).**
+
+### 2. Extract API Key
 
 API key is extracted from (in order):
 1. `X-API-Key` header
@@ -131,7 +160,7 @@ API key is extracted from (in order):
 apiKey := extractAPIKey(r)
 ```
 
-### 2. Validate Format
+### 3. Validate Format
 
 Check key matches expected prefix format:
 
@@ -142,7 +171,7 @@ prefix, valid := key.ValidateFormat(req.APIKey, s.keyPrefix)
 
 Keys must start with configured prefix (default: `ak_`).
 
-### 3. Lookup Key
+### 4. Lookup Key
 
 Find key record by prefix in store:
 
@@ -152,7 +181,7 @@ keys, err := s.keys.Get(ctx, prefix)
 
 Uses indexed prefix lookup for efficiency.
 
-### 4. Verify Hash
+### 5. Verify Hash
 
 Compare provided key against stored bcrypt hash:
 
@@ -160,7 +189,7 @@ Compare provided key against stored bcrypt hash:
 bcrypt.CompareHashAndPassword(k.Hash, []byte(req.APIKey))
 ```
 
-### 5. Validate Key
+### 6. Validate Key
 
 Check key is not expired or revoked:
 
@@ -169,7 +198,7 @@ validation := key.Validate(matchedKey, now)
 // Checks: expires_at, revoked_at
 ```
 
-### 6. Check User
+### 7. Check User
 
 Load user and verify status is `active`:
 
@@ -180,7 +209,7 @@ if user.Status != "active" {
 }
 ```
 
-### 7. Check Quota
+### 8. Check Quota
 
 Monthly quota check with grace period:
 
@@ -194,7 +223,7 @@ Supports meter types:
 
 Returns headers: `X-Quota-Used`, `X-Quota-Limit`, `X-Quota-Reset`
 
-### 8. Check Rate Limit
+### 9. Check Rate Limit
 
 Token bucket rate limiting:
 
@@ -206,7 +235,7 @@ Based on plan's `rate_limit_per_minute` setting.
 
 Returns headers: `X-RateLimit-Remaining`, `X-RateLimit-Reset`, `Retry-After`
 
-### 9. Resolve Entitlements
+### 10. Resolve Entitlements
 
 Add entitlement headers based on user's plan:
 
@@ -220,20 +249,6 @@ entitlementHeaders := entitlement.ToHeaders(userEntitlements)
 ```
 
 Adds headers like `X-Entitlement-Webhooks: true`.
-
-### 10. Match Route
-
-Find matching route by path and method:
-
-```go
-match := s.routeService.Match(req.Method, req.Path, req.Headers)
-```
-
-Routes are matched by:
-- `path_pattern` with `match_type` (exact, prefix, regex)
-- `methods` array
-- `headers` conditions
-- `priority` (higher matches first)
 
 ### 11. Transform Request
 
@@ -310,12 +325,52 @@ s.usage.Record(ctx, usage.Event{
 
 ---
 
+## Public Routes (auth_required: false)
+
+When a route has `auth_required: false`, the request follows a shortened path:
+
+```
+1. Match Route
+   └── auth_required = false
+       ▼
+11. Transform Request
+12. Rewrite Path
+13. Forward to Upstream
+14. Transform Response
+15. Calculate Cost
+16. Record Usage (with anonymous user/key)
+```
+
+**What's skipped for public routes:**
+- API key extraction and validation (steps 2-6)
+- User lookup and status check (step 7)
+- Quota enforcement (step 8)
+- Rate limiting (step 9)
+- Entitlement headers (step 10)
+
+**What still applies:**
+- Request/response transformations
+- Path rewriting
+- Upstream authentication (backend credentials injected by transform)
+- Usage logging (with `anonymous` user/key IDs)
+
+**Use cases:**
+- Reverse proxy for deployed applications
+- Health check endpoints
+- Webhook receivers
+- Static content serving
+
+See [[Routes#Public Routes (No Authentication)]] for configuration details.
+
+---
+
 ## Error Responses
 
 Errors can occur at various stages:
 
 | Stage | Error Code | HTTP Status |
 |-------|------------|-------------|
+| Match Route | `route_not_found` | 404 |
 | Extract Key | `missing_api_key` | 401 |
 | Validate Format | `invalid_api_key` | 401 |
 | Lookup Key | `invalid_api_key` | 401 |
