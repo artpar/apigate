@@ -180,10 +180,10 @@ Keys in list don't include the full key:
 |-----------|------|-------------|
 | `user_id` | string | Authenticated user ID |
 | `user_email` | string | User's email |
-| `token` | string | Session token |
+| `token` | string | JWT session token |
 | `expires_at` | timestamp | Session expiration |
 
-### Example
+### Example: Login Response
 
 ```json
 {
@@ -193,7 +193,7 @@ Keys in list don't include the full key:
     "attributes": {
       "user_id": "usr_xyz789",
       "user_email": "user@example.com",
-      "token": "session_token_value",
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
       "expires_at": "2025-01-20T10:00:00Z"
     }
   }
@@ -204,10 +204,95 @@ Keys in list don't include the full key:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/admin/login` | Create session |
+| POST | `/admin/login` | Create session (returns JWT token) |
 | POST | `/admin/logout` | End session |
+| GET | `/admin/me` | Get current authenticated user |
+| POST | `/admin/register` | Register new user account |
 
-**Implementation**: `adapters/http/admin/admin.go:847-856`
+### Auth Endpoint Aliases
+
+The `/auth/*` endpoints are aliases for the admin auth endpoints, providing a cleaner separation of user authentication from admin API:
+
+| Alias | Admin Endpoint | Description |
+|-------|----------------|-------------|
+| POST `/auth/login` | POST `/admin/login` | User login |
+| POST `/auth/logout` | POST `/admin/logout` | User logout |
+| GET `/auth/me` | GET `/admin/me` | Get current user |
+| POST `/auth/register` | POST `/admin/register` | Register new user |
+
+### Authentication Methods
+
+The admin/auth endpoints accept authentication via:
+
+1. **JWT Token** (preferred for sessions):
+   ```http
+   Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+   ```
+
+2. **Session Cookie** (for browser-based apps):
+   ```http
+   Cookie: apigate_session=base64_encoded_session...
+   ```
+
+3. **API Key** (for service accounts):
+   ```http
+   Authorization: Bearer ak_abc123...
+   ```
+
+### Register Request
+
+```json
+POST /auth/register
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "password": "securepassword",
+  "name": "John Doe"
+}
+```
+
+### Register Response
+
+```json
+{
+  "data": {
+    "type": "users",
+    "id": "usr_abc123",
+    "attributes": {
+      "email": "user@example.com",
+      "name": "John Doe",
+      "status": "active",
+      "plan_id": "free",
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+      "created_at": "2025-01-19T10:00:00Z"
+    }
+  }
+}
+```
+
+### Me Response
+
+```json
+GET /auth/me
+Authorization: Bearer <jwt_token>
+
+{
+  "data": {
+    "type": "users",
+    "id": "usr_abc123",
+    "attributes": {
+      "email": "user@example.com",
+      "name": "John Doe",
+      "status": "active",
+      "plan_id": "free",
+      "created_at": "2025-01-19T10:00:00Z"
+    }
+  }
+}
+```
+
+**Implementation**: `adapters/http/admin/admin.go`
 
 ---
 
