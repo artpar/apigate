@@ -855,48 +855,43 @@ func (s *ProxyService) HandleStreaming(ctx context.Context, req proxy.Request, s
 		Scopes:    matchedKey.Scopes,
 	}
 
-	// 11. Continue route processing (route already matched above)
+	// 11. Continue route processing (reuse match from step 1)
 	if matchedRoute != nil && s.routeService != nil {
-		match := s.routeService.Match(req.Method, req.Path, req.Headers)
-		if match != nil {
-			matchedRoute = match.Route
-
-			// Apply request transform
-			if matchedRoute.RequestTransform != nil && s.transformService != nil {
-				var transformErr error
-				req, transformErr = s.transformService.TransformRequest(ctx, req, matchedRoute.RequestTransform, &auth)
-				if transformErr != nil {
-					return StreamingHandleResult{Error: &proxy.ErrorResponse{
-						Status:  500,
-						Code:    "transform_error",
-						Message: "Request transformation failed: " + transformErr.Error(),
-					}, Auth: &auth}
-				}
+		// Apply request transform
+		if matchedRoute.RequestTransform != nil && s.transformService != nil {
+			var transformErr error
+			req, transformErr = s.transformService.TransformRequest(ctx, req, matchedRoute.RequestTransform, &auth)
+			if transformErr != nil {
+				return StreamingHandleResult{Error: &proxy.ErrorResponse{
+					Status:  500,
+					Code:    "transform_error",
+					Message: "Request transformation failed: " + transformErr.Error(),
+				}, Auth: &auth}
 			}
+		}
 
-			// Path rewriting
-			if matchedRoute.PathRewrite != "" && s.transformService != nil {
-				rewriteCtx := map[string]any{
-					"path":       req.Path,
-					"pathParams": match.PathParams,
-					"method":     req.Method,
-				}
-				if newPath, evalErr := s.transformService.EvalString(ctx, matchedRoute.PathRewrite, rewriteCtx); evalErr == nil && newPath != "" {
-					req.Path = newPath
-				}
+		// Path rewriting (use pathParams from initial match)
+		if matchedRoute.PathRewrite != "" && s.transformService != nil {
+			rewriteCtx := map[string]any{
+				"path":       req.Path,
+				"pathParams": pathParams,
+				"method":     req.Method,
 			}
-
-			// Method override
-			if matchedRoute.MethodOverride != "" {
-				req.Method = matchedRoute.MethodOverride
+			if newPath, evalErr := s.transformService.EvalString(ctx, matchedRoute.PathRewrite, rewriteCtx); evalErr == nil && newPath != "" {
+				req.Path = newPath
 			}
+		}
 
-			// Get and apply upstream auth
-			if matchedRoute.UpstreamID != "" {
-				routeUpstream = s.routeService.GetUpstream(matchedRoute.UpstreamID)
-				if routeUpstream != nil {
-					req.Headers = s.routeService.ApplyUpstreamAuth(routeUpstream, req.Headers)
-				}
+		// Method override
+		if matchedRoute.MethodOverride != "" {
+			req.Method = matchedRoute.MethodOverride
+		}
+
+		// Get and apply upstream auth
+		if matchedRoute.UpstreamID != "" {
+			routeUpstream = s.routeService.GetUpstream(matchedRoute.UpstreamID)
+			if routeUpstream != nil {
+				req.Headers = s.routeService.ApplyUpstreamAuth(routeUpstream, req.Headers)
 			}
 		}
 	}
