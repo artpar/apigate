@@ -84,7 +84,7 @@ apigate plans get <plan-id>
 
 ### Quota Exceeded
 
-**Error**: `quota_exceeded` (429)
+**Error**: `quota_exceeded` (402)
 
 **Check headers**:
 ```

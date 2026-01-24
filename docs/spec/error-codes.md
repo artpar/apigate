@@ -68,6 +68,7 @@ Points to the location of the error:
 |------|--------|-------|-----------|
 | `bad_request` | 400 | Bad Request | Malformed request syntax |
 | `unauthorized` | 401 | Unauthorized | Missing or invalid authentication |
+| `quota_exceeded` | 402 | Payment Required | Monthly request quota exceeded |
 | `forbidden` | 403 | Forbidden | Authenticated but not authorized |
 | `not_found` | 404 | Not Found | Resource doesn't exist |
 | `method_not_allowed` | 405 | Method Not Allowed | HTTP method not supported |

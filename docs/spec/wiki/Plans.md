@@ -112,7 +112,7 @@ curl -X POST http://localhost:8080/admin/plans \
 
 ## Quota Settings
 
-When a user exceeds their monthly quota (`requests_per_month`), APIGate returns HTTP 429.
+When a user exceeds their monthly quota (`requests_per_month`), APIGate returns HTTP 402 (Payment Required).
 
 ### Overage Billing
 

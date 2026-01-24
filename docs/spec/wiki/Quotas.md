@@ -94,15 +94,15 @@ curl -X POST http://localhost:8080/admin/plans \
 When a user exceeds their monthly quota:
 
 ```http
-HTTP/1.1 429 Too Many Requests
+HTTP/1.1 402 Payment Required
 Content-Type: application/vnd.api+json
 
 {
   "errors": [{
-    "status": "429",
+    "status": "402",
     "code": "quota_exceeded",
     "title": "Quota Exceeded",
-    "detail": "Monthly quota of 10000 requests exceeded"
+    "detail": "Monthly request quota exceeded"
   }]
 }
 ```
@@ -239,15 +239,15 @@ def check_quota(response):
 def api_call():
     response = requests.get(url, headers={'X-API-Key': key})
 
-    if response.status_code == 429:
+    if response.status_code == 402:
+        # Quota exceeded - need to upgrade plan or wait for reset
         error = response.json()['errors'][0]
-        if error['code'] == 'quota_exceeded':
-            # Quota exceeded - need to upgrade plan or wait
-            raise QuotaExceededError(error['detail'])
-        else:
-            # Rate limited - retry later
-            time.sleep(int(response.headers.get('Retry-After', 60)))
-            return api_call()
+        raise QuotaExceededError(error['detail'])
+
+    if response.status_code == 429:
+        # Rate limited - retry later
+        time.sleep(int(response.headers.get('Retry-After', 60)))
+        return api_call()
 
     return response
 ```
