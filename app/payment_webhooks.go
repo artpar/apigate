@@ -93,14 +93,23 @@ func (s *PaymentWebhookService) HandleCheckoutCompleted(
 		return err
 	}
 
-	// Update user's plan
+	// Update user's plan (with compensation if this fails)
 	user.PlanID = plan.ID
 	user.UpdatedAt = now
 	if err := s.users.Update(ctx, user); err != nil {
 		s.logger.Error().Err(err).
 			Str("user_id", user.ID).
 			Str("plan_id", plan.ID).
-			Msg("failed to update user plan")
+			Msg("failed to update user plan, attempting to rollback subscription")
+
+		// Compensation: Mark subscription as cancelled to avoid orphan
+		sub.Status = billing.SubscriptionStatusCancelled
+		sub.CancelledAt = &now
+		if rollbackErr := s.subscriptions.Update(ctx, sub); rollbackErr != nil {
+			s.logger.Error().Err(rollbackErr).
+				Str("subscription_id", sub.ID).
+				Msg("failed to rollback subscription after user update failure")
+		}
 		return err
 	}
 
@@ -307,22 +316,13 @@ func (s *PaymentWebhookService) HandleInvoiceFailed(
 }
 
 // findUserByCustomerID finds a user by their payment provider customer ID.
-// Currently only supports StripeID field on User.
+// Uses indexed lookup for efficiency (O(1) instead of O(n)).
 func (s *PaymentWebhookService) findUserByCustomerID(ctx context.Context, customerID string) (ports.User, error) {
-	// List users and find by StripeID
-	// TODO: Add GetByStripeID method to UserStore for efficiency
-	users, err := s.users.List(ctx, 1000, 0)
+	user, err := s.users.GetByStripeID(ctx, customerID)
 	if err != nil {
-		return ports.User{}, err
+		return ports.User{}, errors.New("user not found for customer ID")
 	}
-
-	for _, u := range users {
-		if u.StripeID == customerID {
-			return u, nil
-		}
-	}
-
-	return ports.User{}, errors.New("user not found for customer ID")
+	return user, nil
 }
 
 // findDefaultPlan finds the default plan.

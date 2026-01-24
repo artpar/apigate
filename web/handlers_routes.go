@@ -25,7 +25,12 @@ func (h *Handler) RoutesPage(w http.ResponseWriter, r *http.Request) {
 
 // RouteNewPage displays the create route form.
 func (h *Handler) RouteNewPage(w http.ResponseWriter, r *http.Request) {
-	upstreams, _ := h.upstreams.List(r.Context())
+	upstreams, err := h.upstreams.List(r.Context())
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to list upstreams")
+		http.Error(w, "Failed to load upstreams", http.StatusInternalServerError)
+		return
+	}
 	data := struct {
 		PageData
 		Route     *route.Route
@@ -106,7 +111,12 @@ func (h *Handler) RouteEditPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	upstreams, _ := h.upstreams.List(r.Context())
+	upstreams, err := h.upstreams.List(r.Context())
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to list upstreams")
+		http.Error(w, "Failed to load upstreams", http.StatusInternalServerError)
+		return
+	}
 	data := struct {
 		PageData
 		Route     *route.Route
@@ -202,7 +212,11 @@ func (h *Handler) PartialRoutes(w http.ResponseWriter, r *http.Request) {
 
 	// Build upstream map for display
 	upstreamMap := make(map[string]string)
-	upstreams, _ := h.upstreams.List(r.Context())
+	upstreams, err := h.upstreams.List(r.Context())
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to list upstreams for route display")
+		// Continue with empty map - page can still render
+	}
 	for _, u := range upstreams {
 		upstreamMap[u.ID] = u.Name
 	}

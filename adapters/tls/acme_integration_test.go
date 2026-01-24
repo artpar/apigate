@@ -31,7 +31,7 @@ func TestACMECacheMissError(t *testing.T) {
 	}
 
 	certStore := sqlite.NewCertificateStore(db)
-	cache := NewDBCertCache(certStore)
+	cache := NewDBCertCache(certStore, certStore) // certStore implements both CertificateStore and ACMECacheStore
 
 	_, err = cache.Get(context.Background(), "nonexistent.example.com")
 
@@ -60,7 +60,7 @@ func TestCacheNonCertData(t *testing.T) {
 	}
 
 	certStore := sqlite.NewCertificateStore(db)
-	cache := NewDBCertCache(certStore)
+	cache := NewDBCertCache(certStore, certStore) // certStore implements both CertificateStore and ACMECacheStore
 
 	// Simulate ACME account key storage (single PEM block)
 	accountKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -70,22 +70,50 @@ func TestCacheNonCertData(t *testing.T) {
 		Bytes: keyBytes,
 	})
 
-	// This should not error - account keys are stored in memory only
-	err = cache.Put(context.Background(), "acme-account-key", keyPEM)
+	// Use a realistic ACME account key format (autocert uses "+key" prefix for account keys)
+	// The isAccountKey check looks for "acme_account" or keys starting with "+"
+	accountKeyName := "+acme_account+https://acme-v02.api.letsencrypt.org/directory"
+
+	// This should not error - account keys are now stored in both memory AND database
+	err = cache.Put(context.Background(), accountKeyName, keyPEM)
 	if err != nil {
 		t.Errorf("Failed to store account key: %v", err)
 	}
 
 	// Should be retrievable from memory cache
-	data, err := cache.Get(context.Background(), "acme-account-key")
+	data, err := cache.Get(context.Background(), accountKeyName)
 	if err != nil {
 		t.Errorf("Failed to retrieve account key: %v", err)
 	}
 	if len(data) == 0 {
 		t.Error("Retrieved empty account key data")
 	}
+	t.Log("✓ Account key stored and retrieved from memory cache")
 
-	t.Log("✓ Non-certificate data (account keys) handled correctly")
+	// CRITICAL TEST: Clear memory cache and verify it can be retrieved from database
+	// This is the fix for Issue #47 - account keys must survive restarts
+	cache.ClearMemoryCache()
+	data, err = cache.Get(context.Background(), accountKeyName)
+	if err != nil {
+		t.Errorf("CRITICAL: Failed to retrieve account key from database after memory cache clear: %v", err)
+		t.Error("This means ACME account keys will be lost on restart, causing Let's Encrypt rate limiting!")
+	} else if len(data) == 0 {
+		t.Error("CRITICAL: Retrieved empty account key data from database")
+	} else {
+		t.Log("✓ Account key persisted to database and retrieved after memory cache clear")
+	}
+
+	// Also verify it's actually in the acme_cache table
+	dbData, err := certStore.GetCache(context.Background(), accountKeyName)
+	if err != nil {
+		t.Errorf("Failed to get account key directly from database: %v", err)
+	} else if len(dbData) != len(keyPEM) {
+		t.Errorf("Database data length mismatch: got %d, want %d", len(dbData), len(keyPEM))
+	} else {
+		t.Log("✓ Account key verified in acme_cache table")
+	}
+
+	t.Log("✓ Non-certificate data (account keys) handled correctly with persistence")
 }
 
 // TestCacheCertificateStorage verifies certificate storage and retrieval
@@ -102,7 +130,7 @@ func TestCacheCertificateStorage(t *testing.T) {
 	}
 
 	certStore := sqlite.NewCertificateStore(db)
-	cache := NewDBCertCache(certStore)
+	cache := NewDBCertCache(certStore, certStore) // certStore implements both CertificateStore and ACMECacheStore
 
 	testDomain := "test.example.com"
 	ctx := context.Background()

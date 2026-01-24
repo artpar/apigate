@@ -51,6 +51,19 @@ func (s *UserStore) GetByEmail(ctx context.Context, email string) (ports.User, e
 	return s.users[id], nil
 }
 
+// GetByStripeID retrieves a user by Stripe customer ID.
+func (s *UserStore) GetByStripeID(ctx context.Context, stripeID string) (ports.User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, u := range s.users {
+		if u.StripeID == stripeID {
+			return u, nil
+		}
+	}
+	return ports.User{}, ErrNotFound
+}
+
 // Create stores a new user.
 func (s *UserStore) Create(ctx context.Context, u ports.User) error {
 	s.mu.Lock()

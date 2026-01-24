@@ -20,8 +20,9 @@ import (
 // DBCertCache implements autocert.Cache using database storage.
 // This enables horizontal scaling - all instances share the same certificates.
 type DBCertCache struct {
-	store  ports.CertificateStore
-	logger *slog.Logger
+	store      ports.CertificateStore
+	cacheStore ports.ACMECacheStore // For ACME account keys and other cache data
+	logger     *slog.Logger
 
 	// In-memory cache for performance
 	mu    sync.RWMutex
@@ -30,12 +31,15 @@ type DBCertCache struct {
 }
 
 // NewDBCertCache creates a new database-backed certificate cache.
-func NewDBCertCache(store ports.CertificateStore) *DBCertCache {
+// The cacheStore is used for ACME account keys and other autocert cache data.
+// If cacheStore is nil, account keys will only be stored in memory (not recommended).
+func NewDBCertCache(store ports.CertificateStore, cacheStore ports.ACMECacheStore) *DBCertCache {
 	return &DBCertCache{
-		store:  store,
-		logger: slog.Default(),
-		cache:  make(map[string][]byte),
-		ttl:    5 * time.Minute, // Cache certificates for 5 minutes
+		store:      store,
+		cacheStore: cacheStore,
+		logger:     slog.Default(),
+		cache:      make(map[string][]byte),
+		ttl:        5 * time.Minute, // Cache certificates for 5 minutes
 	}
 }
 
@@ -62,9 +66,21 @@ func (c *DBCertCache) Get(ctx context.Context, key string) ([]byte, error) {
 	}
 	c.mu.RUnlock()
 
-	// Account keys are only stored in memory, so if not found there, it's a miss
+	// Account keys should be stored in database for persistence across restarts
 	if isAccountKey {
-		c.logger.Debug("ACME account key not in memory cache (will create new)", "key_prefix", key[:min(20, len(key))])
+		// Try to retrieve from database if cache store is available
+		if c.cacheStore != nil {
+			data, err := c.cacheStore.GetCache(ctx, key)
+			if err == nil && len(data) > 0 {
+				// Found in database, cache in memory for future requests
+				c.mu.Lock()
+				c.cache[key] = data
+				c.mu.Unlock()
+				c.logger.Debug("ACME account key retrieved from database", "key_prefix", key[:min(20, len(key))])
+				return data, nil
+			}
+		}
+		c.logger.Debug("ACME account key not found (will create new)", "key_prefix", key[:min(20, len(key))])
 		return nil, autocert.ErrCacheMiss
 	}
 
@@ -105,12 +121,20 @@ func (c *DBCertCache) Put(ctx context.Context, key string, data []byte) error {
 	// Try to parse as certificate data (cert + key)
 	certPEM, keyPEM, chainPEM, err := splitCertData(data)
 	if err != nil {
-		// Not a certificate (probably an ACME account key) - store in memory cache only
-		// These don't need to be persisted to the database as certificates
+		// Not a certificate (probably an ACME account key) - store in database for persistence
+		// This ensures account keys survive restarts, preventing Let's Encrypt rate limiting
+		if c.cacheStore != nil {
+			if err := c.cacheStore.PutCache(ctx, key, data); err != nil {
+				c.logger.Error("failed to store ACME account key in database", "key_prefix", key[:min(20, len(key))], "error", err)
+				// Fall back to memory-only storage
+			} else {
+				c.logger.Debug("ACME account key stored in database", "key_prefix", key[:min(20, len(key))], "data_len", len(data))
+			}
+		}
+		// Also store in memory cache for fast access
 		c.mu.Lock()
 		c.cache[key] = data
 		c.mu.Unlock()
-		c.logger.Debug("ACME account key stored in memory cache", "key_prefix", key[:min(20, len(key))], "data_len", len(data))
 		return nil
 	}
 

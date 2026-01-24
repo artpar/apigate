@@ -46,6 +46,17 @@ func (s *UserStore) GetByEmail(ctx context.Context, email string) (ports.User, e
 	return scanUser(row)
 }
 
+// GetByStripeID retrieves a user by Stripe customer ID.
+// Used by payment webhooks to find users from Stripe events.
+func (s *UserStore) GetByStripeID(ctx context.Context, stripeID string) (ports.User, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, email, password_hash, name, stripe_id, plan_id, status, created_at, updated_at
+		FROM users
+		WHERE stripe_id = ?
+	`, stripeID)
+	return scanUser(row)
+}
+
 // Create stores a new user.
 func (s *UserStore) Create(ctx context.Context, u ports.User) error {
 	now := time.Now().UTC()

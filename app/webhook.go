@@ -16,13 +16,15 @@ import (
 
 // WebhookService dispatches webhook events to registered endpoints.
 type WebhookService struct {
-	webhooks   ports.WebhookStore
-	deliveries ports.DeliveryStore
-	logger     zerolog.Logger
-	client     *http.Client
-	mu         sync.Mutex
-	stopCh     chan struct{}
-	running    bool
+	webhooks    ports.WebhookStore
+	deliveries  ports.DeliveryStore
+	logger      zerolog.Logger
+	client      *http.Client
+	mu          sync.Mutex
+	stopCh      chan struct{}
+	running     bool
+	shutdownCtx context.Context    // For graceful shutdown of spawned goroutines
+	shutdownFn  context.CancelFunc // Cancel function for shutdown
 }
 
 // NewWebhookService creates a new webhook service.
@@ -31,14 +33,19 @@ func NewWebhookService(
 	deliveries ports.DeliveryStore,
 	logger zerolog.Logger,
 ) *WebhookService {
+	// Create shutdown context for graceful termination of goroutines
+	shutdownCtx, shutdownFn := context.WithCancel(context.Background())
+
 	return &WebhookService{
-		webhooks:   webhooks,
-		deliveries: deliveries,
-		logger:     logger,
+		webhooks:    webhooks,
+		deliveries:  deliveries,
+		logger:      logger,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-		stopCh: make(chan struct{}),
+		stopCh:      make(chan struct{}),
+		shutdownCtx: shutdownCtx,
+		shutdownFn:  shutdownFn,
 	}
 }
 
@@ -90,8 +97,13 @@ func (s *WebhookService) Dispatch(ctx context.Context, event webhook.Event) erro
 			continue
 		}
 
-		// Dispatch asynchronously
-		go s.sendWebhook(context.Background(), wh, delivery, payloadBytes)
+		// Dispatch asynchronously with timeout derived from shutdown context
+		// This prevents goroutine leaks - goroutines will be cancelled on shutdown
+		webhookCtx, cancel := context.WithTimeout(s.shutdownCtx, 30*time.Second)
+		go func(ctx context.Context, cancelFn context.CancelFunc) {
+			defer cancelFn()
+			s.sendWebhook(ctx, wh, delivery, payloadBytes)
+		}(webhookCtx, cancel)
 	}
 
 	s.logger.Info().
@@ -106,6 +118,14 @@ func (s *WebhookService) Dispatch(ctx context.Context, event webhook.Event) erro
 // sendWebhook sends a webhook and updates the delivery status.
 func (s *WebhookService) sendWebhook(ctx context.Context, wh webhook.Webhook, delivery webhook.Delivery, payload []byte) {
 	start := time.Now()
+
+	// Apply webhook-specific timeout via context (not new client)
+	// This prevents HTTP client leaks from creating a new client per request
+	if wh.TimeoutMS > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(wh.TimeoutMS)*time.Millisecond)
+		defer cancel()
+	}
 
 	// Create the request
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, wh.URL, bytes.NewReader(payload))
@@ -125,16 +145,8 @@ func (s *WebhookService) sendWebhook(ctx context.Context, wh webhook.Webhook, de
 	signature := webhook.SignPayload(payload, wh.Secret)
 	req.Header.Set("X-Webhook-Signature", signature)
 
-	// Use webhook-specific timeout if set
-	client := s.client
-	if wh.TimeoutMS > 0 {
-		client = &http.Client{
-			Timeout: time.Duration(wh.TimeoutMS) * time.Millisecond,
-		}
-	}
-
-	// Send the request
-	resp, err := client.Do(req)
+	// Send the request using shared client
+	resp, err := s.client.Do(req)
 	durationMS := int(time.Since(start).Milliseconds())
 
 	if err != nil {
@@ -232,7 +244,7 @@ func (s *WebhookService) StartRetryWorker(ctx context.Context, interval time.Dur
 	}()
 }
 
-// StopRetryWorker stops the retry worker.
+// StopRetryWorker stops the retry worker and cancels pending webhook goroutines.
 func (s *WebhookService) StopRetryWorker() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -240,6 +252,11 @@ func (s *WebhookService) StopRetryWorker() {
 	if s.running {
 		close(s.stopCh)
 		s.running = false
+	}
+
+	// Cancel shutdown context to terminate any pending webhook goroutines
+	if s.shutdownFn != nil {
+		s.shutdownFn()
 	}
 }
 
@@ -282,8 +299,12 @@ func (s *WebhookService) processRetries(ctx context.Context) {
 			continue
 		}
 
-		// Re-dispatch
-		go s.sendWebhook(context.Background(), wh, updated, []byte(d.Payload))
+		// Re-dispatch with timeout derived from shutdown context
+		retryCtx, cancel := context.WithTimeout(s.shutdownCtx, 30*time.Second)
+		go func(ctx context.Context, cancelFn context.CancelFunc) {
+			defer cancelFn()
+			s.sendWebhook(ctx, wh, updated, []byte(d.Payload))
+		}(retryCtx, cancel)
 	}
 }
 
@@ -332,6 +353,11 @@ func (s *WebhookService) TestWebhook(ctx context.Context, webhookID string) erro
 		return err
 	}
 
-	go s.sendWebhook(context.Background(), wh, delivery, payloadBytes)
+	// Dispatch with timeout derived from shutdown context
+	testCtx, cancel := context.WithTimeout(s.shutdownCtx, 30*time.Second)
+	go func() {
+		defer cancel()
+		s.sendWebhook(testCtx, wh, delivery, payloadBytes)
+	}()
 	return nil
 }

@@ -22,7 +22,6 @@ import (
 	apihttp "github.com/artpar/apigate/adapters/http"
 	"github.com/artpar/apigate/adapters/http/admin"
 	"github.com/artpar/apigate/adapters/idgen"
-	"github.com/artpar/apigate/adapters/memory"
 	"github.com/artpar/apigate/adapters/metrics"
 	"github.com/artpar/apigate/adapters/payment"
 	"github.com/artpar/apigate/adapters/sqlite"
@@ -823,22 +822,17 @@ func (a *App) buildDependencies(s settings.Settings) (app.ProxyDeps, error) {
 	// User store
 	deps.Users = sqlite.NewUserStore(a.DB)
 
-	// Rate limit store (sharded for high throughput)
-	deps.RateLimit = memory.NewShardedRateLimitStore(memory.ShardedRateLimitConfig{
-		NumShards:       32,
-		CleanupInterval: 5 * time.Minute,
-	})
+	// Rate limit store (SQLite for persistence across restarts)
+	// This ensures rate limits survive application restarts
+	deps.RateLimit = sqlite.NewRateLimitStore(a.DB)
 
 	// Usage recorder
 	usageStore := sqlite.NewUsageStore(a.DB)
 
-	// Quota store (sharded, syncs with usage store)
-	deps.Quota = memory.NewQuotaStore(memory.QuotaStoreConfig{
-		NumShards:       32,
-		CleanupInterval: time.Hour,
-		UsageStore:      usageStore,
-	})
-	deps.Usage = NewLocalUsageRecorder(usageStore, 100, 10*time.Second)
+	// Quota store (SQLite for persistence across restarts)
+	// This ensures quota state survives server restarts - users don't get "free" requests back
+	deps.Quota = sqlite.NewQuotaStore(a.DB)
+	deps.Usage = NewLocalUsageRecorder(usageStore, 100, 1*time.Second) // Reduced from 10s to minimize data loss on crash
 	a.usageRecorder = deps.Usage
 
 	// Upstream client

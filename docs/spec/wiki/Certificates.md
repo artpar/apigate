@@ -407,9 +407,12 @@ APIGATE_LOG_LEVEL=debug apigate serve
 ```
 
 You'll see messages like:
-- `ACME account key stored in memory cache` - Account key handling
+- `ACME account key stored in database` - Account key persisted
+- `ACME account key retrieved from database` - Account key loaded after restart
 - `certificate retrieved from database` - Certificate loaded from DB
 - `new certificate obtained and stored` - Fresh certificate from Let's Encrypt
+
+**Note**: As of v0.x.x, ACME account keys are persisted to the database (`acme_cache` table), ensuring they survive restarts and preventing Let's Encrypt rate limiting.
 
 ### Rate Limit Hit
 

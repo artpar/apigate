@@ -98,6 +98,10 @@ type UserStore interface {
 	// GetByEmail retrieves a user by email.
 	GetByEmail(ctx context.Context, email string) (User, error)
 
+	// GetByStripeID retrieves a user by Stripe customer ID.
+	// Used by payment webhooks to find users from Stripe events.
+	GetByStripeID(ctx context.Context, stripeID string) (User, error)
+
 	// Create stores a new user.
 	Create(ctx context.Context, u User) error
 
@@ -977,6 +981,21 @@ type OAuthProvider interface {
 // -----------------------------------------------------------------------------
 // TLS/Certificate Ports
 // -----------------------------------------------------------------------------
+
+// ACMECacheStore provides generic key-value storage for ACME data.
+// Used for account keys and other autocert cache entries that must survive restarts.
+// Without persistence, account keys are lost on restart, causing new certificate
+// requests and hitting Let's Encrypt rate limits (5 certs per 168 hours).
+type ACMECacheStore interface {
+	// GetCache retrieves cached data by key.
+	GetCache(ctx context.Context, key string) ([]byte, error)
+
+	// PutCache stores data with the given key.
+	PutCache(ctx context.Context, key string, data []byte) error
+
+	// DeleteCache removes cached data by key.
+	DeleteCache(ctx context.Context, key string) error
+}
 
 // CertificateStore persists TLS certificates.
 // Database-backed for horizontal scaling (stateless servers).

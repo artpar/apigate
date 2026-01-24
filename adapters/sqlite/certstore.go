@@ -265,5 +265,45 @@ func nullStringCert(s string) sql.NullString {
 	return sql.NullString{String: s, Valid: s != ""}
 }
 
+// -----------------------------------------------------------------------------
+// ACMECacheStore Implementation
+// -----------------------------------------------------------------------------
+
+// GetCache retrieves cached ACME data by key.
+func (s *CertificateStore) GetCache(ctx context.Context, key string) ([]byte, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT data FROM acme_cache WHERE key = ?
+	`, key)
+
+	var data []byte
+	err := row.Scan(&data)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+// PutCache stores ACME data with the given key.
+func (s *CertificateStore) PutCache(ctx context.Context, key string, data []byte) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO acme_cache (key, data, updated_at)
+		VALUES (?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(key) DO UPDATE SET
+			data = excluded.data,
+			updated_at = CURRENT_TIMESTAMP
+	`, key, data)
+	return err
+}
+
+// DeleteCache removes cached ACME data by key.
+func (s *CertificateStore) DeleteCache(ctx context.Context, key string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM acme_cache WHERE key = ?`, key)
+	return err
+}
+
 // Ensure interface compliance.
 var _ ports.CertificateStore = (*CertificateStore)(nil)
+var _ ports.ACMECacheStore = (*CertificateStore)(nil)

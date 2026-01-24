@@ -51,8 +51,16 @@ type ACMEConfig struct {
 }
 
 // NewACMEProvider creates a new ACME TLS provider.
+// The certStore should implement both CertificateStore and ACMECacheStore interfaces
+// for full persistence support. If cacheStore is nil, ACME account keys will only
+// be stored in memory (which can cause Let's Encrypt rate limiting on restarts).
 func NewACMEProvider(certStore ports.CertificateStore, cfg ACMEConfig) (*ACMEProvider, error) {
-	cache := NewDBCertCache(certStore)
+	// Try to use certStore as ACMECacheStore if it implements the interface
+	var cacheStore ports.ACMECacheStore
+	if cs, ok := certStore.(ports.ACMECacheStore); ok {
+		cacheStore = cs
+	}
+	cache := NewDBCertCache(certStore, cacheStore)
 
 	renewalDays := cfg.RenewalDays
 	if renewalDays <= 0 {

@@ -37,6 +37,15 @@ func (m *mockUserStore) GetByEmail(ctx context.Context, email string) (ports.Use
 	return ports.User{}, errors.New("not found")
 }
 
+func (m *mockUserStore) GetByStripeID(ctx context.Context, stripeID string) (ports.User, error) {
+	for _, u := range m.users {
+		if u.StripeID == stripeID {
+			return u, nil
+		}
+	}
+	return ports.User{}, errors.New("not found")
+}
+
 func (m *mockUserStore) Create(ctx context.Context, u ports.User) error { return nil }
 func (m *mockUserStore) Update(ctx context.Context, u ports.User) error { return nil }
 func (m *mockUserStore) Delete(ctx context.Context, id string) error    { return nil }
