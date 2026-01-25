@@ -155,6 +155,7 @@ apigate/
 ├── adapters/                     # Infrastructure adapters
 │   ├── sqlite/                   # SQLite implementations
 │   ├── http/                     # HTTP adapters
+│   ├── tls/                      # TLS/ACME adapters
 │   ├── email/                    # Email adapters
 │   ├── payment/                  # Payment adapters
 │   ├── cache/                    # Cache adapters
@@ -862,9 +863,68 @@ CMD ["apigate", "serve"]
 - [ ] Set strong `APIGATE_JWT_SECRET`
 - [ ] Set strong `APIGATE_ENCRYPTION_KEY`
 - [ ] Configure proper database path
-- [ ] Set up reverse proxy for TLS
+- [ ] Configure TLS (ACME or manual certificates)
 - [ ] Configure backup for SQLite
 - [ ] Set up monitoring (Prometheus)
 - [ ] Configure log aggregation
 - [ ] Test payment webhooks
 - [ ] Verify email delivery
+
+---
+
+## 14. TLS Architecture
+
+### 14.1 ACME Provider
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        TLS LAYER                                          │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  ┌────────────────┐         ┌────────────────┐                          │
+│  │  ACMEProvider  │────────►│ autocert.Manager│                          │
+│  │                │         │                │                          │
+│  │ • GetCertificate│         │ • Client (MUST be set)                    │
+│  │ • RenewCertificate│       │ • DirectoryURL                            │
+│  │ • RevokeCertificate│      │ • Cache                                   │
+│  └────────────────┘         └────────┬───────┘                          │
+│                                      │                                   │
+│                                      ▼                                   │
+│                            ┌────────────────┐                           │
+│                            │  DBCertCache   │                           │
+│                            │                │                           │
+│                            │ • certificates │ (TLS certs)               │
+│                            │ • acme_cache   │ (ACME account keys)       │
+│                            └────────────────┘                           │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### 14.2 Critical Implementation Detail
+
+**The `autocert.Manager.Client` MUST always be explicitly configured:**
+
+```go
+provider.manager = &autocert.Manager{
+    Client: &acme.Client{
+        DirectoryURL: directoryURL,  // Staging or Production
+    },
+    // ... other fields
+}
+```
+
+| Mode | DirectoryURL |
+|------|--------------|
+| Staging | `https://acme-staging-v02.api.letsencrypt.org/directory` |
+| Production | `https://acme-v02.api.letsencrypt.org/directory` |
+
+**Why**: Leaving `Client` as `nil` causes lazy initialization failures in production mode (Issue #48).
+
+### 14.3 Certificate Storage
+
+| Table | Purpose | Key |
+|-------|---------|-----|
+| `certificates` | TLS certificates with metadata | Domain name |
+| `acme_cache` | ACME account keys | `+acme_account+<url>` |
+
+See [TLS Certificates Spec](spec/tls-certificates.md) for full specification

@@ -1,0 +1,16 @@
+repos:
+  - repo: local
+    hooks:
+      - id: go-test
+        name: Go tests
+        entry: go test ./...
+        language: system
+        pass_filenames: false
+        types: [go]
+
+      - id: go-coverage
+        name: Go coverage check
+        entry: bash -c 'go test -coverprofile=/tmp/coverage.out ./... && COVERAGE=$(go tool cover -func=/tmp/coverage.out | grep total | awk "{print \$3}" | sed "s/%//") && echo "Coverage: $COVERAGE%" && if (( $(echo "$COVERAGE < 80" | bc -l) )); then echo "Coverage below 80%"; exit 1; fi'
+        language: system
+        pass_filenames: false
+        types: [go]

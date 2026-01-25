@@ -52,6 +52,12 @@ TLS certificates enable HTTPS for your API gateway:
 
 ---
 
+## Technical Specification
+
+For the authoritative technical specification including implementation details, test requirements, and initialization behavior, see [TLS Certificates Spec](../tls-certificates.md).
+
+---
+
 ## TLS Configuration
 
 TLS can be configured via environment variables, CLI settings, or the Admin UI.
@@ -468,12 +474,24 @@ sqlite3 apigate.db "DELETE FROM certificates WHERE issuer LIKE '%Fake%';"
 - ACME challenge cannot complete (firewall blocking port 80)
 - DNS not properly configured
 - Rate limits exceeded
+- ACME provider not properly initialized (Issue #48)
 
 **Solution**:
 1. Verify port 80 is accessible for HTTP-01 challenges
 2. Check DNS resolution: `dig api.example.com`
 3. Check logs for ACME errors: `APIGATE_LOG_LEVEL=debug apigate serve`
 4. If rate limited, wait or use staging mode for testing
+5. Verify you're running a recent version (Issue #48 was fixed in v0.x.x)
+
+**Technical Detail (Issue #48 Fix):**
+
+The ACME provider's `autocert.Manager.Client` must be explicitly set for both staging and production modes. Earlier versions only set this for staging, causing production mode to fail during lazy initialization.
+
+The fix ensures `Manager.Client` is always configured with the correct ACME directory URL:
+- Production: `https://acme-v02.api.letsencrypt.org/directory`
+- Staging: `https://acme-staging-v02.api.letsencrypt.org/directory`
+
+See [TLS Certificates Spec](../tls-certificates.md) for implementation details
 
 ---
 

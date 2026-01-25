@@ -149,6 +149,8 @@ apigate routes get <route-id>
 
 ## TLS/Certificate Issues
 
+For detailed TLS specification, see [TLS Certificates Spec](../tls-certificates.md).
+
 ### Certificate Not Found
 
 **Error**: `no certificate found for domain`
@@ -203,6 +205,21 @@ apigate certificates create \
   --key-pem new-key.pem \
   --expires-at "2027-01-01T00:00:00Z"
 ```
+
+### TLS Handshake Timeout (Issue #48)
+
+**Error**: TLS handshake hangs or times out after switching from staging to production
+
+**Cause**: In versions prior to the fix, the ACME provider's `Manager.Client` was only initialized for staging mode. Production mode had a `nil` client, causing lazy initialization to fail silently.
+
+**Solutions**:
+1. **Upgrade**: Update to a version that includes the Issue #48 fix
+2. **Verify version**: Check startup logs for commit hash
+3. **Check logs**: `APIGATE_LOG_LEVEL=debug apigate serve`
+
+**How to confirm**: The fix ensures `Manager.Client.DirectoryURL` is always set:
+- Production: `https://acme-v02.api.letsencrypt.org/directory`
+- Staging: `https://acme-staging-v02.api.letsencrypt.org/directory`
 
 ---
 

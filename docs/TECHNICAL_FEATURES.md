@@ -977,9 +977,53 @@ GET /health
 
 ---
 
-## 19. Security Features
+## 19. TLS/Certificate Management
 
-### 19.1 Data Protection
+### 19.1 ACME (Let's Encrypt) Support
+
+| Feature | Description |
+|---------|-------------|
+| Automatic certificate issuance | Certificates obtained on first TLS handshake |
+| Automatic renewal | 30 days before expiration |
+| HTTP-01 challenge | Served at `/.well-known/acme-challenge/` |
+| Staging mode | Test with Let's Encrypt staging server |
+| Database persistence | Certificates stored in `certificates` table |
+| Account key persistence | ACME keys stored in `acme_cache` table |
+
+### 19.2 TLS Configuration
+
+| Setting | Environment Variable | Default |
+|---------|---------------------|---------|
+| `tls.enabled` | `APIGATE_TLS_ENABLED` | `false` |
+| `tls.mode` | `APIGATE_TLS_MODE` | `none` |
+| `tls.domain` | `APIGATE_TLS_DOMAIN` | - |
+| `tls.acme_email` | `APIGATE_TLS_EMAIL` | - |
+| `tls.acme_staging` | `APIGATE_TLS_ACME_STAGING` | `false` |
+| `tls.min_version` | `APIGATE_TLS_MIN_VERSION` | `1.2` |
+
+### 19.3 Certificate Storage
+
+| Data Type | Storage | Key Format |
+|-----------|---------|------------|
+| TLS certificates | `certificates` table | Domain name |
+| ACME account keys | `acme_cache` table | `+acme_account+<url>` |
+| Certificate metadata | `certificates` table | Issuer, expiry, status |
+
+### 19.4 Implementation
+
+> See [TLS Certificates Spec](spec/tls-certificates.md) for full specification.
+
+| File | Purpose |
+|------|---------|
+| `adapters/tls/acme.go` | ACME provider |
+| `adapters/tls/cache.go` | Certificate cache |
+| `ports/tls.go` | TLS provider interface |
+
+---
+
+## 20. Security Features
+
+### 20.1 Data Protection
 
 | Feature | Implementation |
 |---------|----------------|
@@ -989,7 +1033,7 @@ GET /health
 | Session security | Signed cookies |
 | Token signing | HMAC-SHA256/384/512 |
 
-### 19.2 Access Control
+### 20.2 Access Control
 
 | Level | Capabilities |
 |-------|--------------|
@@ -998,7 +1042,7 @@ GET /health
 | User Session | Portal access |
 | Admin | Full management access |
 
-### 19.3 Attack Prevention
+### 20.3 Attack Prevention
 
 | Attack | Mitigation |
 |--------|------------|
@@ -1010,9 +1054,9 @@ GET /health
 
 ---
 
-## 20. Extensibility
+## 21. Extensibility
 
-### 20.1 Custom Modules
+### 21.1 Custom Modules
 
 Create new modules via YAML:
 1. Define schema
@@ -1020,21 +1064,21 @@ Create new modules via YAML:
 3. Configure channels
 4. Implement hooks
 
-### 20.2 Custom Capabilities
+### 21.2 Custom Capabilities
 
 Register new capability types:
 1. Define capability interface
 2. Create provider implementations
 3. Use dependency injection
 
-### 20.3 Custom Providers
+### 21.3 Custom Providers
 
 Implement capability interfaces:
 1. Create Go implementation
 2. Register with container
 3. Configure via settings
 
-### 20.4 Webhooks
+### 21.4 Webhooks
 
 Configure outbound webhooks:
 1. Set webhook URL

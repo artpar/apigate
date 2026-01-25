@@ -16,6 +16,79 @@ import (
 	"golang.org/x/crypto/acme/autocert"
 )
 
+// TestNewACMEProvider verifies that NewACMEProvider correctly initializes
+// the autocert.Manager.Client for both staging and production modes.
+// This is the critical boundary test - Issue #48 occurred because Client
+// was only set for staging mode, leaving production with nil Client.
+func TestNewACMEProvider(t *testing.T) {
+	dbPath := t.TempDir() + "/test.db"
+	db, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("Failed to migrate: %v", err)
+	}
+
+	certStore := sqlite.NewCertificateStore(db)
+
+	tests := []struct {
+		name       string
+		staging    bool
+		wantDirURL string
+	}{
+		{
+			name:       "production mode",
+			staging:    false,
+			wantDirURL: letsEncryptProduction,
+		},
+		{
+			name:       "staging mode",
+			staging:    true,
+			wantDirURL: letsEncryptStaging,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider, err := NewACMEProvider(certStore, ACMEConfig{
+				Email:   "test@example.com",
+				Staging: tt.staging,
+				Domains: []string{"example.com"},
+			})
+			if err != nil {
+				t.Fatalf("NewACMEProvider failed: %v", err)
+			}
+
+			// CRITICAL: Manager.Client must never be nil
+			// This was the root cause of Issue #48 - production mode had nil Client
+			if provider.manager.Client == nil {
+				t.Fatal("CRITICAL: Manager.Client is nil - this breaks ACME initialization")
+			}
+
+			// Verify correct directory URL based on staging flag
+			if provider.manager.Client.DirectoryURL != tt.wantDirURL {
+				t.Errorf("DirectoryURL = %q, want %q",
+					provider.manager.Client.DirectoryURL, tt.wantDirURL)
+			}
+
+			// Also verify the provider's own acmeClient is set
+			if provider.acmeClient == nil {
+				t.Fatal("CRITICAL: provider.acmeClient is nil")
+			}
+
+			if provider.acmeClient.DirectoryURL != tt.wantDirURL {
+				t.Errorf("provider.acmeClient.DirectoryURL = %q, want %q",
+					provider.acmeClient.DirectoryURL, tt.wantDirURL)
+			}
+
+			t.Logf("Provider correctly initialized with DirectoryURL: %s", tt.wantDirURL)
+		})
+	}
+}
+
 // TestACMECacheMissError verifies the critical fix: ErrCacheMiss is autocert.ErrCacheMiss
 // This is the key test that ensures ACME certificate obtainment will be triggered.
 func TestACMECacheMissError(t *testing.T) {

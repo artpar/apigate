@@ -15,6 +15,7 @@
 | [Pagination](pagination.md) | Pagination behavior and parameters | `pkg/jsonapi/pagination.go` |
 | [Resource Types](resource-types.md) | All API resource types and attributes | `adapters/http/admin/` |
 | [Metering API](metering-api.md) | External usage event ingestion | `adapters/http/admin/meter.go` |
+| [TLS Certificates](tls-certificates.md) | ACME/TLS certificate management | `adapters/tls/` |
 
 ## Compliance
 

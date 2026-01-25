@@ -92,18 +92,18 @@ func NewACMEProvider(certStore ports.CertificateStore, cfg ACMEConfig) (*ACMEPro
 		},
 	}
 
-	// Create autocert manager
+	// Create autocert manager with explicit Client for the correct directory
+	// IMPORTANT: Always set Client explicitly - when nil, autocert uses lazy initialization
+	// which can fail silently for production ACME. Setting it explicitly ensures
+	// the correct directory URL is used from the start.
 	provider.manager = &autocert.Manager{
 		Cache:      cache,
 		Prompt:     autocert.AcceptTOS,
 		Email:      cfg.Email,
 		HostPolicy: provider.hostPolicy,
-	}
-
-	if cfg.Staging {
-		provider.manager.Client = &acme.Client{
-			DirectoryURL: letsEncryptStaging,
-		}
+		Client: &acme.Client{
+			DirectoryURL: directoryURL,
+		},
 	}
 
 	return provider, nil

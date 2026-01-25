@@ -52,6 +52,36 @@ Every change must satisfy ALL five principles from PROJECT_STANDARDS.md:
 
 ---
 
+## Test Requirements (CI Enforced)
+
+**These are enforced by CI - violations block merge:**
+
+1. **Coverage threshold**: Total coverage must be >=80%
+2. **Coverage delta**: PRs cannot decrease coverage
+3. **Boundary testing**: Every exported function with config inputs must test all input values
+
+Example - function with boolean config:
+```go
+// Function
+func NewProvider(cfg Config) (*Provider, error)
+
+// REQUIRED test - both values of cfg.Staging
+func TestNewProvider(t *testing.T) {
+    tests := []struct{
+        staging bool
+        wantURL string
+    }{
+        {false, productionURL},  // MUST test
+        {true, stagingURL},      // MUST test
+    }
+    // ...
+}
+```
+
+**Pre-commit hook enforces locally. CI is the final gate.**
+
+---
+
 ## Before Making Changes
 
 ### 1. Check Documentation First

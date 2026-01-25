@@ -32,11 +32,38 @@ jobs:
       - name: Run tests
         run: CGO_ENABLED=1 go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
+      - name: Check coverage threshold
+        run: |
+          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          echo "Total coverage: $COVERAGE%"
+          if (( $(echo "$COVERAGE < 80" | bc -l) )); then
+            echo "::error::Coverage $COVERAGE% is below 80% threshold"
+            exit 1
+          fi
+
+      - name: Check coverage delta
+        if: github.event_name == 'pull_request'
+        run: |
+          # Get coverage for this PR
+          CURRENT=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+
+          # Get coverage from main
+          git fetch origin main --depth=1
+          git checkout origin/main -- . 2>/dev/null || true
+          go test -coverprofile=main.out ./... 2>/dev/null || true
+          MAIN=$(go tool cover -func=main.out 2>/dev/null | grep total | awk '{print $3}' | sed 's/%//' || echo "0")
+
+          echo "Main coverage: $MAIN%, PR coverage: $CURRENT%"
+          if (( $(echo "$CURRENT < $MAIN" | bc -l) )); then
+            echo "::error::Coverage decreased from $MAIN% to $CURRENT%"
+            exit 1
+          fi
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
           files: ./coverage.out
-          fail_ci_if_error: false
+          fail_ci_if_error: true
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
