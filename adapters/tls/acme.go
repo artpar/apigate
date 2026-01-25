@@ -121,6 +121,8 @@ func NewACMEProvider(certStore ports.CertificateStore, cfg ACMEConfig) (*ACMEPro
 	// which can fail silently for production ACME. Setting it explicitly ensures
 	// the correct directory URL is used from the start.
 	// Also set HTTPClient with timeouts to prevent indefinite hangs on network issues.
+	// NOTE: We set Client.Key to the same accountKey so autocert doesn't need to
+	// generate/load its own key - this avoids potential initialization issues.
 	provider.manager = &autocert.Manager{
 		Cache:      cache,
 		Prompt:     autocert.AcceptTOS,
@@ -129,6 +131,7 @@ func NewACMEProvider(certStore ports.CertificateStore, cfg ACMEConfig) (*ACMEPro
 		Client: &acme.Client{
 			DirectoryURL: directoryURL,
 			HTTPClient:   acmeHTTPClient,
+			Key:          accountKey,
 		},
 	}
 
