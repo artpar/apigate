@@ -180,37 +180,64 @@ func (p *ACMEProvider) GetCertificateWithLogging(hello *cryptotls.ClientHelloInf
 		"staging", p.staging,
 		"acme_directory", p.getDirectoryURL())
 
-	cert, err := p.manager.GetCertificate(hello)
-
-	if err != nil {
-		p.logger.Error("failed to get certificate",
-			"domain", domain,
-			"duration", time.Since(start),
-			"staging", p.staging,
-			"error", err)
-		return nil, err
+	// Use a channel to implement timeout around GetCertificate
+	// autocert.Manager.GetCertificate doesn't accept a context, so we wrap it
+	// with a goroutine and timeout to prevent indefinite hangs
+	type result struct {
+		cert *cryptotls.Certificate
+		err  error
 	}
+	resultCh := make(chan result, 1)
 
-	// Log success with certificate details if available
-	if cert != nil && len(cert.Certificate) > 0 {
-		if x509Cert, parseErr := x509.ParseCertificate(cert.Certificate[0]); parseErr == nil {
-			p.logger.Info("certificate obtained successfully",
+	go func() {
+		cert, err := p.manager.GetCertificate(hello)
+		resultCh <- result{cert, err}
+	}()
+
+	// Wait for result with 90 second timeout (longer than HTTP client timeout
+	// to allow for full ACME flow including challenge verification)
+	select {
+	case r := <-resultCh:
+		cert, err := r.cert, r.err
+
+		if err != nil {
+			p.logger.Error("failed to get certificate",
 				"domain", domain,
 				"duration", time.Since(start),
-				"issuer", x509Cert.Issuer.CommonName,
-				"expires", x509Cert.NotAfter)
+				"staging", p.staging,
+				"error", err)
+			return nil, err
+		}
+
+		// Log success with certificate details if available
+		if cert != nil && len(cert.Certificate) > 0 {
+			if x509Cert, parseErr := x509.ParseCertificate(cert.Certificate[0]); parseErr == nil {
+				p.logger.Info("certificate obtained successfully",
+					"domain", domain,
+					"duration", time.Since(start),
+					"issuer", x509Cert.Issuer.CommonName,
+					"expires", x509Cert.NotAfter)
+			} else {
+				p.logger.Info("certificate obtained",
+					"domain", domain,
+					"duration", time.Since(start))
+			}
 		} else {
 			p.logger.Info("certificate obtained",
 				"domain", domain,
 				"duration", time.Since(start))
 		}
-	} else {
-		p.logger.Info("certificate obtained",
-			"domain", domain,
-			"duration", time.Since(start))
-	}
 
-	return cert, nil
+		return cert, nil
+
+	case <-time.After(90 * time.Second):
+		p.logger.Error("certificate acquisition timed out",
+			"domain", domain,
+			"duration", time.Since(start),
+			"staging", p.staging,
+			"timeout", "90s")
+		return nil, fmt.Errorf("certificate acquisition timed out after 90s for domain %s", domain)
+	}
 }
 
 // hostPolicy checks if a domain is allowed.
