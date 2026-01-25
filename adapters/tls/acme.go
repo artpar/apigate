@@ -126,6 +126,26 @@ func NewACMEProvider(certStore ports.CertificateStore, cfg ACMEConfig) (*ACMEPro
 		},
 	}
 
+	// Create the ACME client that will be used by autocert
+	acmeClient := &acme.Client{
+		DirectoryURL: directoryURL,
+		HTTPClient:   acmeHTTPClient,
+		Key:          accountKey,
+	}
+
+	// Pre-fetch the ACME directory to ensure the client is fully initialized
+	// This prevents lazy initialization from hanging during the first GetCertificate call
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	dir, err := acmeClient.Discover(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch ACME directory from %s: %w", directoryURL, err)
+	}
+	slog.Info("ACME directory fetched successfully",
+		"directory_url", directoryURL,
+		"auth_url", dir.AuthzURL,
+		"order_url", dir.OrderURL)
+
 	// Create autocert manager with explicit Client for the correct directory
 	// IMPORTANT: Always set Client explicitly - when nil, autocert uses lazy initialization
 	// which can fail silently for production ACME. Setting it explicitly ensures
@@ -138,11 +158,7 @@ func NewACMEProvider(certStore ports.CertificateStore, cfg ACMEConfig) (*ACMEPro
 		Prompt:     autocert.AcceptTOS,
 		Email:      cfg.Email,
 		HostPolicy: provider.hostPolicy,
-		Client: &acme.Client{
-			DirectoryURL: directoryURL,
-			HTTPClient:   acmeHTTPClient,
-			Key:          accountKey,
-		},
+		Client:     acmeClient,
 	}
 
 	return provider, nil
