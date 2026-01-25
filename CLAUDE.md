@@ -4,6 +4,83 @@
 
 ---
 
+## High-Level Architectural Goals
+
+### 1. Values as Boundaries
+
+Test configuration inputs, not implementation details. If a function accepts config values, test ALL input combinations produce correct outputs.
+
+```go
+// Config has boolean field → test both values
+func NewProvider(cfg Config) // cfg.Staging = true/false
+
+// Tests MUST cover both:
+{staging: false, wantURL: production}
+{staging: true, wantURL: staging}
+```
+
+### 2. Pluggable Modules (Capability/Provider Pattern)
+
+**Capabilities** define interfaces. **Providers** implement them.
+
+```
+core/modules/capabilities/   ← Interface definitions
+  tls.yaml                   ← "capability: tls"
+  payment.yaml               ← "capability: payment"
+  email.yaml                 ← "capability: email"
+
+core/modules/providers/      ← Implementations
+  tls_acme.yaml              ← "meta.implements: [tls]"
+  payment_stripe.yaml        ← "meta.implements: [payment]"
+  email_smtp.yaml            ← "meta.implements: [email]"
+```
+
+**Core Data Modules** (NOT pluggable):
+- `setting.yaml` - key-value config store
+- `certificate.yaml` - certificate data storage
+- `user.yaml`, `plan.yaml`, `route.yaml` - core entities
+
+These are data stores, not capability providers.
+
+### 3. Module YAML is Source of Truth
+
+Module YAML defines everything:
+- Schema (fields, types, constraints)
+- Actions (CRUD + custom)
+- Channels (HTTP endpoints, CLI commands)
+- Hooks (events)
+
+**The runtime generates from YAML.** Never write hand-coded handlers that duplicate module definitions.
+
+```yaml
+# If YAML says this:
+channels:
+  http:
+    serve:
+      endpoints:
+        - { action: get_by_domain, path: "/domain/{domain}" }
+
+# Runtime MUST generate that endpoint. No exceptions.
+```
+
+### 4. No Backward Compatibility / Legacy Maintenance
+
+- Don't maintain parallel paths (old + new)
+- Delete legacy code, don't wrap it
+- No feature flags for "old way" vs "new way"
+- Single implementation path only
+
+### 5. No Unnecessary Transforms in Glue Layers
+
+Glue code connects components. It should NOT:
+- Transform data shapes
+- Add business logic
+- Validate beyond type checking
+
+Pass data through. Let boundaries handle their own concerns.
+
+---
+
 ## Governing Documents
 
 Before making any changes, understand and follow these documents:
@@ -381,6 +458,8 @@ cp docs/spec/json-api.md /tmp/apigate-wiki/JSON-API-Format.md
 cp docs/spec/error-codes.md /tmp/apigate-wiki/Error-Codes.md
 cp docs/spec/pagination.md /tmp/apigate-wiki/Pagination.md
 cp docs/spec/resource-types.md /tmp/apigate-wiki/Resource-Types.md
+cp docs/spec/tls-certificates.md /tmp/apigate-wiki/TLS-Certificates.md
+cp docs/spec/metering-api.md /tmp/apigate-wiki/Metering-API.md
 
 cd /tmp/apigate-wiki
 git add -A
@@ -397,8 +476,59 @@ git push
 | Error-Codes | `docs/spec/error-codes.md` |
 | Pagination | `docs/spec/pagination.md` |
 | Resource-Types | `docs/spec/resource-types.md` |
+| TLS-Certificates | `docs/spec/tls-certificates.md` |
+| Metering-API | `docs/spec/metering-api.md` |
 
 **Important**: Always edit `docs/spec/` first, then sync to wiki. Never edit wiki directly.
+
+---
+
+## Implementation Notes
+
+### HTTP Channel Module Endpoints
+
+The HTTP channel (`core/channel/http/http.go`) respects module YAML endpoint definitions:
+
+1. **Explicit Endpoints** (from `channels.http.serve.endpoints`):
+   - Registered via `registerExplicitEndpoints()`
+   - Use custom base_path if defined
+   - Support all HTTP methods (GET, POST, PUT, PATCH, DELETE)
+   - Path parameters extracted via `chi.URLParam(r, "param")`
+
+2. **Implicit CRUD** (fallback when no endpoints defined):
+   - Generated from `mod.Actions`
+   - Uses `mod.Plural` as base path
+
+### Module Types
+
+| Type | Location | Pattern |
+|------|----------|---------|
+| Core Data Modules | `core/modules/*.yaml` | No `meta.implements` |
+| Capability Definitions | `core/modules/capabilities/*.yaml` | `capability: name` |
+| Provider Implementations | `core/modules/providers/*.yaml` | `meta.implements: [cap]` |
+
+**Example**: `setting.yaml` is a core data module (stores config), while `tls_acme.yaml` is a provider (implements TLS capability).
+
+### Custom Action Handlers
+
+Custom actions in module YAML (e.g., `get_by_domain`, `list_expiring`) are executed via:
+
+```go
+result, err := c.runtime.Execute(ctx, mod.Source.Name, action.Name, input)
+```
+
+Path parameters are extracted and passed in `input.Data`:
+- `{id}` → `data["id"]`
+- `{domain}` → `data["domain"]` or `input.Lookup`
+- `{prefix}` → `data["prefix"]`
+
+### When Removing Legacy Handlers
+
+When module YAML replaces hand-coded handlers:
+1. Delete the handler file (e.g., `settings.go`)
+2. Remove route registration from router
+3. Remove tests for deleted handlers
+4. Update documentation (spec + wiki)
 
 ---
 

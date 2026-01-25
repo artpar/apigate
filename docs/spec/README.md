@@ -54,8 +54,30 @@ Ensure spec and code stay in sync:
 
 When adding new features, update both the spec and implementation together.
 
+## Module-Generated Endpoints
+
+Modules in `core/modules/` can define explicit HTTP endpoints in their YAML:
+
+```yaml
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /api/settings
+      endpoints:
+        - { action: list, method: GET, path: "/", auth: admin }
+        - { action: get, method: GET, path: "/{key}", auth: admin }
+```
+
+The HTTP channel reads these definitions and generates corresponding routes at runtime.
+
+See [Resource Types](resource-types.md) for Settings and Certificates module endpoints.
+
+---
+
 ## Version History
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.1.0 | 2025-01-25 | Added module-generated endpoints (Settings, Certificates) |
 | 1.0.0 | 2025-01-19 | Initial JSON:API alignment |

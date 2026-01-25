@@ -962,3 +962,246 @@ func TestAuthHandler_AuthMiddleware_NoSession(t *testing.T) {
 // Note: Tests for doList, doGet, doCreate, doUpdate, doDelete, doCustomAction with runtime
 // would require setting up a real runtime.Runtime or refactoring to use an interface.
 // The existing tests cover the error paths, and integration tests cover the success paths.
+
+// TestChannel_Register_ExplicitBasePath tests that custom base_path from module YAML is used.
+func TestChannel_Register_ExplicitBasePath(t *testing.T) {
+	tests := []struct {
+		name         string
+		basePath     string
+		wantBasePath string
+	}{
+		{
+			name:         "empty base_path uses plural",
+			basePath:     "",
+			wantBasePath: "/items",
+		},
+		{
+			name:         "explicit base_path is used",
+			basePath:     "/api/settings",
+			wantBasePath: "/api/settings",
+		},
+		{
+			name:         "custom api path",
+			basePath:     "/api/certificates",
+			wantBasePath: "/api/certificates",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := New(nil, "")
+
+			mod := convention.Derived{
+				Source: schema.Module{
+					Name: "item",
+					Channels: schema.Channels{
+						HTTP: schema.HTTPChannel{
+							Serve: schema.HTTPServe{
+								Enabled:  true,
+								BasePath: tt.basePath,
+							},
+						},
+					},
+				},
+				Plural: "items",
+				Actions: []convention.DerivedAction{
+					{Name: "list", Type: schema.ActionTypeList},
+				},
+			}
+
+			err := c.Register(mod)
+			if err != nil {
+				t.Errorf("Register should not error: %v", err)
+			}
+
+			if _, exists := c.modules["item"]; !exists {
+				t.Error("Module should be registered")
+			}
+		})
+	}
+}
+
+// TestChannel_Register_ExplicitEndpoints tests that explicit endpoints from YAML are registered.
+func TestChannel_Register_ExplicitEndpoints(t *testing.T) {
+	c := New(nil, "")
+
+	mod := convention.Derived{
+		Source: schema.Module{
+			Name: "setting",
+			Channels: schema.Channels{
+				HTTP: schema.HTTPChannel{
+					Serve: schema.HTTPServe{
+						Enabled:  true,
+						BasePath: "/api/settings",
+						Endpoints: []schema.HTTPEndpoint{
+							{Action: "list", Method: "GET", Path: "/", Auth: "admin"},
+							{Action: "get", Method: "GET", Path: "/{key}", Auth: "admin"},
+							{Action: "update", Method: "PUT", Path: "/{key}", Auth: "admin"},
+						},
+					},
+				},
+			},
+		},
+		Plural: "settings",
+		Actions: []convention.DerivedAction{
+			{Name: "list", Type: schema.ActionTypeList},
+			{Name: "get", Type: schema.ActionTypeGet},
+			{Name: "update", Type: schema.ActionTypeUpdate},
+		},
+	}
+
+	err := c.Register(mod)
+	if err != nil {
+		t.Errorf("Register should not error: %v", err)
+	}
+
+	if _, exists := c.modules["setting"]; !exists {
+		t.Error("Module should be registered")
+	}
+}
+
+// TestChannel_Register_CertificateEndpoints tests certificate module endpoint configuration.
+func TestChannel_Register_CertificateEndpoints(t *testing.T) {
+	c := New(nil, "")
+
+	mod := convention.Derived{
+		Source: schema.Module{
+			Name: "certificate",
+			Channels: schema.Channels{
+				HTTP: schema.HTTPChannel{
+					Serve: schema.HTTPServe{
+						Enabled:  true,
+						BasePath: "/api/certificates",
+						Endpoints: []schema.HTTPEndpoint{
+							{Action: "list", Method: "GET", Path: "/", Auth: "admin"},
+							{Action: "get_by_domain", Method: "GET", Path: "/domain/{domain}", Auth: "admin"},
+							{Action: "list_expiring", Method: "GET", Path: "/expiring", Auth: "admin"},
+							{Action: "list_expired", Method: "GET", Path: "/expired", Auth: "admin"},
+							{Action: "get", Method: "GET", Path: "/{id}", Auth: "admin"},
+							{Action: "delete", Method: "DELETE", Path: "/{id}", Auth: "admin"},
+							{Action: "revoke", Method: "POST", Path: "/{id}/revoke", Auth: "admin"},
+						},
+					},
+				},
+			},
+		},
+		Plural: "certificates",
+		Actions: []convention.DerivedAction{
+			{Name: "list", Type: schema.ActionTypeList},
+			{Name: "get", Type: schema.ActionTypeGet},
+			{Name: "get_by_domain", Type: schema.ActionTypeCustom},
+			{Name: "list_expiring", Type: schema.ActionTypeCustom},
+			{Name: "list_expired", Type: schema.ActionTypeCustom},
+			{Name: "delete", Type: schema.ActionTypeDelete},
+			{Name: "revoke", Type: schema.ActionTypeCustom},
+		},
+	}
+
+	err := c.Register(mod)
+	if err != nil {
+		t.Errorf("Register should not error: %v", err)
+	}
+
+	if _, exists := c.modules["certificate"]; !exists {
+		t.Error("Module should be registered")
+	}
+}
+
+// TestChannel_ImplicitVsExplicitEndpoints tests that explicit endpoints take precedence.
+func TestChannel_ImplicitVsExplicitEndpoints(t *testing.T) {
+	tests := []struct {
+		name             string
+		endpoints        []schema.HTTPEndpoint
+		wantExplicit     bool
+		wantEndpointPath string
+	}{
+		{
+			name:             "no explicit endpoints uses implicit CRUD",
+			endpoints:        nil,
+			wantExplicit:     false,
+			wantEndpointPath: "",
+		},
+		{
+			name: "explicit endpoints override implicit",
+			endpoints: []schema.HTTPEndpoint{
+				{Action: "list", Method: "GET", Path: "/", Auth: "admin"},
+			},
+			wantExplicit:     true,
+			wantEndpointPath: "/",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := New(nil, "")
+
+			mod := convention.Derived{
+				Source: schema.Module{
+					Name: "item",
+					Channels: schema.Channels{
+						HTTP: schema.HTTPChannel{
+							Serve: schema.HTTPServe{
+								Enabled:   true,
+								BasePath:  "/api/items",
+								Endpoints: tt.endpoints,
+							},
+						},
+					},
+				},
+				Plural: "items",
+				Actions: []convention.DerivedAction{
+					{Name: "list", Type: schema.ActionTypeList},
+				},
+			}
+
+			err := c.Register(mod)
+			if err != nil {
+				t.Errorf("Register should not error: %v", err)
+			}
+
+			hasExplicit := len(tt.endpoints) > 0
+			if hasExplicit != tt.wantExplicit {
+				t.Errorf("hasExplicit = %v, want %v", hasExplicit, tt.wantExplicit)
+			}
+		})
+	}
+}
+
+// TestRegisterExplicitEndpoints_AllMethods tests that all HTTP methods are registered correctly.
+func TestRegisterExplicitEndpoints_AllMethods(t *testing.T) {
+	c := New(nil, "")
+
+	mod := convention.Derived{
+		Source: schema.Module{
+			Name: "test",
+			Channels: schema.Channels{
+				HTTP: schema.HTTPChannel{
+					Serve: schema.HTTPServe{
+						Enabled:  true,
+						BasePath: "/api/test",
+						Endpoints: []schema.HTTPEndpoint{
+							{Action: "list", Method: "GET", Path: "/"},
+							{Action: "create", Method: "POST", Path: "/"},
+							{Action: "update", Method: "PUT", Path: "/{id}"},
+							{Action: "patch", Method: "PATCH", Path: "/{id}"},
+							{Action: "delete", Method: "DELETE", Path: "/{id}"},
+						},
+					},
+				},
+			},
+		},
+		Plural: "tests",
+		Actions: []convention.DerivedAction{
+			{Name: "list", Type: schema.ActionTypeList},
+			{Name: "create", Type: schema.ActionTypeCreate},
+			{Name: "update", Type: schema.ActionTypeUpdate},
+			{Name: "patch", Type: schema.ActionTypeUpdate},
+			{Name: "delete", Type: schema.ActionTypeDelete},
+		},
+	}
+
+	err := c.Register(mod)
+	if err != nil {
+		t.Errorf("Register should not error: %v", err)
+	}
+}

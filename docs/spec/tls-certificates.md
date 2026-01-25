@@ -198,6 +198,62 @@ The system automatically handles the transition. Staging certificates remain in 
 
 ---
 
+## Admin API Endpoints
+
+### Settings API
+
+Manage TLS/ACME settings via the Settings module API:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/mod/api/settings/` | List all settings |
+| GET | `/mod/api/settings/{key}` | Get setting by key |
+| GET | `/mod/api/settings/prefix/tls.` | List TLS settings |
+| PUT | `/mod/api/settings/{key}` | Update setting |
+
+**Example: Get TLS staging mode**
+```bash
+curl http://localhost:8080/mod/api/settings/tls.acme_staging
+```
+
+**Example: Disable staging mode**
+```bash
+curl -X PUT http://localhost:8080/mod/api/settings/tls.acme_staging \
+  -H "Content-Type: application/json" \
+  -d '{"value": "false"}'
+```
+
+### Certificates API
+
+Manage certificates via the Certificates module API:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/mod/api/certificates/` | List all certificates |
+| GET | `/mod/api/certificates/{id}` | Get certificate by ID |
+| GET | `/mod/api/certificates/domain/{domain}` | Get certificate for domain |
+| GET | `/mod/api/certificates/expiring?days=30` | List expiring certificates |
+| GET | `/mod/api/certificates/expired` | List expired certificates |
+| DELETE | `/mod/api/certificates/{id}` | Delete certificate |
+| POST | `/mod/api/certificates/{id}/revoke` | Revoke certificate |
+
+**Example: List certificates**
+```bash
+curl http://localhost:8080/mod/api/certificates/
+```
+
+**Example: Get certificate by domain**
+```bash
+curl http://localhost:8080/mod/api/certificates/domain/api.example.com
+```
+
+**Example: List certificates expiring in 30 days**
+```bash
+curl "http://localhost:8080/mod/api/certificates/expiring?days=30"
+```
+
+---
+
 ## Implementation Files
 
 | File | Purpose |
@@ -206,11 +262,15 @@ The system automatically handles the transition. Staging certificates remain in 
 | `adapters/tls/cache.go` | Certificate cache implementation |
 | `adapters/tls/acme_integration_test.go` | Integration tests |
 | `ports/tls.go` | TLS provider interface |
+| `core/modules/setting.yaml` | Settings module definition |
+| `core/modules/certificate.yaml` | Certificates module definition |
+| `core/channel/http/http.go` | HTTP channel (generates endpoints from YAML) |
 
 ---
 
 ## See Also
 
+- [Resource Types](resource-types.md) - Settings and Certificates resource schemas
 - [Certificates (Wiki)](wiki/Certificates.md) - User documentation
 - [Configuration](wiki/Configuration.md) - All TLS settings
 - [Troubleshooting](wiki/Troubleshooting.md) - Common issues

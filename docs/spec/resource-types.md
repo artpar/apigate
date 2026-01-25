@@ -569,6 +569,21 @@ Modules defined in `core/modules/` automatically get CRUD endpoints with resourc
 
 ### URL Pattern
 
+Modules can define explicit endpoints in their YAML `channels.http.serve` section:
+
+```yaml
+channels:
+  http:
+    serve:
+      enabled: true
+      base_path: /api/settings    # Custom base path
+      endpoints:                   # Explicit endpoint definitions
+        - { action: list, method: GET, path: "/", auth: admin }
+        - { action: get, method: GET, path: "/{key}", auth: admin }
+```
+
+If no explicit endpoints are defined, implicit CRUD routes are generated:
+
 ```
 GET    /{module_plural}           # List
 POST   /{module_plural}           # Create
@@ -595,7 +610,134 @@ For a module with `plural: widgets`:
 }
 ```
 
-**Implementation**: `core/channel/http/http.go:236-405`
+**Implementation**: `core/channel/http/http.go`
+
+---
+
+## Settings Resource
+
+**Type**: `settings`
+
+Core data module for key-value configuration storage.
+
+### Attributes
+
+| Attribute | Type | Description | Mutable |
+|-----------|------|-------------|---------|
+| `key` | string | Unique setting key | No |
+| `value` | string | Setting value | Yes |
+| `description` | string | Setting description | Yes |
+| `updated_at` | timestamp | Last update time | No |
+
+### Example
+
+```json
+{
+  "data": {
+    "type": "settings",
+    "id": "tls.enabled",
+    "attributes": {
+      "key": "tls.enabled",
+      "value": "true",
+      "description": "Enable TLS",
+      "updated_at": "2025-01-19T10:00:00Z"
+    }
+  }
+}
+```
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/mod/api/settings/` | List all settings |
+| GET | `/mod/api/settings/{key}` | Get setting by key |
+| GET | `/mod/api/settings/prefix/{prefix}` | List settings by prefix |
+| POST | `/mod/api/settings/` | Create setting |
+| PUT | `/mod/api/settings/{key}` | Update setting |
+| DELETE | `/mod/api/settings/{key}` | Delete setting |
+| POST | `/mod/api/settings/batch` | Batch update settings |
+
+### Common Settings
+
+| Key | Description | Values |
+|-----|-------------|--------|
+| `tls.enabled` | Enable TLS | `true`, `false` |
+| `tls.mode` | TLS mode | `acme`, `manual`, `disabled` |
+| `tls.domain` | Domain for certificate | Domain name |
+| `tls.acme_email` | ACME contact email | Email address |
+| `tls.acme_staging` | Use Let's Encrypt staging | `true`, `false` |
+
+**Implementation**: `core/modules/setting.yaml`
+
+---
+
+## Certificates Resource
+
+**Type**: `certificates`
+
+Core data module for TLS certificate metadata storage.
+
+### Attributes
+
+| Attribute | Type | Description | Mutable |
+|-----------|------|-------------|---------|
+| `domain` | string | Certificate domain | No |
+| `issuer` | string | Certificate issuer | No |
+| `not_before` | timestamp | Certificate valid from | No |
+| `not_after` | timestamp | Certificate expires | No |
+| `key_type` | string | Key type (ecdsa, rsa) | No |
+| `status` | enum | Certificate status | Yes |
+| `created_at` | timestamp | When stored | No |
+
+### Status Values
+
+| Status | Description |
+|--------|-------------|
+| `active` | Valid and in use |
+| `expired` | Past expiration |
+| `revoked` | Manually revoked |
+
+### Example
+
+```json
+{
+  "data": {
+    "type": "certificates",
+    "id": "cert_abc123",
+    "attributes": {
+      "domain": "api.example.com",
+      "issuer": "Let's Encrypt Authority X3",
+      "not_before": "2025-01-01T00:00:00Z",
+      "not_after": "2025-04-01T00:00:00Z",
+      "key_type": "ecdsa",
+      "status": "active",
+      "created_at": "2025-01-01T00:00:00Z"
+    }
+  }
+}
+```
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/mod/api/certificates/` | List all certificates |
+| GET | `/mod/api/certificates/{id}` | Get certificate by ID |
+| GET | `/mod/api/certificates/domain/{domain}` | Get certificate by domain |
+| GET | `/mod/api/certificates/expiring` | List certificates expiring soon |
+| GET | `/mod/api/certificates/expired` | List expired certificates |
+| POST | `/mod/api/certificates/` | Create certificate record |
+| DELETE | `/mod/api/certificates/{id}` | Delete certificate |
+| POST | `/mod/api/certificates/{id}/revoke` | Revoke certificate |
+
+### Query Parameters
+
+| Endpoint | Parameter | Description |
+|----------|-----------|-------------|
+| `/expiring` | `days` | Days to look ahead (default: 30) |
+
+**Implementation**: `core/modules/certificate.yaml`
 
 ---
 

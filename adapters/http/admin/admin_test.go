@@ -967,32 +967,6 @@ func TestGetUsage(t *testing.T) {
 	}
 }
 
-func TestGetSettings(t *testing.T) {
-	h, rawKey := setupHandler(t)
-
-	resp := doRequest(t, h, "GET", "/settings", nil, rawKey)
-
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("Expected 200, got %d", resp.StatusCode)
-	}
-
-	var result map[string]any
-	json.NewDecoder(resp.Body).Decode(&result)
-
-	// Settings are returned via WriteMeta, so data is in result["meta"]
-	meta, _ := result["meta"].(map[string]any)
-	if meta == nil {
-		t.Fatal("Expected meta in response")
-	}
-	server, _ := meta["server"].(map[string]any)
-	if server == nil {
-		t.Fatal("Expected server in meta")
-	}
-	if server["port"].(float64) != 8080 {
-		t.Errorf("Expected port=8080, got %v", server["port"])
-	}
-}
-
 func TestDoctor(t *testing.T) {
 	h, rawKey := setupHandler(t)
 
@@ -1823,25 +1797,6 @@ func TestGetUsage_UnknownPeriod(t *testing.T) {
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected 200 (defaults to month), got %d", resp.StatusCode)
-	}
-}
-
-// ============================================================================
-// Settings API Tests
-// ============================================================================
-
-func TestUpdateSettings(t *testing.T) {
-	h, rawKey := setupHandler(t)
-
-	body := map[string]interface{}{
-		"server": map[string]interface{}{
-			"port": 9090,
-		},
-	}
-	resp := doRequest(t, h, "PUT", "/settings", body, rawKey)
-
-	if resp.StatusCode != http.StatusNotImplemented {
-		t.Fatalf("Expected 501, got %d", resp.StatusCode)
 	}
 }
 

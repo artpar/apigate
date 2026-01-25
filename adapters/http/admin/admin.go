@@ -139,11 +139,6 @@ func (h *Handler) Router() chi.Router {
 		// Usage
 		r.Get("/usage", h.GetUsage)
 
-		// Settings
-		r.Get("/settings", h.GetSettings)
-		r.Put("/settings", h.UpdateSettings)
-		r.Patch("/settings", h.UpdateSettings)
-
 		// Doctor (system health)
 		r.Get("/doctor", h.Doctor)
 

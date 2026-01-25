@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/artpar/apigate/core/convention"
 	"github.com/artpar/apigate/core/openapi"
@@ -92,12 +93,20 @@ func (c *Channel) Register(mod convention.Derived) error {
 
 	c.modules[mod.Source.Name] = mod
 
-	// Build base path from plural (single source of truth)
-	basePath := "/" + mod.Plural
+	// Use configured base_path or derive from plural
+	basePath := mod.Source.Channels.HTTP.Serve.BasePath
+	if basePath == "" {
+		basePath = "/" + mod.Plural
+	}
 
-	// Register routes for each action
-	for _, action := range mod.Actions {
-		c.registerActionRoute(mod, action, basePath)
+	// Register from explicit endpoints if defined
+	if len(mod.Source.Channels.HTTP.Serve.Endpoints) > 0 {
+		c.registerExplicitEndpoints(mod, basePath)
+	} else {
+		// Fall back to implicit CRUD generation
+		for _, action := range mod.Actions {
+			c.registerActionRoute(mod, action, basePath)
+		}
 	}
 
 	return nil
@@ -157,6 +166,181 @@ func (c *Channel) registerActionRoute(mod convention.Derived, action convention.
 	case schema.ActionTypeCustom:
 		// POST /plural/{id}/{action} - custom action
 		c.router.Post(basePath+"/{id}/"+action.Name, c.handleCustomAction(mod, action.Name))
+	}
+}
+
+// registerExplicitEndpoints registers endpoints exactly as defined in module YAML.
+func (c *Channel) registerExplicitEndpoints(mod convention.Derived, basePath string) {
+	for _, ep := range mod.Source.Channels.HTTP.Serve.Endpoints {
+		path := basePath + ep.Path
+		handler := c.makeExplicitHandler(mod, ep.Action, ep.Auth)
+
+		switch strings.ToUpper(ep.Method) {
+		case "GET":
+			c.router.Get(path, handler)
+		case "POST":
+			c.router.Post(path, handler)
+		case "PUT":
+			c.router.Put(path, handler)
+		case "PATCH":
+			c.router.Patch(path, handler)
+		case "DELETE":
+			c.router.Delete(path, handler)
+		}
+	}
+}
+
+// makeExplicitHandler creates a handler for an explicitly defined endpoint.
+// It routes to the appropriate action based on the action name.
+func (c *Channel) makeExplicitHandler(mod convention.Derived, actionName, auth string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+
+		// TODO: Check auth if specified (admin, user, public)
+		// For now, all module endpoints require authentication to be handled
+		// at a higher level (e.g., gateway auth middleware)
+
+		// Find the action definition
+		var action *convention.DerivedAction
+		for i := range mod.Actions {
+			if mod.Actions[i].Name == actionName {
+				action = &mod.Actions[i]
+				break
+			}
+		}
+
+		// Route based on action type or name
+		switch actionName {
+		case "list":
+			c.doList(ctx, w, r, mod)
+		case "get":
+			id := chi.URLParam(r, "id")
+			if id == "" {
+				id = chi.URLParam(r, "key") // For settings module
+			}
+			c.doGet(ctx, w, r, mod, id)
+		case "create":
+			c.doCreate(ctx, w, r, mod)
+		case "update":
+			id := chi.URLParam(r, "id")
+			if id == "" {
+				id = chi.URLParam(r, "key") // For settings module
+			}
+			c.doUpdate(ctx, w, r, mod, id)
+		case "delete":
+			id := chi.URLParam(r, "id")
+			if id == "" {
+				id = chi.URLParam(r, "key") // For settings module
+			}
+			c.doDelete(ctx, w, r, mod, id)
+		default:
+			// Custom action - handle based on action definition
+			if action != nil {
+				c.doExplicitAction(ctx, w, r, mod, action)
+			} else {
+				jsonapi.WriteNotFound(w, "action")
+			}
+		}
+	}
+}
+
+// doExplicitAction handles custom actions defined in module YAML.
+func (c *Channel) doExplicitAction(ctx context.Context, w http.ResponseWriter, r *http.Request, mod convention.Derived, action *convention.DerivedAction) {
+	// Extract input data from path params and query params
+	data := make(map[string]any)
+
+	// Extract path parameters
+	rctx := chi.RouteContext(r.Context())
+	if rctx != nil {
+		for i, key := range rctx.URLParams.Keys {
+			if key != "" && i < len(rctx.URLParams.Values) {
+				data[key] = rctx.URLParams.Values[i]
+			}
+		}
+	}
+
+	// Extract query parameters for action inputs
+	for _, input := range action.Source.Input {
+		if val := r.URL.Query().Get(input.Name); val != "" {
+			data[input.Name] = val
+		}
+	}
+
+	// Parse body if present
+	if r.ContentLength > 0 {
+		var bodyData map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&bodyData); err != nil {
+			jsonapi.WriteBadRequest(w, "Invalid JSON body")
+			return
+		}
+		for k, v := range bodyData {
+			data[k] = v
+		}
+	}
+
+	// Build input - lookup value for record-based actions
+	lookup := ""
+	if id := chi.URLParam(r, "id"); id != "" {
+		lookup = id
+	} else if key := chi.URLParam(r, "key"); key != "" {
+		lookup = key
+	} else if domain := chi.URLParam(r, "domain"); domain != "" {
+		lookup = domain
+	} else if prefix := chi.URLParam(r, "prefix"); prefix != "" {
+		// For list_by_prefix style actions, prefix goes in data
+		data["prefix"] = prefix
+	}
+
+	input := runtime.ActionInput{
+		Data:         data,
+		Lookup:       lookup,
+		Channel:      "http",
+		RemoteIP:     r.RemoteAddr,
+		RequestBytes: r.ContentLength,
+	}
+
+	result, err := c.runtime.Execute(ctx, mod.Source.Name, action.Name, input)
+	if err != nil {
+		jsonapi.WriteBadRequest(w, err.Error())
+		return
+	}
+
+	// Handle different result types
+	if result.List != nil {
+		// List result - return collection
+		resources := make([]jsonapi.Resource, 0, len(result.List))
+		for _, item := range result.List {
+			id := ""
+			if idVal, ok := item["id"]; ok {
+				id = fmt.Sprintf("%v", idVal)
+			}
+			rb := jsonapi.NewResource(mod.Plural, id)
+			for k, v := range item {
+				if k != "id" {
+					rb.Attr(k, v)
+				}
+			}
+			resources = append(resources, rb.Build())
+		}
+		jsonapi.WriteCollection(w, http.StatusOK, resources, nil)
+	} else if result.Data != nil {
+		// Single record result
+		id := result.ID
+		if id == "" {
+			if idVal, ok := result.Data["id"]; ok {
+				id = fmt.Sprintf("%v", idVal)
+			}
+		}
+		rb := jsonapi.NewResource(mod.Plural, id)
+		for k, v := range result.Data {
+			if k != "id" {
+				rb.Attr(k, v)
+			}
+		}
+		jsonapi.WriteResource(w, http.StatusOK, rb.Build())
+	} else {
+		// No data - return 204
+		jsonapi.WriteNoContent(w)
 	}
 }
 
