@@ -190,7 +190,13 @@ func (p *ACMEProvider) GetCertificateWithLogging(hello *cryptotls.ClientHelloInf
 	resultCh := make(chan result, 1)
 
 	go func() {
+		p.logger.Info("entering autocert.GetCertificate goroutine",
+			"domain", domain)
 		cert, err := p.manager.GetCertificate(hello)
+		p.logger.Info("autocert.GetCertificate returned",
+			"domain", domain,
+			"has_cert", cert != nil,
+			"has_error", err != nil)
 		resultCh <- result{cert, err}
 	}()
 
