@@ -81,7 +81,7 @@ func (c *DBCertCache) Get(ctx context.Context, key string) ([]byte, error) {
 				return data, nil
 			}
 		}
-		c.logger.Debug("ACME account key not found (will create new)", "key_prefix", key[:min(20, len(key))])
+		c.logger.Info("ACME account key not found, will create new", "key", key[:min(30, len(key))])
 		return nil, autocert.ErrCacheMiss
 	}
 
@@ -97,7 +97,7 @@ func (c *DBCertCache) Get(ctx context.Context, key string) ([]byte, error) {
 	cert, err := c.store.GetByDomain(ctx, domain)
 	if err != nil {
 		if errors.Is(err, ports.ErrNotFound) {
-			c.logger.Debug("certificate not in database (will obtain via ACME)", "domain", key)
+			c.logger.Info("certificate not in database, will obtain via ACME", "domain", key)
 			return nil, autocert.ErrCacheMiss
 		}
 		c.logger.Error("failed to get certificate from database", "domain", key, "error", err)
@@ -174,7 +174,7 @@ func (c *DBCertCache) Put(ctx context.Context, key string, data []byte) error {
 				c.logger.Error("failed to store ACME account key in database", "key_prefix", key[:min(20, len(key))], "error", err)
 				// Fall back to memory-only storage
 			} else {
-				c.logger.Debug("ACME account key stored in database", "key_prefix", key[:min(20, len(key))], "data_len", len(data))
+				c.logger.Info("ACME account key stored in database", "key", key[:min(30, len(key))], "data_len", len(data))
 			}
 		}
 		// Also store in memory cache for fast access

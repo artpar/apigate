@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -35,6 +36,7 @@ type ACMEProvider struct {
 	email       string
 	staging     bool
 	renewalDays int
+	logger      *slog.Logger
 
 	mu           sync.RWMutex
 	domains      []string
@@ -86,6 +88,7 @@ func NewACMEProvider(certStore ports.CertificateStore, cfg ACMEConfig) (*ACMEPro
 		renewalDays: renewalDays,
 		domains:     cfg.Domains,
 		accountKey:  accountKey,
+		logger:      slog.Default(),
 		acmeClient: &acme.Client{
 			DirectoryURL: directoryURL,
 			Key:          accountKey,
@@ -112,6 +115,65 @@ func NewACMEProvider(certStore ports.CertificateStore, cfg ACMEConfig) (*ACMEPro
 // Name returns the provider name.
 func (p *ACMEProvider) Name() string {
 	return "acme"
+}
+
+// SetLogger sets a custom logger for the ACME provider.
+func (p *ACMEProvider) SetLogger(logger *slog.Logger) {
+	p.logger = logger
+	p.cache.SetLogger(logger)
+}
+
+// GetCertificateWithLogging wraps autocert.Manager.GetCertificate with logging.
+// This is the function that should be used in tls.Config.GetCertificate to provide
+// visibility into certificate acquisition and failures.
+func (p *ACMEProvider) GetCertificateWithLogging(hello *cryptotls.ClientHelloInfo) (*cryptotls.Certificate, error) {
+	domain := hello.ServerName
+	start := time.Now()
+
+	p.logger.Info("TLS certificate requested",
+		"domain", domain,
+		"staging", p.staging)
+
+	// Check host policy first for early logging
+	if err := p.hostPolicy(context.Background(), domain); err != nil {
+		p.logger.Error("domain rejected by host policy",
+			"domain", domain,
+			"error", err,
+			"allowed_domains", p.domains)
+		return nil, err
+	}
+
+	cert, err := p.manager.GetCertificate(hello)
+
+	if err != nil {
+		p.logger.Error("failed to get certificate",
+			"domain", domain,
+			"duration", time.Since(start),
+			"staging", p.staging,
+			"error", err)
+		return nil, err
+	}
+
+	// Log success with certificate details if available
+	if cert != nil && len(cert.Certificate) > 0 {
+		if x509Cert, parseErr := x509.ParseCertificate(cert.Certificate[0]); parseErr == nil {
+			p.logger.Info("certificate obtained successfully",
+				"domain", domain,
+				"duration", time.Since(start),
+				"issuer", x509Cert.Issuer.CommonName,
+				"expires", x509Cert.NotAfter)
+		} else {
+			p.logger.Info("certificate obtained",
+				"domain", domain,
+				"duration", time.Since(start))
+		}
+	} else {
+		p.logger.Info("certificate obtained",
+			"domain", domain,
+			"duration", time.Since(start))
+	}
+
+	return cert, nil
 }
 
 // hostPolicy checks if a domain is allowed.

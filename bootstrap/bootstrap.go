@@ -767,17 +767,17 @@ func (a *App) initACMETLS(s settings.Settings, minVersion uint16) error {
 	a.acmeProvider = provider
 	a.acmeManager = provider.GetManager()
 
-	// Configure TLS with ACME
+	// Configure TLS with ACME using logging wrapper for visibility
 	a.tlsConfig = &cryptotls.Config{
 		MinVersion:     minVersion,
-		GetCertificate: a.acmeManager.GetCertificate,
+		GetCertificate: provider.GetCertificateWithLogging,
 		NextProtos:     []string{"h2", "http/1.1", "acme-tls/1"},
 	}
 
 	a.Logger.Info().
 		Strs("domains", domains).
 		Bool("staging", staging).
-		Msg("ACME TLS configured")
+		Msg("ACME TLS configured with logging")
 
 	return nil
 }
