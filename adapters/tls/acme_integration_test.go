@@ -8,11 +8,14 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"math/big"
+	"net"
+	"net/http"
 	"testing"
 	"time"
 
 	"github.com/artpar/apigate/adapters/sqlite"
 	domaintls "github.com/artpar/apigate/domain/tls"
+	"golang.org/x/crypto/acme"
 	"golang.org/x/crypto/acme/autocert"
 )
 
@@ -312,4 +315,126 @@ func TestCombineCertData(t *testing.T) {
 
 	t.Logf("Combined cert data length: %d bytes", len(data))
 	t.Log("✓ Certificate data combining works")
+}
+
+// TestACMEDirectoryConnectivity verifies that both staging and production
+// ACME directories are reachable. This is a network-level test that helps
+// diagnose Issue #48 where production ACME fails but staging works.
+func TestACMEDirectoryConnectivity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping network test in short mode")
+	}
+
+	httpClient := &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   10 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout: 10 * time.Second,
+		},
+	}
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("failed to generate key: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	tests := []struct {
+		name         string
+		directoryURL string
+	}{
+		{"staging", letsEncryptStaging},
+		{"production", letsEncryptProduction},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &acme.Client{
+				DirectoryURL: tt.directoryURL,
+				HTTPClient:   httpClient,
+				Key:          key,
+			}
+
+			// Test directory discovery
+			dir, err := client.Discover(ctx)
+			if err != nil {
+				t.Errorf("Discover failed for %s: %v", tt.name, err)
+				return
+			}
+
+			// Verify we got a valid directory response
+			// The NewNonceURL or OrderURL should be populated
+			if dir.NonceURL == "" && dir.OrderURL == "" {
+				t.Errorf("Directory response empty for %s (no NonceURL or OrderURL)", tt.name)
+			}
+
+			t.Logf("%s directory: NonceURL=%s, OrderURL=%s", tt.name, dir.NonceURL, dir.OrderURL)
+		})
+	}
+}
+
+// TestACMEHTTPClientTimeout verifies that the HTTP client has proper timeouts
+// configured. This is critical for Issue #48 - without timeouts, network issues
+// cause indefinite hangs instead of errors.
+func TestACMEHTTPClientTimeout(t *testing.T) {
+	dbPath := t.TempDir() + "/test.db"
+	db, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("Failed to migrate: %v", err)
+	}
+
+	certStore := sqlite.NewCertificateStore(db)
+
+	tests := []struct {
+		name    string
+		staging bool
+	}{
+		{"production", false},
+		{"staging", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider, err := NewACMEProvider(certStore, ACMEConfig{
+				Email:   "test@example.com",
+				Staging: tt.staging,
+				Domains: []string{"example.com"},
+			})
+			if err != nil {
+				t.Fatalf("NewACMEProvider failed: %v", err)
+			}
+
+			// CRITICAL: Manager.Client.HTTPClient must have timeout set
+			manager := provider.GetManager()
+			if manager.Client == nil {
+				t.Fatal("manager.Client is nil")
+			}
+			if manager.Client.HTTPClient == nil {
+				t.Fatal("CRITICAL: manager.Client.HTTPClient is nil - this causes indefinite hangs")
+			}
+			if manager.Client.HTTPClient.Timeout == 0 {
+				t.Fatal("CRITICAL: manager.Client.HTTPClient.Timeout is 0 - this causes indefinite hangs")
+			}
+
+			// Also check provider's acmeClient
+			if provider.acmeClient.HTTPClient == nil {
+				t.Fatal("CRITICAL: provider.acmeClient.HTTPClient is nil")
+			}
+			if provider.acmeClient.HTTPClient.Timeout == 0 {
+				t.Fatal("CRITICAL: provider.acmeClient.HTTPClient.Timeout is 0")
+			}
+
+			t.Logf("%s mode: HTTPClient.Timeout = %v", tt.name, provider.acmeClient.HTTPClient.Timeout)
+		})
+	}
 }
