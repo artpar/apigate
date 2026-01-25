@@ -85,13 +85,23 @@ func NewACMEProvider(certStore ports.CertificateStore, cfg ACMEConfig) (*ACMEPro
 	// Create HTTP client with appropriate timeouts for ACME operations
 	// Without this, HTTP calls to Let's Encrypt could hang indefinitely
 	// if there are network issues (this was the root cause of production ACME hangs)
+	//
+	// Force IPv4 using "tcp4" network to avoid IPv6 connectivity issues.
+	// Some servers have IPv6 enabled but broken routing, causing connection
+	// attempts to hang when dual-stack (IPv4+IPv6) is used.
+	dialer := &net.Dialer{
+		Timeout:   10 * time.Second, // Connection timeout
+		KeepAlive: 30 * time.Second,
+	}
 	acmeHTTPClient := &http.Client{
 		Timeout: 60 * time.Second, // Overall request timeout
 		Transport: &http.Transport{
-			DialContext: (&net.Dialer{
-				Timeout:   10 * time.Second, // Connection timeout
-				KeepAlive: 30 * time.Second,
-			}).DialContext,
+			// Force IPv4 by using custom dial function with "tcp4" network
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				// Override network to force IPv4 only
+				return dialer.DialContext(ctx, "tcp4", addr)
+			},
+			ForceAttemptHTTP2:     true,
 			TLSHandshakeTimeout:   10 * time.Second,
 			ResponseHeaderTimeout: 30 * time.Second,
 			ExpectContinueTimeout: 1 * time.Second,
