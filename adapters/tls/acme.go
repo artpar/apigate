@@ -59,10 +59,21 @@ type ACMEConfig struct {
 // for full persistence support. If cacheStore is nil, ACME account keys will only
 // be stored in memory (which can cause Let's Encrypt rate limiting on restarts).
 func NewACMEProvider(certStore ports.CertificateStore, cfg ACMEConfig) (*ACMEProvider, error) {
+	logger := slog.Default()
+
+	logger.Info("[ACME:INIT] Starting ACME provider initialization",
+		"email", cfg.Email,
+		"staging", cfg.Staging,
+		"domains", cfg.Domains,
+		"renewal_days", cfg.RenewalDays)
+
 	// Try to use certStore as ACMECacheStore if it implements the interface
 	var cacheStore ports.ACMECacheStore
 	if cs, ok := certStore.(ports.ACMECacheStore); ok {
 		cacheStore = cs
+		logger.Info("[ACME:INIT] CertStore implements ACMECacheStore interface")
+	} else {
+		logger.Warn("[ACME:INIT] CertStore does NOT implement ACMECacheStore - account keys will be memory-only")
 	}
 	cache := NewDBCertCache(certStore, cacheStore)
 
@@ -75,31 +86,44 @@ func NewACMEProvider(certStore ports.CertificateStore, cfg ACMEConfig) (*ACMEPro
 	if cfg.Staging {
 		directoryURL = letsEncryptStaging
 	}
+	logger.Info("[ACME:INIT] Using ACME directory",
+		"url", directoryURL,
+		"is_staging", cfg.Staging)
 
 	// Generate account key for ACME
+	logger.Info("[ACME:INIT] Generating ECDSA P-256 account key...")
 	accountKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
+		logger.Error("[ACME:INIT] Failed to generate account key", "error", err)
 		return nil, fmt.Errorf("generate account key: %w", err)
 	}
+	logger.Info("[ACME:INIT] Account key generated successfully")
 
 	// Create HTTP client with appropriate timeouts for ACME operations
-	// Without this, HTTP calls to Let's Encrypt could hang indefinitely
-	// if there are network issues (this was the root cause of production ACME hangs)
-	//
-	// Force IPv4 using "tcp4" network to avoid IPv6 connectivity issues.
-	// Some servers have IPv6 enabled but broken routing, causing connection
-	// attempts to hang when dual-stack (IPv4+IPv6) is used.
+	logger.Info("[ACME:INIT] Creating HTTP client with timeouts",
+		"overall_timeout", "60s",
+		"dial_timeout", "10s",
+		"tls_handshake_timeout", "10s",
+		"response_header_timeout", "30s",
+		"force_ipv4", true)
+
 	dialer := &net.Dialer{
-		Timeout:   10 * time.Second, // Connection timeout
+		Timeout:   10 * time.Second,
 		KeepAlive: 30 * time.Second,
 	}
 	acmeHTTPClient := &http.Client{
-		Timeout: 60 * time.Second, // Overall request timeout
+		Timeout: 60 * time.Second,
 		Transport: &http.Transport{
 			// Force IPv4 by using custom dial function with "tcp4" network
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				// Override network to force IPv4 only
-				return dialer.DialContext(ctx, "tcp4", addr)
+				logger.Debug("[ACME:HTTP] Dialing", "network", "tcp4", "addr", addr)
+				conn, err := dialer.DialContext(ctx, "tcp4", addr)
+				if err != nil {
+					logger.Error("[ACME:HTTP] Dial failed", "addr", addr, "error", err)
+				} else {
+					logger.Debug("[ACME:HTTP] Dial succeeded", "addr", addr, "local", conn.LocalAddr(), "remote", conn.RemoteAddr())
+				}
+				return conn, err
 			},
 			ForceAttemptHTTP2:     true,
 			TLSHandshakeTimeout:   10 * time.Second,
@@ -109,6 +133,7 @@ func NewACMEProvider(certStore ports.CertificateStore, cfg ACMEConfig) (*ACMEPro
 			IdleConnTimeout:       90 * time.Second,
 		},
 	}
+	logger.Info("[ACME:INIT] HTTP client created")
 
 	provider := &ACMEProvider{
 		certStore:   certStore,
@@ -118,7 +143,7 @@ func NewACMEProvider(certStore ports.CertificateStore, cfg ACMEConfig) (*ACMEPro
 		renewalDays: renewalDays,
 		domains:     cfg.Domains,
 		accountKey:  accountKey,
-		logger:      slog.Default(),
+		logger:      logger,
 		acmeClient: &acme.Client{
 			DirectoryURL: directoryURL,
 			Key:          accountKey,
@@ -127,6 +152,8 @@ func NewACMEProvider(certStore ports.CertificateStore, cfg ACMEConfig) (*ACMEPro
 	}
 
 	// Create the ACME client that will be used by autocert
+	logger.Info("[ACME:INIT] Creating ACME client for autocert manager",
+		"directory_url", directoryURL)
 	acmeClient := &acme.Client{
 		DirectoryURL: directoryURL,
 		HTTPClient:   acmeHTTPClient,
@@ -134,25 +161,38 @@ func NewACMEProvider(certStore ports.CertificateStore, cfg ACMEConfig) (*ACMEPro
 	}
 
 	// Pre-fetch the ACME directory to ensure the client is fully initialized
-	// This prevents lazy initialization from hanging during the first GetCertificate call
+	logger.Info("[ACME:INIT] Pre-fetching ACME directory (30s timeout)...",
+		"url", directoryURL)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	discoverStart := time.Now()
 	dir, err := acmeClient.Discover(ctx)
+	discoverDuration := time.Since(discoverStart)
+
 	if err != nil {
+		logger.Error("[ACME:INIT] Failed to fetch ACME directory",
+			"url", directoryURL,
+			"duration", discoverDuration,
+			"error", err)
 		return nil, fmt.Errorf("failed to fetch ACME directory from %s: %w", directoryURL, err)
 	}
-	slog.Info("ACME directory fetched successfully",
+	logger.Info("[ACME:INIT] ACME directory fetched successfully",
+		"duration", discoverDuration,
 		"directory_url", directoryURL,
-		"auth_url", dir.AuthzURL,
-		"order_url", dir.OrderURL)
+		"authz_url", dir.AuthzURL,
+		"order_url", dir.OrderURL,
+		"revoke_url", dir.RevokeURL,
+		"nonce_url", dir.NonceURL,
+		"terms_url", dir.Terms)
 
-	// Create autocert manager with explicit Client for the correct directory
-	// IMPORTANT: Always set Client explicitly - when nil, autocert uses lazy initialization
-	// which can fail silently for production ACME. Setting it explicitly ensures
-	// the correct directory URL is used from the start.
-	// Also set HTTPClient with timeouts to prevent indefinite hangs on network issues.
-	// NOTE: We set Client.Key to the same accountKey so autocert doesn't need to
-	// generate/load its own key - this avoids potential initialization issues.
+	// Create autocert manager with explicit Client
+	logger.Info("[ACME:INIT] Creating autocert.Manager",
+		"email", cfg.Email,
+		"has_host_policy", true,
+		"has_cache", true,
+		"has_client", true)
+
 	provider.manager = &autocert.Manager{
 		Cache:      cache,
 		Prompt:     autocert.AcceptTOS,
@@ -160,6 +200,12 @@ func NewACMEProvider(certStore ports.CertificateStore, cfg ACMEConfig) (*ACMEPro
 		HostPolicy: provider.hostPolicy,
 		Client:     acmeClient,
 	}
+
+	logger.Info("[ACME:INIT] ACME provider initialization complete",
+		"staging", cfg.Staging,
+		"directory", directoryURL,
+		"email", cfg.Email,
+		"domains", cfg.Domains)
 
 	return provider, nil
 }
@@ -189,29 +235,49 @@ func (p *ACMEProvider) SetLogger(logger *slog.Logger) {
 func (p *ACMEProvider) GetCertificateWithLogging(hello *cryptotls.ClientHelloInfo) (*cryptotls.Certificate, error) {
 	domain := hello.ServerName
 	start := time.Now()
+	requestID := fmt.Sprintf("%d", start.UnixNano())
 
-	p.logger.Info("TLS certificate requested",
-		"domain", domain,
-		"staging", p.staging)
-
-	// Check host policy first for early logging
-	if err := p.hostPolicy(context.Background(), domain); err != nil {
-		p.logger.Error("domain rejected by host policy",
-			"domain", domain,
-			"error", err,
-			"allowed_domains", p.domains)
-		return nil, err
+	clientAddr := "unknown"
+	if hello.Conn != nil {
+		clientAddr = hello.Conn.RemoteAddr().String()
 	}
 
-	// Log that we're about to call autocert - this helps identify hangs
-	p.logger.Info("calling autocert manager",
+	p.logger.Info("[ACME:GETCERT] TLS certificate requested",
+		"request_id", requestID,
 		"domain", domain,
 		"staging", p.staging,
-		"acme_directory", p.getDirectoryURL())
+		"client_addr", clientAddr)
+
+	// Check host policy first for early logging
+	p.logger.Debug("[ACME:GETCERT] Checking host policy",
+		"request_id", requestID,
+		"domain", domain,
+		"allowed_domains", p.domains)
+
+	if err := p.hostPolicy(context.Background(), domain); err != nil {
+		p.logger.Error("[ACME:GETCERT] domain rejected by host policy",
+			"request_id", requestID,
+			"domain", domain,
+			"error", err,
+			"allowed_domains", p.domains,
+			"duration", time.Since(start))
+		return nil, err
+	}
+	p.logger.Debug("[ACME:GETCERT] Host policy check passed",
+		"request_id", requestID,
+		"domain", domain)
+
+	// Log detailed state before calling autocert
+	p.logger.Info("[ACME:GETCERT] Calling autocert.Manager.GetCertificate",
+		"request_id", requestID,
+		"domain", domain,
+		"staging", p.staging,
+		"acme_directory", p.getDirectoryURL(),
+		"email", p.email,
+		"manager_has_cache", p.manager.Cache != nil,
+		"manager_has_client", p.manager.Client != nil)
 
 	// Use a channel to implement timeout around GetCertificate
-	// autocert.Manager.GetCertificate doesn't accept a context, so we wrap it
-	// with a goroutine and timeout to prevent indefinite hangs
 	type result struct {
 		cert *cryptotls.Certificate
 		err  error
@@ -219,58 +285,87 @@ func (p *ACMEProvider) GetCertificateWithLogging(hello *cryptotls.ClientHelloInf
 	resultCh := make(chan result, 1)
 
 	go func() {
-		p.logger.Info("entering autocert.GetCertificate goroutine",
-			"domain", domain)
-		cert, err := p.manager.GetCertificate(hello)
-		p.logger.Info("autocert.GetCertificate returned",
+		p.logger.Info("[ACME:GETCERT] Goroutine started - calling p.manager.GetCertificate",
+			"request_id", requestID,
 			"domain", domain,
+			"goroutine_start", time.Now().Format(time.RFC3339Nano))
+
+		certStart := time.Now()
+		cert, err := p.manager.GetCertificate(hello)
+		certDuration := time.Since(certStart)
+
+		p.logger.Info("[ACME:GETCERT] p.manager.GetCertificate returned",
+			"request_id", requestID,
+			"domain", domain,
+			"duration", certDuration,
 			"has_cert", cert != nil,
-			"has_error", err != nil)
+			"has_error", err != nil,
+			"error", err)
+
 		resultCh <- result{cert, err}
 	}()
 
-	// Wait for result with 90 second timeout (longer than HTTP client timeout
-	// to allow for full ACME flow including challenge verification)
+	// Wait for result with 90 second timeout
+	p.logger.Debug("[ACME:GETCERT] Waiting for result (90s timeout)",
+		"request_id", requestID,
+		"domain", domain)
+
 	select {
 	case r := <-resultCh:
 		cert, err := r.cert, r.err
+		totalDuration := time.Since(start)
 
 		if err != nil {
-			p.logger.Error("failed to get certificate",
+			p.logger.Error("[ACME:GETCERT] Certificate acquisition failed",
+				"request_id", requestID,
 				"domain", domain,
-				"duration", time.Since(start),
+				"duration", totalDuration,
 				"staging", p.staging,
-				"error", err)
+				"error", err,
+				"error_type", fmt.Sprintf("%T", err))
 			return nil, err
 		}
 
-		// Log success with certificate details if available
+		// Log success with certificate details
 		if cert != nil && len(cert.Certificate) > 0 {
 			if x509Cert, parseErr := x509.ParseCertificate(cert.Certificate[0]); parseErr == nil {
-				p.logger.Info("certificate obtained successfully",
+				p.logger.Info("[ACME:GETCERT] Certificate obtained successfully",
+					"request_id", requestID,
 					"domain", domain,
-					"duration", time.Since(start),
+					"duration", totalDuration,
 					"issuer", x509Cert.Issuer.CommonName,
-					"expires", x509Cert.NotAfter)
+					"issuer_org", x509Cert.Issuer.Organization,
+					"subject", x509Cert.Subject.CommonName,
+					"not_before", x509Cert.NotBefore,
+					"not_after", x509Cert.NotAfter,
+					"serial", x509Cert.SerialNumber.String(),
+					"dns_names", x509Cert.DNSNames)
 			} else {
-				p.logger.Info("certificate obtained",
+				p.logger.Info("[ACME:GETCERT] Certificate obtained (parse failed)",
+					"request_id", requestID,
 					"domain", domain,
-					"duration", time.Since(start))
+					"duration", totalDuration,
+					"parse_error", parseErr)
 			}
 		} else {
-			p.logger.Info("certificate obtained",
+			p.logger.Info("[ACME:GETCERT] Certificate obtained (empty cert chain?)",
+				"request_id", requestID,
 				"domain", domain,
-				"duration", time.Since(start))
+				"duration", totalDuration,
+				"cert_is_nil", cert == nil)
 		}
 
 		return cert, nil
 
 	case <-time.After(90 * time.Second):
-		p.logger.Error("certificate acquisition timed out",
+		totalDuration := time.Since(start)
+		p.logger.Error("[ACME:GETCERT] Certificate acquisition TIMED OUT",
+			"request_id", requestID,
 			"domain", domain,
-			"duration", time.Since(start),
+			"duration", totalDuration,
 			"staging", p.staging,
-			"timeout", "90s")
+			"timeout", "90s",
+			"acme_directory", p.getDirectoryURL())
 		return nil, fmt.Errorf("certificate acquisition timed out after 90s for domain %s", domain)
 	}
 }
@@ -281,31 +376,48 @@ func (p *ACMEProvider) hostPolicy(ctx context.Context, host string) error {
 	domains := p.domains
 	p.mu.RUnlock()
 
+	p.logger.Debug("[ACME:HOSTPOLICY] Checking host",
+		"host", host,
+		"configured_domains", domains,
+		"domain_count", len(domains))
+
 	// If no domains configured, allow all
 	if len(domains) == 0 {
+		p.logger.Debug("[ACME:HOSTPOLICY] No domains configured, allowing all")
 		return nil
 	}
 
 	// Check if host matches any configured domain
 	for _, d := range domains {
 		if d == host {
+			p.logger.Debug("[ACME:HOSTPOLICY] Exact match found",
+				"host", host,
+				"matched_domain", d)
 			return nil
 		}
 		// Support wildcard matching
 		if len(d) > 1 && d[0] == '*' && d[1] == '.' {
-			// *.example.com should match sub.example.com
 			suffix := d[1:] // .example.com
 			if len(host) > len(suffix) && host[len(host)-len(suffix):] == suffix {
+				p.logger.Debug("[ACME:HOSTPOLICY] Wildcard match found",
+					"host", host,
+					"matched_wildcard", d)
 				return nil
 			}
 		}
 	}
 
+	p.logger.Warn("[ACME:HOSTPOLICY] Host not in allowed domains",
+		"host", host,
+		"allowed_domains", domains)
 	return fmt.Errorf("host %q not in allowed domains", host)
 }
 
 // UpdateDomains updates the list of allowed domains.
 func (p *ACMEProvider) UpdateDomains(domains []string) {
+	p.logger.Info("[ACME:CONFIG] Updating allowed domains",
+		"old_domains", p.domains,
+		"new_domains", domains)
 	p.mu.Lock()
 	p.domains = domains
 	p.mu.Unlock()
@@ -314,11 +426,23 @@ func (p *ACMEProvider) UpdateDomains(domains []string) {
 // GetCertificate retrieves or obtains a certificate for a domain.
 // This is the main method called by tls.Config.GetCertificate.
 func (p *ACMEProvider) GetCertificate(ctx context.Context, domain string) (domaintls.Certificate, error) {
+	p.logger.Debug("[ACME:GETCERT:INTERNAL] GetCertificate called",
+		"domain", domain)
+
 	// Try to get from database first
 	cert, err := p.certStore.GetByDomain(ctx, domain)
 	if err == nil && cert.IsActive() && !cert.NeedsRenewal(p.renewalDays) {
+		p.logger.Debug("[ACME:GETCERT:INTERNAL] Found valid certificate in database",
+			"domain", domain,
+			"expires", cert.ExpiresAt)
 		return cert, nil
 	}
+
+	p.logger.Info("[ACME:GETCERT:INTERNAL] Need to obtain/renew certificate",
+		"domain", domain,
+		"db_error", err,
+		"cert_active", cert.IsActive(),
+		"needs_renewal", cert.NeedsRenewal(p.renewalDays))
 
 	// Need to obtain/renew certificate
 	return p.ObtainCertificate(ctx, domain)
@@ -326,31 +450,50 @@ func (p *ACMEProvider) GetCertificate(ctx context.Context, domain string) (domai
 
 // ObtainCertificate obtains a new certificate for a domain via ACME.
 func (p *ACMEProvider) ObtainCertificate(ctx context.Context, domain string) (domaintls.Certificate, error) {
+	p.logger.Info("[ACME:OBTAIN] Starting certificate acquisition",
+		"domain", domain)
+
 	// Check host policy first
 	if err := p.hostPolicy(ctx, domain); err != nil {
+		p.logger.Error("[ACME:OBTAIN] Host policy check failed",
+			"domain", domain,
+			"error", err)
 		return domaintls.Certificate{}, err
 	}
 
 	// Use autocert manager to get the certificate
-	// This will either return cached cert or obtain a new one
 	hello := &cryptotls.ClientHelloInfo{
 		ServerName: domain,
 	}
 
+	p.logger.Info("[ACME:OBTAIN] Calling autocert.Manager.GetCertificate",
+		"domain", domain)
+
 	tlsCert, err := p.manager.GetCertificate(hello)
 	if err != nil {
+		p.logger.Error("[ACME:OBTAIN] Failed to get certificate from ACME",
+			"domain", domain,
+			"error", err)
 		return domaintls.Certificate{}, fmt.Errorf("get certificate from ACME: %w", err)
 	}
 
 	// Parse the certificate to extract metadata
 	if len(tlsCert.Certificate) == 0 {
+		p.logger.Error("[ACME:OBTAIN] No certificate returned from ACME",
+			"domain", domain)
 		return domaintls.Certificate{}, errors.New("no certificate returned from ACME")
 	}
 
 	_, err = x509.ParseCertificate(tlsCert.Certificate[0])
 	if err != nil {
+		p.logger.Error("[ACME:OBTAIN] Failed to parse certificate",
+			"domain", domain,
+			"error", err)
 		return domaintls.Certificate{}, fmt.Errorf("parse certificate: %w", err)
 	}
+
+	p.logger.Info("[ACME:OBTAIN] Certificate obtained, fetching from database",
+		"domain", domain)
 
 	// Get from database (should have been stored by cache)
 	return p.certStore.GetByDomain(ctx, domain)
@@ -358,13 +501,19 @@ func (p *ACMEProvider) ObtainCertificate(ctx context.Context, domain string) (do
 
 // RenewCertificate forces renewal of a certificate.
 func (p *ACMEProvider) RenewCertificate(ctx context.Context, domain string) (domaintls.Certificate, error) {
+	p.logger.Info("[ACME:RENEW] Starting certificate renewal",
+		"domain", domain)
+
 	// Delete from cache to force re-fetch
 	if err := p.cache.Delete(ctx, domain); err != nil {
-		// Log but continue - we want to renew anyway
+		p.logger.Warn("[ACME:RENEW] Failed to delete from cache (continuing anyway)",
+			"domain", domain,
+			"error", err)
 	}
 
 	// Clear memory cache
 	p.cache.ClearMemoryCache()
+	p.logger.Debug("[ACME:RENEW] Memory cache cleared")
 
 	// Obtain new certificate
 	return p.ObtainCertificate(ctx, domain)
@@ -372,25 +521,44 @@ func (p *ACMEProvider) RenewCertificate(ctx context.Context, domain string) (dom
 
 // RevokeCertificate revokes a certificate.
 func (p *ACMEProvider) RevokeCertificate(ctx context.Context, domain string, reason string) error {
+	p.logger.Info("[ACME:REVOKE] Starting certificate revocation",
+		"domain", domain,
+		"reason", reason)
+
 	cert, err := p.certStore.GetByDomain(ctx, domain)
 	if err != nil {
+		p.logger.Error("[ACME:REVOKE] Failed to get certificate from store",
+			"domain", domain,
+			"error", err)
 		return fmt.Errorf("get certificate: %w", err)
 	}
 
 	// Parse the certificate
 	block, _ := pem.Decode(cert.CertPEM)
 	if block == nil {
+		p.logger.Error("[ACME:REVOKE] Failed to decode certificate PEM",
+			"domain", domain)
 		return errors.New("failed to decode certificate PEM")
 	}
 
 	x509Cert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
+		p.logger.Error("[ACME:REVOKE] Failed to parse certificate",
+			"domain", domain,
+			"error", err)
 		return fmt.Errorf("parse certificate: %w", err)
 	}
 
 	// Revoke via ACME
+	p.logger.Info("[ACME:REVOKE] Calling ACME revoke endpoint",
+		"domain", domain,
+		"serial", x509Cert.SerialNumber.String())
+
 	err = p.acmeClient.RevokeCert(ctx, nil, x509Cert.Raw, acme.CRLReasonUnspecified)
 	if err != nil {
+		p.logger.Error("[ACME:REVOKE] ACME revocation failed",
+			"domain", domain,
+			"error", err)
 		return fmt.Errorf("revoke certificate via ACME: %w", err)
 	}
 
@@ -401,12 +569,17 @@ func (p *ACMEProvider) RevokeCertificate(ctx context.Context, domain string, rea
 	cert.RevokeReason = reason
 
 	if err := p.certStore.Update(ctx, cert); err != nil {
+		p.logger.Error("[ACME:REVOKE] Failed to update certificate status in database",
+			"domain", domain,
+			"error", err)
 		return fmt.Errorf("update certificate status: %w", err)
 	}
 
 	// Remove from cache
 	p.cache.Delete(ctx, domain)
 
+	p.logger.Info("[ACME:REVOKE] Certificate revoked successfully",
+		"domain", domain)
 	return nil
 }
 
@@ -415,12 +588,21 @@ func (p *ACMEProvider) CheckRenewal(ctx context.Context, domain string, renewalD
 	cert, err := p.certStore.GetByDomain(ctx, domain)
 	if err != nil {
 		if errors.Is(err, ports.ErrNotFound) {
-			return true, nil // No certificate, needs obtaining
+			p.logger.Debug("[ACME:RENEWAL] No certificate found, needs obtaining",
+				"domain", domain)
+			return true, nil
 		}
 		return false, fmt.Errorf("get certificate: %w", err)
 	}
 
-	return cert.NeedsRenewal(renewalDays), nil
+	needsRenewal := cert.NeedsRenewal(renewalDays)
+	p.logger.Debug("[ACME:RENEWAL] Renewal check complete",
+		"domain", domain,
+		"needs_renewal", needsRenewal,
+		"expires", cert.ExpiresAt,
+		"renewal_days", renewalDays)
+
+	return needsRenewal, nil
 }
 
 // GetManager returns the autocert manager for use in HTTP handlers.
