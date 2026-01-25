@@ -145,9 +145,18 @@ func TestE2E_ACMEPersistence_Certificate(t *testing.T) {
 		}
 
 		// Parse and verify it's the same certificate
-		block, _ := pem.Decode(data)
-		if block == nil || block.Type != "CERTIFICATE" {
-			t.Fatal("retrieved data is not a valid certificate PEM")
+		// Note: autocert expects PRIVATE KEY first, then CERTIFICATE
+		// So we need to skip the private key block to find the certificate
+		remaining := data
+		var block *pem.Block
+		for {
+			block, remaining = pem.Decode(remaining)
+			if block == nil {
+				t.Fatal("no PEM blocks found in retrieved data")
+			}
+			if block.Type == "CERTIFICATE" {
+				break
+			}
 		}
 		cert, err := x509.ParseCertificate(block.Bytes)
 		if err != nil {
@@ -284,8 +293,22 @@ func TestE2E_ACMEPersistence_MultipleRestarts(t *testing.T) {
 				t.Fatalf("CRITICAL: Certificate lost after restart %d: %v", i, err)
 			}
 
-			block, _ := pem.Decode(data)
-			cert, _ := x509.ParseCertificate(block.Bytes)
+			// Skip private key block to find certificate
+			remaining := data
+			var block *pem.Block
+			for {
+				block, remaining = pem.Decode(remaining)
+				if block == nil {
+					t.Fatalf("no certificate block found after restart %d", i)
+				}
+				if block.Type == "CERTIFICATE" {
+					break
+				}
+			}
+			cert, err := x509.ParseCertificate(block.Bytes)
+			if err != nil {
+				t.Fatalf("parse certificate after restart %d: %v", i, err)
+			}
 			if cert.SerialNumber.String() != originalSerial {
 				t.Fatalf("serial mismatch after restart %d", i)
 			}

@@ -3,6 +3,7 @@ package tls
 
 import (
 	"context"
+	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
@@ -84,8 +85,16 @@ func (c *DBCertCache) Get(ctx context.Context, key string) ([]byte, error) {
 		return nil, autocert.ErrCacheMiss
 	}
 
-	// Key format: domain name
-	cert, err := c.store.GetByDomain(ctx, key)
+	// Extract domain from autocert key format (domain+rsa, domain+ecdsa, or just domain)
+	domain := key
+	if idx := strings.LastIndex(key, "+"); idx > 0 {
+		suffix := key[idx:]
+		if suffix == "+rsa" || suffix == "+ecdsa" {
+			domain = key[:idx]
+		}
+	}
+
+	cert, err := c.store.GetByDomain(ctx, domain)
 	if err != nil {
 		if errors.Is(err, ports.ErrNotFound) {
 			c.logger.Debug("certificate not in database (will obtain via ACME)", "domain", key)
@@ -101,8 +110,45 @@ func (c *DBCertCache) Get(ctx context.Context, key string) ([]byte, error) {
 		return nil, autocert.ErrCacheMiss
 	}
 
-	// Combine cert and key data (autocert expects this format)
+	// Combine cert and key data (autocert expects this format: key first, then cert)
 	data := combineCertData(cert)
+
+	// Check if the cert's key type matches what autocert is asking for
+	// autocert uses: "domain" for ECDSA, "domain+rsa" for RSA, "domain+ecdsa" for explicit ECDSA
+	// If we have an RSA cert but autocert wants ECDSA (bare domain or +ecdsa), return cache miss
+	// so autocert will try "domain+rsa" next
+	wantsRSA := strings.HasSuffix(key, "+rsa")
+	wantsECDSA := key == domain || strings.HasSuffix(key, "+ecdsa") // bare domain or explicit +ecdsa
+
+	if wantsECDSA || wantsRSA {
+		// Parse the private key to check its type
+		block, _ := pem.Decode(cert.KeyPEM)
+		if block != nil {
+			// Check key type
+			_, rsaErr := x509.ParsePKCS1PrivateKey(block.Bytes)
+			_, pkcs8Key, _ := func() (interface{}, interface{}, error) {
+				k, e := x509.ParsePKCS8PrivateKey(block.Bytes)
+				return k, k, e
+			}()
+
+			isRSA := rsaErr == nil
+			if pkcs8Key != nil {
+				_, isRSA = pkcs8Key.(*rsa.PrivateKey)
+			}
+
+			if wantsECDSA && isRSA {
+				// Client wants ECDSA but we have RSA - return cache miss
+				// autocert will then try "domain+rsa"
+				c.logger.Debug("key type mismatch", "key", key, "want", "ECDSA", "have", "RSA")
+				return nil, autocert.ErrCacheMiss
+			}
+			if wantsRSA && !isRSA {
+				// Client wants RSA but we have ECDSA - return cache miss
+				c.logger.Debug("key type mismatch", "key", key, "want", "RSA", "have", "ECDSA")
+				return nil, autocert.ErrCacheMiss
+			}
+		}
+	}
 
 	// Update in-memory cache
 	c.mu.Lock()
@@ -151,8 +197,17 @@ func (c *DBCertCache) Put(ctx context.Context, key string, data []byte) error {
 
 	now := time.Now().UTC()
 
+	// Extract domain from autocert key format (domain+rsa, domain+ecdsa, or just domain)
+	domain := key
+	if idx := strings.LastIndex(key, "+"); idx > 0 {
+		suffix := key[idx:]
+		if suffix == "+rsa" || suffix == "+ecdsa" {
+			domain = key[:idx]
+		}
+	}
+
 	// Check if certificate already exists
-	existing, err := c.store.GetByDomain(ctx, key)
+	existing, err := c.store.GetByDomain(ctx, domain)
 	if err == nil && existing.ID != "" {
 		// Update existing certificate
 		existing.CertPEM = certPEM
@@ -166,15 +221,15 @@ func (c *DBCertCache) Put(ctx context.Context, key string, data []byte) error {
 		existing.UpdatedAt = now
 
 		if err := c.store.Update(ctx, existing); err != nil {
-			c.logger.Error("failed to update certificate in database", "domain", key, "error", err)
+			c.logger.Error("failed to update certificate in database", "domain", domain, "error", err)
 			return fmt.Errorf("update certificate in database: %w", err)
 		}
-		c.logger.Info("certificate renewed and stored", "domain", key, "issuer", parsedCert.Issuer.CommonName, "expires", parsedCert.NotAfter)
+		c.logger.Info("certificate renewed and stored", "domain", domain, "issuer", parsedCert.Issuer.CommonName, "expires", parsedCert.NotAfter)
 	} else {
 		// Create new certificate
 		cert := domaintls.Certificate{
 			ID:           domaintls.GenerateCertificateID(),
-			Domain:       key,
+			Domain:       domain,
 			CertPEM:      certPEM,
 			ChainPEM:     chainPEM,
 			KeyPEM:       keyPEM,
@@ -188,10 +243,10 @@ func (c *DBCertCache) Put(ctx context.Context, key string, data []byte) error {
 		}
 
 		if err := c.store.Create(ctx, cert); err != nil {
-			c.logger.Error("failed to store certificate in database", "domain", key, "error", err)
+			c.logger.Error("failed to store certificate in database", "domain", domain, "error", err)
 			return fmt.Errorf("store certificate in database: %w", err)
 		}
-		c.logger.Info("new certificate obtained and stored", "domain", key, "issuer", parsedCert.Issuer.CommonName, "expires", parsedCert.NotAfter)
+		c.logger.Info("new certificate obtained and stored", "domain", domain, "issuer", parsedCert.Issuer.CommonName, "expires", parsedCert.NotAfter)
 	}
 
 	// Update in-memory cache
@@ -210,8 +265,17 @@ func (c *DBCertCache) Delete(ctx context.Context, key string) error {
 	delete(c.cache, key)
 	c.mu.Unlock()
 
+	// Extract domain from autocert key format (domain+rsa, domain+ecdsa, or just domain)
+	domain := key
+	if idx := strings.LastIndex(key, "+"); idx > 0 {
+		suffix := key[idx:]
+		if suffix == "+rsa" || suffix == "+ecdsa" {
+			domain = key[:idx]
+		}
+	}
+
 	// Get the certificate by domain
-	cert, err := c.store.GetByDomain(ctx, key)
+	cert, err := c.store.GetByDomain(ctx, domain)
 	if err != nil {
 		if errors.Is(err, ports.ErrNotFound) {
 			return nil // Already doesn't exist
@@ -236,12 +300,14 @@ func (c *DBCertCache) ClearMemoryCache() {
 }
 
 // combineCertData combines certificate, key, and chain into a single blob.
-// Format: cert PEM + key PEM + chain PEM (if present)
+// Format: key PEM + cert PEM + chain PEM (if present)
+// IMPORTANT: autocert expects PRIVATE KEY first, then certificates.
+// See autocert.Manager.cacheGet which checks: strings.Contains(priv.Type, "PRIVATE")
 func combineCertData(cert domaintls.Certificate) []byte {
 	data := make([]byte, 0, len(cert.CertPEM)+len(cert.KeyPEM)+len(cert.ChainPEM)+2)
-	data = append(data, cert.CertPEM...)
-	data = append(data, '\n')
 	data = append(data, cert.KeyPEM...)
+	data = append(data, '\n')
+	data = append(data, cert.CertPEM...)
 	if len(cert.ChainPEM) > 0 {
 		data = append(data, '\n')
 		data = append(data, cert.ChainPEM...)
