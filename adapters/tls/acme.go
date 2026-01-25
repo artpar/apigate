@@ -12,6 +12,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/http"
 	"sync"
 	"time"
 
@@ -80,6 +82,24 @@ func NewACMEProvider(certStore ports.CertificateStore, cfg ACMEConfig) (*ACMEPro
 		return nil, fmt.Errorf("generate account key: %w", err)
 	}
 
+	// Create HTTP client with appropriate timeouts for ACME operations
+	// Without this, HTTP calls to Let's Encrypt could hang indefinitely
+	// if there are network issues (this was the root cause of production ACME hangs)
+	acmeHTTPClient := &http.Client{
+		Timeout: 60 * time.Second, // Overall request timeout
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   10 * time.Second, // Connection timeout
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: 30 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			MaxIdleConns:          10,
+			IdleConnTimeout:       90 * time.Second,
+		},
+	}
+
 	provider := &ACMEProvider{
 		certStore:   certStore,
 		cache:       cache,
@@ -92,6 +112,7 @@ func NewACMEProvider(certStore ports.CertificateStore, cfg ACMEConfig) (*ACMEPro
 		acmeClient: &acme.Client{
 			DirectoryURL: directoryURL,
 			Key:          accountKey,
+			HTTPClient:   acmeHTTPClient,
 		},
 	}
 
@@ -99,6 +120,7 @@ func NewACMEProvider(certStore ports.CertificateStore, cfg ACMEConfig) (*ACMEPro
 	// IMPORTANT: Always set Client explicitly - when nil, autocert uses lazy initialization
 	// which can fail silently for production ACME. Setting it explicitly ensures
 	// the correct directory URL is used from the start.
+	// Also set HTTPClient with timeouts to prevent indefinite hangs on network issues.
 	provider.manager = &autocert.Manager{
 		Cache:      cache,
 		Prompt:     autocert.AcceptTOS,
@@ -106,6 +128,7 @@ func NewACMEProvider(certStore ports.CertificateStore, cfg ACMEConfig) (*ACMEPro
 		HostPolicy: provider.hostPolicy,
 		Client: &acme.Client{
 			DirectoryURL: directoryURL,
+			HTTPClient:   acmeHTTPClient,
 		},
 	}
 
@@ -115,6 +138,14 @@ func NewACMEProvider(certStore ports.CertificateStore, cfg ACMEConfig) (*ACMEPro
 // Name returns the provider name.
 func (p *ACMEProvider) Name() string {
 	return "acme"
+}
+
+// getDirectoryURL returns the ACME directory URL for logging.
+func (p *ACMEProvider) getDirectoryURL() string {
+	if p.staging {
+		return letsEncryptStaging
+	}
+	return letsEncryptProduction
 }
 
 // SetLogger sets a custom logger for the ACME provider.
@@ -142,6 +173,12 @@ func (p *ACMEProvider) GetCertificateWithLogging(hello *cryptotls.ClientHelloInf
 			"allowed_domains", p.domains)
 		return nil, err
 	}
+
+	// Log that we're about to call autocert - this helps identify hangs
+	p.logger.Info("calling autocert manager",
+		"domain", domain,
+		"staging", p.staging,
+		"acme_directory", p.getDirectoryURL())
 
 	cert, err := p.manager.GetCertificate(hello)
 

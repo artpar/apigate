@@ -69,6 +69,7 @@ func (c *DBCertCache) Get(ctx context.Context, key string) ([]byte, error) {
 
 	// Account keys should be stored in database for persistence across restarts
 	if isAccountKey {
+		c.logger.Info("looking up ACME account key", "key", key[:min(50, len(key))])
 		// Try to retrieve from database if cache store is available
 		if c.cacheStore != nil {
 			data, err := c.cacheStore.GetCache(ctx, key)
@@ -77,11 +78,16 @@ func (c *DBCertCache) Get(ctx context.Context, key string) ([]byte, error) {
 				c.mu.Lock()
 				c.cache[key] = data
 				c.mu.Unlock()
-				c.logger.Debug("ACME account key retrieved from database", "key_prefix", key[:min(20, len(key))])
+				c.logger.Info("ACME account key retrieved from database", "key", key[:min(50, len(key))], "data_len", len(data))
 				return data, nil
 			}
+			if err != nil {
+				c.logger.Warn("failed to retrieve ACME account key from database", "key", key[:min(50, len(key))], "error", err)
+			}
+		} else {
+			c.logger.Warn("no cache store available for ACME account keys, will use in-memory only")
 		}
-		c.logger.Info("ACME account key not found, will create new", "key", key[:min(30, len(key))])
+		c.logger.Info("ACME account key not found, autocert will create new", "key", key[:min(50, len(key))])
 		return nil, autocert.ErrCacheMiss
 	}
 
