@@ -193,3 +193,45 @@ jobs:
 
       - name: Run go vet
         run: CGO_ENABLED=1 go vet ./...
+
+  docs:
+    name: Validate Docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate spec files exist
+        run: |
+          REQUIRED_FILES=(
+            "docs/spec/README.md"
+            "docs/spec/json-api.md"
+            "docs/spec/error-codes.md"
+            "docs/spec/pagination.md"
+            "docs/spec/resource-types.md"
+            "docs/spec/tls-certificates.md"
+            "docs/spec/metering-api.md"
+          )
+
+          MISSING=0
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "::error::Missing required spec file: $file"
+              MISSING=1
+            fi
+          done
+
+          if [ $MISSING -eq 1 ]; then
+            exit 1
+          fi
+
+          echo "All required spec files present"
+
+      - name: Check spec file headers
+        run: |
+          # Verify spec files have proper header format
+          for file in docs/spec/*.md; do
+            if ! head -1 "$file" | grep -q "^#"; then
+              echo "::warning::$file does not start with a header"
+            fi
+          done

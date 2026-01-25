@@ -1,0 +1,60 @@
+name: Sync Wiki
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docs/spec/**'
+  workflow_dispatch:  # Allow manual trigger
+
+permissions:
+  contents: write
+
+jobs:
+  sync-wiki:
+    name: Sync docs/spec to Wiki
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main repo
+        uses: actions/checkout@v4
+        with:
+          path: main
+
+      - name: Checkout wiki
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}.wiki
+          path: wiki
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync spec files to wiki
+        run: |
+          # Map spec files to wiki pages
+          cp main/docs/spec/README.md wiki/Home.md
+          cp main/docs/spec/json-api.md wiki/JSON-API-Format.md
+          cp main/docs/spec/error-codes.md wiki/Error-Codes.md
+          cp main/docs/spec/pagination.md wiki/Pagination.md
+          cp main/docs/spec/resource-types.md wiki/Resource-Types.md
+          cp main/docs/spec/tls-certificates.md wiki/TLS-Certificates.md
+          cp main/docs/spec/metering-api.md wiki/Metering-API.md
+
+          # Add sync timestamp
+          echo "" >> wiki/Home.md
+          echo "---" >> wiki/Home.md
+          echo "_Last synced: $(date -u '+%Y-%m-%d %H:%M:%S UTC') from docs/spec/_" >> wiki/Home.md
+
+      - name: Commit and push wiki changes
+        run: |
+          cd wiki
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if git diff --quiet; then
+            echo "No changes to sync"
+          else
+            git add -A
+            git commit -m "Sync from docs/spec/ ($(date -u '+%Y-%m-%d'))"
+            git push
+            echo "Wiki updated successfully"
+          fi

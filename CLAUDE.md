@@ -435,9 +435,63 @@ API handlers       → adapters/http/admin/     # Uses pkg/jsonapi/
 
 ---
 
+## CI/CD Automation
+
+### Automated Workflows
+
+| Workflow | Trigger | What It Does |
+|----------|---------|--------------|
+| `ci.yml` | Push/PR to main | Tests, coverage check, builds, vet, docs validation |
+| `release.yml` | Tag `v*` | Builds all platforms, GitHub release, Docker, Homebrew |
+| `wiki-sync.yml` | Push to main (docs/spec) | Syncs docs/spec to GitHub wiki |
+
+### Creating a Release
+
+Use the release script to automate version bumping and tagging:
+
+```bash
+# Patch release (bug fixes): v0.1.10 -> v0.1.11
+./scripts/prepare-release.sh patch
+
+# Minor release (new features): v0.1.10 -> v0.2.0
+./scripts/prepare-release.sh minor
+
+# Major release (breaking changes): v0.1.10 -> v1.0.0
+./scripts/prepare-release.sh major
+```
+
+The script will:
+1. Fetch latest tags
+2. Calculate next version
+3. Show commits since last release
+4. Prompt for confirmation
+5. Create and push tag
+
+GitHub Actions then automatically:
+1. Runs tests
+2. Builds binaries (Linux, macOS, Windows)
+3. Creates GitHub release with changelog
+4. Builds/pushes Docker image
+5. Updates Homebrew formula
+6. Syncs wiki from docs/spec
+
+### Manual Wiki Sync
+
+```bash
+# Preview changes
+./scripts/sync-wiki.sh --dry-run
+
+# Sync to wiki
+./scripts/sync-wiki.sh
+```
+
+---
+
 ## GitHub Wiki Synchronization
 
 The GitHub wiki mirrors `docs/spec/` for external visibility.
+
+**Automated**: Wiki syncs automatically on push to main when `docs/spec/` changes.
 
 ### First-Time Setup
 
@@ -445,27 +499,6 @@ The wiki must be initialized via GitHub UI before git access works:
 1. Go to https://github.com/artpar/apigate/wiki
 2. Click "Create the first page"
 3. Save any content (will be replaced by sync)
-
-### Sync Workflow
-
-```bash
-# Clone wiki (first time only)
-git clone git@github.com:artpar/apigate.wiki.git /tmp/apigate-wiki
-
-# Sync spec to wiki
-cp docs/spec/README.md /tmp/apigate-wiki/Home.md
-cp docs/spec/json-api.md /tmp/apigate-wiki/JSON-API-Format.md
-cp docs/spec/error-codes.md /tmp/apigate-wiki/Error-Codes.md
-cp docs/spec/pagination.md /tmp/apigate-wiki/Pagination.md
-cp docs/spec/resource-types.md /tmp/apigate-wiki/Resource-Types.md
-cp docs/spec/tls-certificates.md /tmp/apigate-wiki/TLS-Certificates.md
-cp docs/spec/metering-api.md /tmp/apigate-wiki/Metering-API.md
-
-cd /tmp/apigate-wiki
-git add -A
-git commit -m "Sync from docs/spec/"
-git push
-```
 
 ### Wiki Structure
 
@@ -479,7 +512,7 @@ git push
 | TLS-Certificates | `docs/spec/tls-certificates.md` |
 | Metering-API | `docs/spec/metering-api.md` |
 
-**Important**: Always edit `docs/spec/` first, then sync to wiki. Never edit wiki directly.
+**Important**: Always edit `docs/spec/` first. Wiki syncs automatically on push to main.
 
 ---
 
