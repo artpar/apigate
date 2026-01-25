@@ -264,6 +264,23 @@ When using ACME, certificates are automatically renewed:
 
 APIGate supports Server Name Indication (SNI) for multiple domains when using database-stored certificates.
 
+### ACME Certificate Cache
+
+The ACME certificate cache stores two types of data:
+
+| Data Type | Storage | Description |
+|-----------|---------|-------------|
+| **ACME account keys** | `acme_cache` table | Private key for ACME account registration |
+| **TLS certificates** | `certificates` table | Domain certificates with metadata |
+
+**Cache key format**: The autocert library uses specific key formats:
+- `domain` - Request for ECDSA certificate (preferred)
+- `domain+rsa` - Request for RSA certificate
+- `domain+ecdsa` - Explicit ECDSA request
+- `+acme_account+<url>` - ACME account key
+
+**Key type matching**: If a cached certificate's key type doesn't match the request (e.g., RSA cert for ECDSA request), the cache returns a miss and autocert tries the appropriate key format.
+
 ---
 
 ## Certificate Events
@@ -423,6 +440,40 @@ You'll see messages like:
 **Solution**:
 - Wait for rate limit reset
 - Use staging for testing: `apigate settings set tls.acme_staging true`
+
+### Switching from Staging to Production
+
+When switching from Let's Encrypt staging to production:
+
+1. **Certificates are re-obtained automatically**: Staging certificates (issued by "Fake LE Intermediate X1") won't be used in production mode. The system detects the key type mismatch and obtains new production certificates.
+
+2. **ACME account keys persist**: The ACME account key is stored in the `acme_cache` table and reused, preventing unnecessary account creation.
+
+3. **No manual cleanup needed**: Simply change the setting and restart:
+   ```bash
+   apigate settings set tls.acme_staging false
+   # Restart the server
+   ```
+
+**Note**: If you experience issues after switching, you can clear the certificate cache:
+```bash
+sqlite3 apigate.db "DELETE FROM certificates WHERE issuer LIKE '%Fake%';"
+```
+
+### TLS Handshake Timeout
+
+**Error**: TLS handshake hangs or times out
+
+**Causes**:
+- ACME challenge cannot complete (firewall blocking port 80)
+- DNS not properly configured
+- Rate limits exceeded
+
+**Solution**:
+1. Verify port 80 is accessible for HTTP-01 challenges
+2. Check DNS resolution: `dig api.example.com`
+3. Check logs for ACME errors: `APIGATE_LOG_LEVEL=debug apigate serve`
+4. If rate limited, wait or use staging mode for testing
 
 ---
 
