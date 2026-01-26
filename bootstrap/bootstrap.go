@@ -40,7 +40,6 @@ import (
 	"github.com/artpar/apigate/web"
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
-	"golang.org/x/crypto/acme/autocert"
 )
 
 // Environment variable names for bootstrap configuration.
@@ -91,7 +90,6 @@ type App struct {
 	tlsEnabled    bool
 	tlsMode       string // acme, manual, none
 	tlsConfig     *cryptotls.Config
-	acmeManager   *autocert.Manager
 	acmeProvider  *adapterstls.ACMEProvider
 	httpChallenge *http.Server // HTTP server for ACME HTTP-01 challenges
 
@@ -765,7 +763,6 @@ func (a *App) initACMETLS(s settings.Settings, minVersion uint16) error {
 		return fmt.Errorf("create ACME provider: %w", err)
 	}
 	a.acmeProvider = provider
-	a.acmeManager = provider.GetManager()
 
 	// Configure TLS with ACME using logging wrapper for visibility
 	a.tlsConfig = &cryptotls.Config{
@@ -1024,13 +1021,13 @@ func (a *App) startACMEChallengeServer(errCh chan error) error {
 	httpRedirect := s.GetBool(settings.KeyTLSHTTPRedirect)
 
 	// Create handler that serves ACME challenges and optionally redirects other traffic
-	handler := a.acmeManager.HTTPHandler(nil)
+	handler := a.acmeProvider.HTTPHandler(nil)
 
 	if httpRedirect {
 		// Wrap to redirect non-challenge requests to HTTPS
 		originalHandler := handler
 		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Let autocert handle ACME challenge paths
+			// Let ACME provider handle challenge paths
 			if strings.HasPrefix(r.URL.Path, "/.well-known/acme-challenge/") {
 				originalHandler.ServeHTTP(w, r)
 				return

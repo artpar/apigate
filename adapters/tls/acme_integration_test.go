@@ -16,11 +16,10 @@ import (
 	"github.com/artpar/apigate/adapters/sqlite"
 	domaintls "github.com/artpar/apigate/domain/tls"
 	"golang.org/x/crypto/acme"
-	"golang.org/x/crypto/acme/autocert"
 )
 
 // TestNewACMEProvider verifies that NewACMEProvider correctly initializes
-// the autocert.Manager.Client for both staging and production modes.
+// the acme.Client for both staging and production modes.
 // This is the critical boundary test - Issue #48 occurred because Client
 // was only set for staging mode, leaving production with nil Client.
 func TestNewACMEProvider(t *testing.T) {
@@ -65,26 +64,16 @@ func TestNewACMEProvider(t *testing.T) {
 				t.Fatalf("NewACMEProvider failed: %v", err)
 			}
 
-			// CRITICAL: Manager.Client must never be nil
+			// CRITICAL: client must never be nil
 			// This was the root cause of Issue #48 - production mode had nil Client
-			if provider.manager.Client == nil {
-				t.Fatal("CRITICAL: Manager.Client is nil - this breaks ACME initialization")
+			if provider.client == nil {
+				t.Fatal("CRITICAL: provider.client is nil - this breaks ACME initialization")
 			}
 
 			// Verify correct directory URL based on staging flag
-			if provider.manager.Client.DirectoryURL != tt.wantDirURL {
+			if provider.client.DirectoryURL != tt.wantDirURL {
 				t.Errorf("DirectoryURL = %q, want %q",
-					provider.manager.Client.DirectoryURL, tt.wantDirURL)
-			}
-
-			// Also verify the provider's own acmeClient is set
-			if provider.acmeClient == nil {
-				t.Fatal("CRITICAL: provider.acmeClient is nil")
-			}
-
-			if provider.acmeClient.DirectoryURL != tt.wantDirURL {
-				t.Errorf("provider.acmeClient.DirectoryURL = %q, want %q",
-					provider.acmeClient.DirectoryURL, tt.wantDirURL)
+					provider.client.DirectoryURL, tt.wantDirURL)
 			}
 
 			t.Logf("Provider correctly initialized with DirectoryURL: %s", tt.wantDirURL)
@@ -92,8 +81,9 @@ func TestNewACMEProvider(t *testing.T) {
 	}
 }
 
-// TestACMECacheMissError verifies the critical fix: ErrCacheMiss is autocert.ErrCacheMiss
-// This is the key test that ensures ACME certificate obtainment will be triggered.
+// TestACMECacheMissError verifies the critical fix: ErrCacheMiss behavior.
+// When a certificate is not found, the provider should return an error
+// that triggers certificate obtainment.
 func TestACMECacheMissError(t *testing.T) {
 	dbPath := t.TempDir() + "/test.db"
 	db, err := sqlite.Open(dbPath)
@@ -107,22 +97,33 @@ func TestACMECacheMissError(t *testing.T) {
 	}
 
 	certStore := sqlite.NewCertificateStore(db)
-	cache := NewDBCertCache(certStore, certStore) // certStore implements both CertificateStore and ACMECacheStore
 
-	_, err = cache.Get(context.Background(), "nonexistent.example.com")
-
-	// This is the critical test - the error MUST be autocert.ErrCacheMiss
-	// for the autocert.Manager to trigger certificate obtainment
-	if err != autocert.ErrCacheMiss {
-		t.Errorf("CRITICAL: Expected autocert.ErrCacheMiss, got: %v (type: %T)", err, err)
-		t.Error("This will prevent ACME certificate obtainment from working!")
-	} else {
-		t.Log("✓ DBCertCache.Get correctly returns autocert.ErrCacheMiss")
+	provider, err := NewACMEProvider(certStore, ACMEConfig{
+		Email:   "test@example.com",
+		Staging: true,
+		Domains: []string{"example.com"},
+	})
+	if err != nil {
+		t.Fatalf("NewACMEProvider failed: %v", err)
 	}
+
+	// Memory cache should be empty
+	cert := provider.getCachedCert("nonexistent.example.com")
+	if cert != nil {
+		t.Error("Expected nil from memory cache for nonexistent domain")
+	}
+
+	// Database lookup should fail
+	_, err = provider.certStore.GetByDomain(context.Background(), "nonexistent.example.com")
+	if err == nil {
+		t.Error("Expected error from database lookup for nonexistent domain")
+	}
+
+	t.Log("✓ Cache miss behavior works correctly")
 }
 
-// TestCacheNonCertData verifies that non-certificate data (like ACME account keys) is handled
-// autocert stores both account keys (single PEM block) and certificates (multiple blocks)
+// TestCacheNonCertData verifies that non-certificate data (like ACME account keys) is handled.
+// The new implementation handles account keys internally in the acme.Client.
 func TestCacheNonCertData(t *testing.T) {
 	dbPath := t.TempDir() + "/test.db"
 	db, err := sqlite.Open(dbPath)
@@ -136,7 +137,6 @@ func TestCacheNonCertData(t *testing.T) {
 	}
 
 	certStore := sqlite.NewCertificateStore(db)
-	cache := NewDBCertCache(certStore, certStore) // certStore implements both CertificateStore and ACMECacheStore
 
 	// Simulate ACME account key storage (single PEM block)
 	accountKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -146,53 +146,28 @@ func TestCacheNonCertData(t *testing.T) {
 		Bytes: keyBytes,
 	})
 
-	// Use a realistic ACME account key format (autocert uses "+key" prefix for account keys)
-	// The isAccountKey check looks for "acme_account" or keys starting with "+"
+	// Use a realistic ACME account key format
 	accountKeyName := "+acme_account+https://acme-v02.api.letsencrypt.org/directory"
 
-	// This should not error - account keys are now stored in both memory AND database
-	err = cache.Put(context.Background(), accountKeyName, keyPEM)
+	// Store via ACMECacheStore interface (certStore implements both)
+	err = certStore.PutCache(context.Background(), accountKeyName, keyPEM)
 	if err != nil {
 		t.Errorf("Failed to store account key: %v", err)
 	}
 
-	// Should be retrievable from memory cache
-	data, err := cache.Get(context.Background(), accountKeyName)
+	// Should be retrievable
+	data, err := certStore.GetCache(context.Background(), accountKeyName)
 	if err != nil {
 		t.Errorf("Failed to retrieve account key: %v", err)
 	}
 	if len(data) == 0 {
 		t.Error("Retrieved empty account key data")
 	}
-	t.Log("✓ Account key stored and retrieved from memory cache")
 
-	// CRITICAL TEST: Clear memory cache and verify it can be retrieved from database
-	// This is the fix for Issue #47 - account keys must survive restarts
-	cache.ClearMemoryCache()
-	data, err = cache.Get(context.Background(), accountKeyName)
-	if err != nil {
-		t.Errorf("CRITICAL: Failed to retrieve account key from database after memory cache clear: %v", err)
-		t.Error("This means ACME account keys will be lost on restart, causing Let's Encrypt rate limiting!")
-	} else if len(data) == 0 {
-		t.Error("CRITICAL: Retrieved empty account key data from database")
-	} else {
-		t.Log("✓ Account key persisted to database and retrieved after memory cache clear")
-	}
-
-	// Also verify it's actually in the acme_cache table
-	dbData, err := certStore.GetCache(context.Background(), accountKeyName)
-	if err != nil {
-		t.Errorf("Failed to get account key directly from database: %v", err)
-	} else if len(dbData) != len(keyPEM) {
-		t.Errorf("Database data length mismatch: got %d, want %d", len(dbData), len(keyPEM))
-	} else {
-		t.Log("✓ Account key verified in acme_cache table")
-	}
-
-	t.Log("✓ Non-certificate data (account keys) handled correctly with persistence")
+	t.Log("✓ Non-certificate data (account keys) handled correctly")
 }
 
-// TestCacheCertificateStorage verifies certificate storage and retrieval
+// TestCacheCertificateStorage verifies certificate storage and retrieval.
 func TestCacheCertificateStorage(t *testing.T) {
 	dbPath := t.TempDir() + "/test.db"
 	db, err := sqlite.Open(dbPath)
@@ -206,7 +181,6 @@ func TestCacheCertificateStorage(t *testing.T) {
 	}
 
 	certStore := sqlite.NewCertificateStore(db)
-	cache := NewDBCertCache(certStore, certStore) // certStore implements both CertificateStore and ACMECacheStore
 
 	testDomain := "test.example.com"
 	ctx := context.Background()
@@ -240,27 +214,29 @@ func TestCacheCertificateStorage(t *testing.T) {
 		Bytes: keyBytes,
 	})
 
-	// Combine as autocert would (cert + key)
-	data := append(certPEM, keyPEM...)
+	// Test 1: Store certificate directly in database
+	now := time.Now().UTC()
+	cert := domaintls.Certificate{
+		ID:           domaintls.GenerateCertificateID(),
+		Domain:       testDomain,
+		CertPEM:      certPEM,
+		KeyPEM:       keyPEM,
+		IssuedAt:     template.NotBefore,
+		ExpiresAt:    template.NotAfter,
+		Issuer:       "Test CA",
+		SerialNumber: "1",
+		Status:       domaintls.StatusActive,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
 
-	// Test 1: Store certificate
-	err = cache.Put(ctx, testDomain, data)
+	err = certStore.Create(ctx, cert)
 	if err != nil {
 		t.Fatalf("Failed to store certificate: %v", err)
 	}
-	t.Log("✓ Certificate stored in cache")
+	t.Log("✓ Certificate stored in database")
 
-	// Test 2: Retrieve from cache (should hit memory cache)
-	retrieved, err := cache.Get(ctx, testDomain)
-	if err != nil {
-		t.Fatalf("Failed to retrieve from cache: %v", err)
-	}
-	if len(retrieved) == 0 {
-		t.Fatal("Retrieved empty data")
-	}
-	t.Log("✓ Certificate retrieved from memory cache")
-
-	// Test 3: Verify it's in the database
+	// Test 2: Retrieve from database
 	dbCert, err := certStore.GetByDomain(ctx, testDomain)
 	if err != nil {
 		t.Fatalf("Certificate not in database: %v", err)
@@ -271,34 +247,23 @@ func TestCacheCertificateStorage(t *testing.T) {
 	if dbCert.Status != domaintls.StatusActive {
 		t.Errorf("Status mismatch: got %s, want %s", dbCert.Status, domaintls.StatusActive)
 	}
-	t.Logf("✓ Certificate stored in database with ID: %s", dbCert.ID)
+	t.Logf("✓ Certificate retrieved from database with ID: %s", dbCert.ID)
 
-	// Test 4: Clear memory cache and retrieve (should hit database)
-	cache.ClearMemoryCache()
-	retrieved, err = cache.Get(ctx, testDomain)
-	if err != nil {
-		t.Fatalf("Failed to retrieve from database: %v", err)
-	}
-	if len(retrieved) == 0 {
-		t.Fatal("Retrieved empty data from database")
-	}
-	t.Log("✓ Certificate retrieved from database after memory cache clear")
-
-	// Test 5: Delete certificate
-	err = cache.Delete(ctx, testDomain)
+	// Test 3: Delete certificate
+	err = certStore.Delete(ctx, dbCert.ID)
 	if err != nil {
 		t.Fatalf("Failed to delete certificate: %v", err)
 	}
 
-	// Verify it returns ErrCacheMiss now
-	_, err = cache.Get(ctx, testDomain)
-	if err != autocert.ErrCacheMiss {
-		t.Errorf("Expected ErrCacheMiss after delete, got: %v", err)
+	// Verify it's gone
+	_, err = certStore.GetByDomain(ctx, testDomain)
+	if err == nil {
+		t.Error("Expected error after delete")
 	}
 	t.Log("✓ Certificate deleted successfully")
 }
 
-// TestCombineCertData verifies certificate combining works correctly
+// TestCombineCertData verifies certificate combining works correctly.
 func TestCombineCertData(t *testing.T) {
 	cert := domaintls.Certificate{
 		CertPEM:  []byte("-----BEGIN CERTIFICATE-----\ntest-cert\n-----END CERTIFICATE-----"),
@@ -368,7 +333,7 @@ func TestACMEDirectoryConnectivity(t *testing.T) {
 			}
 
 			// Verify we got a valid directory response
-			// The NewNonceURL or OrderURL should be populated
+			// The NonceURL or OrderURL should be populated
 			if dir.NonceURL == "" && dir.OrderURL == "" {
 				t.Errorf("Directory response empty for %s (no NonceURL or OrderURL)", tt.name)
 			}
@@ -414,27 +379,143 @@ func TestACMEHTTPClientTimeout(t *testing.T) {
 				t.Fatalf("NewACMEProvider failed: %v", err)
 			}
 
-			// CRITICAL: Manager.Client.HTTPClient must have timeout set
-			manager := provider.GetManager()
-			if manager.Client == nil {
-				t.Fatal("manager.Client is nil")
+			// CRITICAL: client.HTTPClient must have timeout set
+			if provider.client == nil {
+				t.Fatal("provider.client is nil")
 			}
-			if manager.Client.HTTPClient == nil {
-				t.Fatal("CRITICAL: manager.Client.HTTPClient is nil - this causes indefinite hangs")
+			if provider.client.HTTPClient == nil {
+				t.Fatal("CRITICAL: provider.client.HTTPClient is nil - this causes indefinite hangs")
 			}
-			if manager.Client.HTTPClient.Timeout == 0 {
-				t.Fatal("CRITICAL: manager.Client.HTTPClient.Timeout is 0 - this causes indefinite hangs")
-			}
-
-			// Also check provider's acmeClient
-			if provider.acmeClient.HTTPClient == nil {
-				t.Fatal("CRITICAL: provider.acmeClient.HTTPClient is nil")
-			}
-			if provider.acmeClient.HTTPClient.Timeout == 0 {
-				t.Fatal("CRITICAL: provider.acmeClient.HTTPClient.Timeout is 0")
+			if provider.client.HTTPClient.Timeout == 0 {
+				t.Fatal("CRITICAL: provider.client.HTTPClient.Timeout is 0 - this causes indefinite hangs")
 			}
 
-			t.Logf("%s mode: HTTPClient.Timeout = %v", tt.name, provider.acmeClient.HTTPClient.Timeout)
+			t.Logf("%s mode: HTTPClient.Timeout = %v", tt.name, provider.client.HTTPClient.Timeout)
 		})
 	}
+}
+
+// TestDirectACMEProviderFields verifies the new DirectACMEProvider struct fields.
+func TestDirectACMEProviderFields(t *testing.T) {
+	dbPath := t.TempDir() + "/test.db"
+	db, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("Failed to migrate: %v", err)
+	}
+
+	certStore := sqlite.NewCertificateStore(db)
+
+	provider, err := NewACMEProvider(certStore, ACMEConfig{
+		Email:       "test@example.com",
+		Staging:     true,
+		Domains:     []string{"example.com", "*.example.com"},
+		RenewalDays: 14,
+	})
+	if err != nil {
+		t.Fatalf("NewACMEProvider failed: %v", err)
+	}
+
+	// Verify fields are initialized
+	if provider.client == nil {
+		t.Error("client is nil")
+	}
+	if provider.certStore == nil {
+		t.Error("certStore is nil")
+	}
+	if provider.logger == nil {
+		t.Error("logger is nil")
+	}
+	if provider.email != "test@example.com" {
+		t.Errorf("email = %q, want %q", provider.email, "test@example.com")
+	}
+	if provider.staging != true {
+		t.Error("staging should be true")
+	}
+	if provider.renewalDays != 14 {
+		t.Errorf("renewalDays = %d, want 14", provider.renewalDays)
+	}
+	if len(provider.domains) != 2 {
+		t.Errorf("domains count = %d, want 2", len(provider.domains))
+	}
+	if provider.tlsAlpnCerts == nil {
+		t.Error("tlsAlpnCerts map is nil")
+	}
+	if provider.http01Tokens == nil {
+		t.Error("http01Tokens map is nil")
+	}
+	if provider.rateLimitUntil == nil {
+		t.Error("rateLimitUntil map is nil")
+	}
+	if provider.certCache == nil {
+		t.Error("certCache map is nil")
+	}
+	if provider.accountKey == nil {
+		t.Error("accountKey is nil")
+	}
+
+	t.Log("✓ All DirectACMEProvider fields properly initialized")
+}
+
+// TestChallengeHandling verifies challenge maps work correctly.
+func TestChallengeHandling(t *testing.T) {
+	dbPath := t.TempDir() + "/test.db"
+	db, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("Failed to migrate: %v", err)
+	}
+
+	certStore := sqlite.NewCertificateStore(db)
+
+	provider, err := NewACMEProvider(certStore, ACMEConfig{
+		Email:   "test@example.com",
+		Staging: true,
+		Domains: []string{"example.com"},
+	})
+	if err != nil {
+		t.Fatalf("NewACMEProvider failed: %v", err)
+	}
+
+	// Test HTTP-01 challenge handling
+	keyAuth, err := provider.prepareHTTP01Challenge("test-token-12345")
+	if err != nil {
+		t.Fatalf("prepareHTTP01Challenge failed: %v", err)
+	}
+	if keyAuth == "" {
+		t.Error("keyAuth is empty")
+	}
+
+	// Verify token is stored
+	provider.challengeMu.RLock()
+	storedKeyAuth, exists := provider.http01Tokens["test-token-12345"]
+	provider.challengeMu.RUnlock()
+
+	if !exists {
+		t.Error("HTTP-01 token not stored")
+	}
+	if storedKeyAuth != keyAuth {
+		t.Error("Stored keyAuth doesn't match")
+	}
+
+	// Cleanup
+	provider.cleanupHTTP01Challenge("test-token-12345")
+
+	provider.challengeMu.RLock()
+	_, exists = provider.http01Tokens["test-token-12345"]
+	provider.challengeMu.RUnlock()
+
+	if exists {
+		t.Error("HTTP-01 token not cleaned up")
+	}
+
+	t.Log("✓ Challenge handling works correctly")
 }

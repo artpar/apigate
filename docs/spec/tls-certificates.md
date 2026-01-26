@@ -9,7 +9,7 @@
 
 ## Overview
 
-APIGate provides automatic TLS certificate management using ACME (Let's Encrypt) or manual certificate provisioning.
+APIGate provides automatic TLS certificate management using direct ACME (Let's Encrypt) client or manual certificate provisioning.
 
 ---
 
@@ -34,56 +34,61 @@ APIGate provides automatic TLS certificate management using ACME (Let's Encrypt)
 
 ---
 
-## ACME Provider Initialization
+## ACME Provider Architecture
 
-### Manager Configuration
+### Direct ACME Client
 
-The `autocert.Manager` is initialized with explicit configuration:
+The implementation uses `golang.org/x/crypto/acme.Client` directly (not autocert.Manager) for full control over the ACME flow:
 
 ```go
-provider.manager = &autocert.Manager{
-    Cache:      cache,
-    Prompt:     autocert.AcceptTOS,
-    Email:      cfg.Email,
-    HostPolicy: provider.hostPolicy,
-    Client: &acme.Client{
-        DirectoryURL: directoryURL,  // MUST be set explicitly
-    },
+provider.client = &acme.Client{
+    DirectoryURL: directoryURL,  // Always set explicitly
+    Key:          accountKey,
+    HTTPClient:   httpClientWithTimeout,
 }
 ```
 
-### Critical Requirement: Manager.Client
+### Why Direct ACME (not autocert)?
 
-**The `Manager.Client` MUST always be set explicitly.**
+| Aspect | autocert.Manager | Direct acme.Client |
+|--------|-----------------|-------------------|
+| Error visibility | Errors swallowed silently | Full logging at each step |
+| Cache timing | After internal callback (unreliable) | Immediately after issuance |
+| Rate limit handling | Hangs for minutes | Fast-fail with retry-after tracking |
+| Challenge types | HTTP-01 only | TLS-ALPN-01 (primary) + HTTP-01 (fallback) |
+| Step timeouts | Overall only | Per-step (30s each) |
+| Observability | None | Full flow tracking with [ACME:*] log prefixes |
+
+### Directory URLs
 
 | Staging | DirectoryURL |
 |---------|--------------|
 | `true` | `https://acme-staging-v02.api.letsencrypt.org/directory` |
 | `false` | `https://acme-v02.api.letsencrypt.org/directory` |
 
-**Why this matters:**
-- When `Client` is `nil`, autocert uses lazy initialization
-- Lazy initialization can fail silently in production mode
-- This causes TLS handshake timeouts (Issue #48)
+---
 
-### Test Coverage Requirement
+## ACME Flow (5 Steps)
 
-Every code path through `NewACMEProvider` MUST be tested:
+When a certificate is requested, the direct ACME flow executes:
 
-```go
-func TestNewACMEProvider(t *testing.T) {
-    tests := []struct {
-        name       string
-        staging    bool
-        wantDirURL string
-    }{
-        {"production mode", false, letsEncryptProduction},
-        {"staging mode", true, letsEncryptStaging},
-    }
-    // Verify Manager.Client is non-nil
-    // Verify DirectoryURL matches expected value
-}
 ```
+Step 1: [ACME:ORDER]     → Create order with ACME server
+Step 2: [ACME:AUTHZ]     → Get authorization for domain
+Step 3: [ACME:CHALLENGE] → Solve TLS-ALPN-01 or HTTP-01 challenge
+Step 4: [ACME:FINALIZE]  → Finalize order and receive certificate
+Step 5: [ACME:CACHE]     → Store certificate IMMEDIATELY in database
+```
+
+Each step:
+- Has its own 30-second timeout
+- Logs start, success/failure, and duration
+- Classifies errors (retryable, rate-limited, invalid, fatal)
+
+### Challenge Selection Priority
+
+1. **TLS-ALPN-01** (preferred) - Does not require port 80
+2. **HTTP-01** (fallback) - Requires port 80 accessible
 
 ---
 
@@ -93,26 +98,41 @@ func TestNewACMEProvider(t *testing.T) {
 
 | Data Type | Storage Location | Key Format |
 |-----------|-----------------|------------|
-| ACME account keys | `acme_cache` table | `+acme_account+<directory_url>` |
 | TLS certificates | `certificates` table | Domain name |
+| In-memory cache | `certCache` map | Domain name |
 
-### Cache Key Formats
+### Caching Layers
 
-The `autocert` library uses specific key formats:
+1. **Memory cache** - Fast lookup for repeated requests
+2. **Database** - Persistent storage, survives restarts
+3. **ACME issuance** - Triggered when no valid certificate exists
 
-| Key Format | Description |
-|------------|-------------|
-| `domain` | ECDSA certificate (preferred) |
-| `domain+rsa` | RSA certificate request |
-| `domain+ecdsa` | Explicit ECDSA request |
-| `+acme_account+<url>` | ACME account private key |
+### Certificate Lookup Flow
 
-### Key Type Matching
+```
+1. Check TLS-ALPN-01 challenge cert (for ACME validation)
+2. Check host policy (domain allowed?)
+3. Check rate limit (fast-fail if rate limited)
+4. Check memory cache
+5. Check database
+6. Obtain via ACME flow
+```
 
-If a cached certificate's key type doesn't match the request:
-1. Cache returns `ErrCacheMiss`
-2. autocert requests certificate with correct key type
-3. New certificate is stored with appropriate suffix
+---
+
+## Rate Limit Fast-Fail
+
+When a domain is rate limited:
+
+1. Rate limit is recorded with retry-after time
+2. Subsequent requests fail immediately with descriptive error
+3. No ACME requests made until retry-after expires
+4. Prevents hammering ACME servers during outages
+
+```go
+// Check in logs
+[ACME:GETCERT] Domain is rate limited, fast-fail domain=example.com retry_after=2025-01-26T10:00:00Z
+```
 
 ---
 
@@ -124,8 +144,8 @@ When ACME is enabled:
 
 1. Server starts with TLS enabled
 2. First TLS handshake triggers certificate request
-3. HTTP-01 challenge served at `/.well-known/acme-challenge/`
-4. Certificate obtained and stored in database
+3. TLS-ALPN-01 or HTTP-01 challenge solved
+4. Certificate obtained and **immediately** stored in database
 5. Certificate served for subsequent requests
 
 ### Automatic Renewal
@@ -146,6 +166,19 @@ When ACME is enabled:
 
 ---
 
+## Error Classification
+
+The provider classifies errors for appropriate handling:
+
+| Error Type | Status Codes | Action |
+|------------|-------------|--------|
+| `ErrorRetryable` | 500, 502, 503, network errors | Retry with backoff |
+| `ErrorRateLimited` | 429 | Fast-fail until retry-after |
+| `ErrorInvalid` | 400, 403, 404 | Don't retry, log error |
+| `ErrorFatal` | Other | Stop, requires investigation |
+
+---
+
 ## Switching Between Staging and Production
 
 ### Process
@@ -159,7 +192,6 @@ When ACME is enabled:
 
 | Component | Behavior |
 |-----------|----------|
-| ACME account key | Persisted in `acme_cache`, reused |
 | Staging certificates | Ignored (issuer mismatch) |
 | Production certificates | Obtained fresh |
 
@@ -169,24 +201,45 @@ The system automatically handles the transition. Staging certificates remain in 
 
 ---
 
+## Logging
+
+All ACME operations use structured logging with prefixes:
+
+| Prefix | Description |
+|--------|-------------|
+| `[ACME:INIT]` | Provider initialization |
+| `[ACME:GETCERT]` | Certificate request handling |
+| `[ACME:ORDER]` | ACME order creation |
+| `[ACME:AUTHZ]` | Authorization processing |
+| `[ACME:CHALLENGE]` | Challenge preparation and validation |
+| `[ACME:FINALIZE]` | Order finalization |
+| `[ACME:CACHE]` | Certificate caching |
+| `[ACME:RATELIMIT]` | Rate limit tracking |
+| `[ACME:HTTP:REQ/RESP]` | HTTP requests to ACME server |
+
+---
+
 ## Error Handling
 
 ### ACME Challenge Failed
 
-**Cause**: DNS not pointing to server, port 80 blocked, or path blocked
+**Cause**: DNS not pointing to server, port 80/443 blocked, or path blocked
 
-**Requirements**:
+**Requirements for TLS-ALPN-01**:
 1. DNS A/AAAA record points to server
-2. Port 80 accessible (HTTP-01 challenge)
+2. Port 443 accessible
+3. ALPN negotiation supported
+
+**Requirements for HTTP-01**:
+1. DNS A/AAAA record points to server
+2. Port 80 accessible
 3. `/.well-known/acme-challenge/` path not blocked
 
 ### TLS Handshake Timeout
 
-**Cause**: ACME provider not properly initialized
+**Cause**: ACME provider not properly initialized or network issues
 
-**Fix History**: Issue #48 - Manager.Client was only set for staging mode. Fixed by always setting Client explicitly with correct DirectoryURL.
-
-**Prevention**: Test coverage for all `ACMEConfig.Staging` values.
+**Fix History**: Issue #48 - Replaced autocert.Manager with direct acme.Client for full control and visibility.
 
 ### Rate Limit Exceeded
 
@@ -194,7 +247,8 @@ The system automatically handles the transition. Staging certificates remain in 
 
 **Prevention**:
 1. Use staging for testing: `tls.acme_staging = true`
-2. ACME account keys persist across restarts (no duplicate registrations)
+2. Rate limit fast-fail prevents hammering
+3. Check logs for `[ACME:RATELIMIT]` entries
 
 ---
 
@@ -258,13 +312,39 @@ curl "http://localhost:8080/mod/api/certificates/expiring?days=30"
 
 | File | Purpose |
 |------|---------|
-| `adapters/tls/acme.go` | ACME provider implementation |
-| `adapters/tls/cache.go` | Certificate cache implementation |
+| `adapters/tls/acme.go` | Direct ACME provider implementation |
+| `adapters/tls/certcache.go` | Certificate cache utilities |
+| `adapters/tls/acme_test.go` | Unit tests |
 | `adapters/tls/acme_integration_test.go` | Integration tests |
 | `ports/tls.go` | TLS provider interface |
 | `core/modules/setting.yaml` | Settings module definition |
 | `core/modules/certificate.yaml` | Certificates module definition |
 | `core/channel/http/http.go` | HTTP channel (generates endpoints from YAML) |
+
+---
+
+## Verification
+
+```bash
+# 1. Configure for staging first
+sqlite3 apigate.db "UPDATE settings SET value='true' WHERE key='tls.acme_staging'"
+
+# 2. Watch logs for ACME flow
+./apigate serve 2>&1 | grep -E "ACME"
+
+# 3. Make TLS request
+curl -v --insecure https://yourdomain.com/
+
+# Expected logs:
+# [ACME:ORDER] Creating order domain=yourdomain.com
+# [ACME:AUTHZ] Processing authorization domain=yourdomain.com
+# [ACME:CHALLENGE] Preparing TLS-ALPN-01 challenge domain=yourdomain.com
+# [ACME:FINALIZE] Finalizing order domain=yourdomain.com
+# [ACME:CACHE:SUCCESS] Certificate cached domain=yourdomain.com cert_id=xxx
+
+# 4. Verify in database
+sqlite3 apigate.db "SELECT domain, status, expires_at FROM certificates"
+```
 
 ---
 
