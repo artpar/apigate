@@ -186,6 +186,70 @@ func NewACMEProvider(certStore ports.CertificateStore, cfg ACMEConfig) (*ACMEPro
 		"nonce_url", dir.NonceURL,
 		"terms_url", dir.Terms)
 
+	// Pre-register the ACME account to avoid autocert doing it lazily
+	// This is where production might hang - now we'll see it during init
+	logger.Info("[ACME:INIT] Pre-registering ACME account (30s timeout)...",
+		"email", cfg.Email,
+		"directory", directoryURL)
+
+	regCtx, regCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer regCancel()
+
+	regStart := time.Now()
+	acct := &acme.Account{
+		Contact: []string{"mailto:" + cfg.Email},
+	}
+
+	logger.Info("[ACME:INIT] Calling acmeClient.Register...",
+		"contact", acct.Contact)
+
+	registeredAcct, err := acmeClient.Register(regCtx, acct, autocert.AcceptTOS)
+	regDuration := time.Since(regStart)
+
+	if err != nil {
+		// Check if account already exists (this is fine)
+		if err == acme.ErrAccountAlreadyExists {
+			logger.Info("[ACME:INIT] ACME account already exists (OK)",
+				"duration", regDuration,
+				"email", cfg.Email)
+			// Try to get the existing account
+			getAcctCtx, getAcctCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer getAcctCancel()
+
+			getAcctStart := time.Now()
+			existingAcct, getErr := acmeClient.GetReg(getAcctCtx, "")
+			getAcctDuration := time.Since(getAcctStart)
+
+			if getErr != nil {
+				logger.Warn("[ACME:INIT] Could not get existing account (continuing anyway)",
+					"duration", getAcctDuration,
+					"error", getErr)
+			} else {
+				logger.Info("[ACME:INIT] Retrieved existing ACME account",
+					"duration", getAcctDuration,
+					"status", existingAcct.Status,
+					"uri", existingAcct.URI,
+					"contact", existingAcct.Contact)
+			}
+		} else {
+			// Registration failed with some other error - log prominently but continue
+			// This catches network issues, rate limiting, invalid email, etc.
+			// autocert will try again when GetCertificate is called
+			logger.Error("[ACME:INIT] ACME account registration FAILED (will retry on first request)",
+				"duration", regDuration,
+				"error", err,
+				"error_type", fmt.Sprintf("%T", err),
+				"note", "initialization continuing - autocert will retry registration")
+		}
+	} else {
+		logger.Info("[ACME:INIT] ACME account registered successfully",
+			"duration", regDuration,
+			"status", registeredAcct.Status,
+			"uri", registeredAcct.URI,
+			"contact", registeredAcct.Contact,
+			"orders_url", registeredAcct.OrdersURL)
+	}
+
 	// Create autocert manager with explicit Client
 	logger.Info("[ACME:INIT] Creating autocert.Manager",
 		"email", cfg.Email,
