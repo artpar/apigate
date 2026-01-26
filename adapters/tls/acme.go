@@ -14,6 +14,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -80,6 +82,10 @@ type ACMEProvider struct {
 	domains      []string
 	acmeClient   *acme.Client
 	accountKey   crypto.Signer
+
+	// Rate limit tracking per domain
+	rateLimitMu    sync.RWMutex
+	rateLimitUntil map[string]time.Time // domain -> retry after time
 
 	// Challenge tokens for HTTP-01 (used by direct ACME flow)
 	challengeMu     sync.RWMutex
@@ -189,6 +195,7 @@ func NewACMEProvider(certStore ports.CertificateStore, cfg ACMEConfig) (*ACMEPro
 		domains:         cfg.Domains,
 		accountKey:      accountKey,
 		logger:          logger,
+		rateLimitUntil:  make(map[string]time.Time),
 		challengeTokens: make(map[string]string),
 		acmeClient: &acme.Client{
 			DirectoryURL: directoryURL,
@@ -377,6 +384,22 @@ func (p *ACMEProvider) GetCertificateWithLogging(hello *cryptotls.ClientHelloInf
 		"request_id", requestID,
 		"domain", domain)
 
+	// Check if domain is rate limited
+	p.rateLimitMu.RLock()
+	retryAfter, isRateLimited := p.rateLimitUntil[domain]
+	p.rateLimitMu.RUnlock()
+
+	if isRateLimited && time.Now().Before(retryAfter) {
+		waitTime := time.Until(retryAfter)
+		p.logger.Warn("[ACME:GETCERT] Domain is rate limited, cannot obtain certificate",
+			"request_id", requestID,
+			"domain", domain,
+			"retry_after", retryAfter.Format(time.RFC3339),
+			"wait_time", waitTime.Round(time.Second))
+		return nil, fmt.Errorf("rate limited for domain %s, retry after %s (in %s)",
+			domain, retryAfter.Format(time.RFC3339), waitTime.Round(time.Second))
+	}
+
 	// Log detailed state before calling autocert
 	p.logger.Info("[ACME:GETCERT] Calling autocert.Manager.GetCertificate",
 		"request_id", requestID,
@@ -426,6 +449,28 @@ func (p *ACMEProvider) GetCertificateWithLogging(hello *cryptotls.ClientHelloInf
 		totalDuration := time.Since(start)
 
 		if err != nil {
+			// Check if this is a rate limit error and extract retry-after time
+			errStr := err.Error()
+			if strings.Contains(errStr, "rateLimited") || strings.Contains(errStr, "429") {
+				// Parse retry-after time from error message
+				// Format: "retry after 2026-01-26 09:41:29 UTC"
+				if retryTime := p.parseRetryAfter(errStr); !retryTime.IsZero() {
+					p.rateLimitMu.Lock()
+					p.rateLimitUntil[domain] = retryTime
+					p.rateLimitMu.Unlock()
+
+					p.logger.Error("[ACME:GETCERT] Rate limited by Let's Encrypt",
+						"request_id", requestID,
+						"domain", domain,
+						"duration", totalDuration,
+						"retry_after", retryTime.Format(time.RFC3339),
+						"wait_time", time.Until(retryTime).Round(time.Second),
+						"staging", p.staging)
+					return nil, fmt.Errorf("rate limited for domain %s, retry after %s",
+						domain, retryTime.Format(time.RFC3339))
+				}
+			}
+
 			p.logger.Error("[ACME:GETCERT] Certificate acquisition failed",
 				"request_id", requestID,
 				"domain", domain,
@@ -719,6 +764,48 @@ func (p *ACMEProvider) CheckRenewal(ctx context.Context, domain string, renewalD
 // This can be used to handle ACME HTTP-01 challenges.
 func (p *ACMEProvider) GetManager() *autocert.Manager {
 	return p.manager
+}
+
+// parseRetryAfter extracts the retry-after time from a rate limit error message.
+// Looks for patterns like "retry after 2026-01-26 09:41:29 UTC" in the error string.
+func (p *ACMEProvider) parseRetryAfter(errStr string) time.Time {
+	// Pattern: "retry after YYYY-MM-DD HH:MM:SS UTC"
+	re := regexp.MustCompile(`retry after (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) UTC`)
+	matches := re.FindStringSubmatch(errStr)
+	if len(matches) >= 2 {
+		t, err := time.Parse("2006-01-02 15:04:05", matches[1])
+		if err == nil {
+			return t.UTC()
+		}
+		p.logger.Warn("[ACME:RATELIMIT] Failed to parse retry-after time",
+			"matched", matches[1],
+			"error", err)
+	}
+
+	// If we can't parse the exact time, set a default wait of 1 hour
+	// This is safer than hammering the ACME server
+	p.logger.Warn("[ACME:RATELIMIT] Could not parse retry-after time, defaulting to 1 hour",
+		"error_string_preview", errStr[:min(100, len(errStr))])
+	return time.Now().Add(1 * time.Hour)
+}
+
+// ClearRateLimit clears the rate limit for a domain (useful after waiting).
+func (p *ACMEProvider) ClearRateLimit(domain string) {
+	p.rateLimitMu.Lock()
+	delete(p.rateLimitUntil, domain)
+	p.rateLimitMu.Unlock()
+	p.logger.Info("[ACME:RATELIMIT] Rate limit cleared for domain", "domain", domain)
+}
+
+// GetRateLimitInfo returns rate limit information for a domain.
+func (p *ACMEProvider) GetRateLimitInfo(domain string) (time.Time, bool) {
+	p.rateLimitMu.RLock()
+	defer p.rateLimitMu.RUnlock()
+	retryAfter, exists := p.rateLimitUntil[domain]
+	if !exists || time.Now().After(retryAfter) {
+		return time.Time{}, false
+	}
+	return retryAfter, true
 }
 
 // Ensure interface compliance.
