@@ -380,6 +380,93 @@ Higher priority values match first. Same priority = more specific path wins.
 
 ---
 
+## Reserved Paths
+
+Certain paths are **reserved** and can never be overridden by user-defined routes, regardless of priority or pattern. This ensures critical system functionality remains accessible.
+
+### Always Reserved
+
+These paths are always protected:
+
+| Path | Purpose |
+|------|---------|
+| `/health/*` | Health check endpoints |
+| `/metrics` | Prometheus metrics |
+| `/version` | Service version info |
+| `/admin/*` | Admin UI and API (configurable) |
+| `/auth/*` | Authentication API (configurable) |
+
+### Conditionally Reserved
+
+These paths are reserved when the feature is enabled:
+
+| Path | When Reserved | Purpose |
+|------|---------------|---------|
+| `/swagger/*` | OpenAPI enabled | Swagger UI |
+| `/.well-known/*` | OpenAPI enabled | OpenAPI spec |
+| `/portal/*` | Portal enabled | User portal (configurable) |
+| `/docs/*` | Docs enabled | Developer documentation (configurable) |
+| `/mod/*` | Modules enabled | Module API (configurable) |
+| `/payment-webhooks/*` | Webhooks enabled | Payment provider webhooks (configurable) |
+| `/api/v1/meter/*` | Metering enabled | Metering API (configurable) |
+
+### Why Reserved Paths?
+
+Reserved paths prevent the "chicken-and-egg" problem where a catch-all route (`/*`) can override the admin UI, making it impossible to access the Settings UI to fix the routing configuration.
+
+**Example Problem** (before reserved paths):
+```yaml
+# Catch-all route created via UI
+path_pattern: /*
+upstream_id: my-app
+
+# This route now intercepts /admin/* requests
+# Admin UI becomes inaccessible
+# Cannot access Settings to remove the route
+```
+
+**Solution** (with reserved paths):
+```yaml
+# Catch-all route still works
+path_pattern: /*
+upstream_id: my-app
+
+# But /admin/* is reserved
+# Admin UI remains accessible at /admin
+# Can configure/fix routes via Settings UI
+```
+
+### Custom Base Paths
+
+Reserved paths respect custom base path configuration from Settings:
+
+```yaml
+# If admin base path configured as /custom-admin
+admin_base_path: /custom-admin
+
+# Then /custom-admin/* is reserved instead of /admin/*
+```
+
+This allows customization while maintaining protection.
+
+### Testing Reserved Paths
+
+You can verify reserved paths are protected:
+
+```bash
+# These always return built-in handlers (never proxy)
+curl http://localhost:8080/admin
+curl http://localhost:8080/health
+curl http://localhost:8080/metrics
+
+# Even with catch-all route:
+# POST /admin/routes with path_pattern: /*
+# Still accessible:
+curl http://localhost:8080/admin  # Returns admin UI, not upstream
+```
+
+---
+
 ## Creating Routes
 
 ### Admin UI

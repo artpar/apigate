@@ -626,7 +626,7 @@ func NewRouterWithConfig(proxyHandler *ProxyHandler, healthHandler *HealthHandle
 	// Priority route middleware (if enabled)
 	// This allows database routes with priority > 0 to override built-in routes
 	if cfg.RouteService != nil {
-		r.Use(NewPriorityRouteMiddleware(proxyHandler, cfg.RouteService, logger))
+		r.Use(NewPriorityRouteMiddleware(proxyHandler, cfg.RouteService, logger, cfg))
 	}
 
 	// Health endpoints (no auth required)
@@ -780,7 +780,21 @@ func NewRouterWithConfig(proxyHandler *ProxyHandler, healthHandler *HealthHandle
 
 	// Catch-all for proxy: routes not matched by web UI or other handlers
 	// This allows dynamic routes (from database) to work as a fallback
-	r.NotFound(proxyHandler.ServeHTTP)
+	// IMPORTANT: Never proxy reserved paths (admin UI, health checks, etc.)
+	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		// Double-check: if this is a reserved path, return 404 instead of proxying
+		// This prevents catch-all upstream routes from overriding built-in handlers
+		if isReservedPath(r.URL.Path, cfg) {
+			logger.Warn().
+				Str("path", r.URL.Path).
+				Msg("reserved path not found in built-in routes - returning 404 instead of proxying")
+			http.NotFound(w, r)
+			return
+		}
+
+		// Not a reserved path - safe to proxy to upstream
+		proxyHandler.ServeHTTP(w, r)
+	})
 
 	return r
 }
@@ -967,19 +981,119 @@ func (m *routeMatchResult) GetRoute() RouteInfo {
 	return m.Route
 }
 
+// isReservedPath checks if a path should be protected from database route overrides.
+// These paths are always handled by built-in handlers, never proxied to upstreams.
+func isReservedPath(path string, cfg RouterConfig) bool {
+	// System endpoints (always reserved)
+	if strings.HasPrefix(path, "/health") || path == "/metrics" || path == "/version" {
+		return true
+	}
+
+	// OpenAPI endpoints (only reserved when enabled)
+	if cfg.EnableOpenAPI {
+		if strings.HasPrefix(path, "/swagger") || strings.HasPrefix(path, "/.well-known") {
+			return true
+		}
+	}
+
+	// Admin API (configurable path, default: /admin)
+	adminPath := normalizeBasePath(cfg.AdminBasePath)
+	if adminPath == "" {
+		adminPath = "/admin"
+	}
+	if path == adminPath || strings.HasPrefix(path, adminPath+"/") {
+		return true
+	}
+
+	// Auth API (configurable path, default: /auth)
+	authPath := normalizeBasePath(cfg.AuthBasePath)
+	if authPath == "" {
+		authPath = "/auth"
+	}
+	if path == authPath || strings.HasPrefix(path, authPath+"/") {
+		return true
+	}
+
+	// Portal (configurable path, default: /portal)
+	if cfg.PortalHandler != nil {
+		portalPath := normalizeBasePath(cfg.PortalBasePath)
+		if portalPath == "" {
+			portalPath = "/portal"
+		}
+		if path == portalPath || strings.HasPrefix(path, portalPath+"/") {
+			return true
+		}
+	}
+
+	// Portal Auth API (configurable path, default: /api/portal/auth)
+	if cfg.PortalAuthHandler != nil {
+		portalAuthPath := normalizeBasePath(cfg.PortalAuthBasePath)
+		if portalAuthPath == "" {
+			portalAuthPath = "/api/portal/auth"
+		}
+		if path == portalAuthPath || strings.HasPrefix(path, portalAuthPath+"/") {
+			return true
+		}
+	}
+
+	// Docs (configurable path, default: /docs)
+	if cfg.DocsHandler != nil && cfg.DocsEnabled {
+		docsPath := normalizeBasePath(cfg.DocsBasePath)
+		if docsPath == "" {
+			docsPath = "/docs"
+		}
+		if path == docsPath || strings.HasPrefix(path, docsPath+"/") {
+			return true
+		}
+	}
+
+	// Module API (configurable path, default: /mod)
+	if cfg.ModuleHandler != nil && cfg.ModuleEnabled {
+		modulePath := normalizeBasePath(cfg.ModuleBasePath)
+		if modulePath == "" {
+			modulePath = "/mod"
+		}
+		if path == modulePath || strings.HasPrefix(path, modulePath+"/") {
+			return true
+		}
+	}
+
+	// Payment webhooks (configurable path, default: /payment-webhooks)
+	if cfg.PaymentWebhookHandler != nil && cfg.PaymentWebhookEnabled {
+		webhookPath := normalizeBasePath(cfg.PaymentWebhookBasePath)
+		if webhookPath == "" {
+			webhookPath = "/payment-webhooks"
+		}
+		if path == webhookPath || strings.HasPrefix(path, webhookPath+"/") {
+			return true
+		}
+	}
+
+	// Metering API (configurable path, default: /api/v1/meter)
+	if cfg.MeterHandler != nil && cfg.MeterEnabled {
+		meterPath := normalizeBasePath(cfg.MeterBasePath)
+		if meterPath == "" {
+			meterPath = "/api/v1/meter"
+		}
+		if path == meterPath || strings.HasPrefix(path, meterPath+"/") {
+			return true
+		}
+	}
+
+	// Note: Web UI at root (/, /login, etc.) is NOT reserved.
+	// It can be overridden by custom routes with higher priority.
+	// This allows users to deploy their own frontend while still accessing /admin.
+
+	return false
+}
+
 // NewPriorityRouteMiddleware creates middleware that checks database routes before chi routing.
 // This allows database routes with priority > 0 to override built-in routes.
-func NewPriorityRouteMiddleware(proxyHandler *ProxyHandler, routeService interface{}, logger zerolog.Logger) func(next http.Handler) http.Handler {
+func NewPriorityRouteMiddleware(proxyHandler *ProxyHandler, routeService interface{}, logger zerolog.Logger, cfg RouterConfig) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Skip health and metrics endpoints - these should always use built-in handlers
-			if strings.HasPrefix(r.URL.Path, "/health") || r.URL.Path == "/metrics" {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			// Skip admin API endpoints - these should always use built-in handlers
-			if strings.HasPrefix(r.URL.Path, "/admin/") {
+			// Skip reserved paths - these should always use built-in handlers
+			if isReservedPath(r.URL.Path, cfg) {
 				next.ServeHTTP(w, r)
 				return
 			}
