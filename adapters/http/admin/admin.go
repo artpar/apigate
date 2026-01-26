@@ -104,6 +104,11 @@ func NewHandler(deps Deps) *Handler {
 func (h *Handler) Router() chi.Router {
 	r := chi.NewRouter()
 
+	// Root endpoint - API info
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/dashboard", http.StatusFound)
+	})
+
 	// Public endpoints (no auth required)
 	r.Post("/login", h.Login)
 	r.Post("/register", h.Register)
