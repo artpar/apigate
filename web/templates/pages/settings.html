@@ -71,6 +71,108 @@
                 </div>
             </div>
 
+            <!-- Handler Routes Configuration -->
+            <div class="card-body" style="border-bottom: 1px solid #e5e7eb;">
+                <h3 class="card-title mb-4">Handler Routes Configuration</h3>
+                <p class="text-muted mb-4">
+                    Customize where APIGate's built-in features are accessible. This allows you to serve your own content at standard paths
+                    (e.g., custom portal at <code>/portal/</code>) while accessing APIGate features at different paths (e.g., <code>/apigate-portal/</code>).
+                </p>
+                <div class="alert alert-warning mb-4" style="background: #fffbeb; border: 1px solid #fbbf24; padding: 12px; border-radius: 4px;">
+                    <strong>⚠️ Warning:</strong> Changes take effect immediately. Ensure paths don't conflict with your upstream routes.
+                    Paths must start with <code>/</code> and not end with <code>/</code> (e.g., <code>/admin</code> not <code>admin</code> or <code>/admin/</code>).
+                </div>
+
+                <div class="form">
+                    <!-- Core Handlers -->
+                    <div style="border-bottom: 1px solid #e5e7eb; padding-bottom: 24px; margin-bottom: 24px;">
+                        <h4 class="mb-3" style="font-size: 16px; font-weight: 600;">Core Handlers (Always Enabled)</h4>
+
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                            <div class="form-group">
+                                <label class="form-label" for="routes_admin_base_path">Admin API Path</label>
+                                <input type="text" id="routes_admin_base_path" name="routes_admin_base_path" class="form-input" value="{{.Settings.AdminBasePath}}" placeholder="/admin">
+                                <p class="form-hint">Admin dashboard and management API endpoints</p>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="routes_auth_base_path">Auth API Path</label>
+                                <input type="text" id="routes_auth_base_path" name="routes_auth_base_path" class="form-input" value="{{.Settings.AuthBasePath}}" placeholder="/auth">
+                                <p class="form-hint">Authentication endpoints (login, register, logout)</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Customer-Facing Handlers -->
+                    <div style="border-bottom: 1px solid #e5e7eb; padding-bottom: 24px; margin-bottom: 24px;">
+                        <h4 class="mb-3" style="font-size: 16px; font-weight: 600;">Customer-Facing Handlers</h4>
+
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                            <div class="form-group">
+                                <label class="form-label" for="routes_portal_base_path">Customer Portal Path</label>
+                                <input type="text" id="routes_portal_base_path" name="routes_portal_base_path" class="form-input" value="{{.Settings.PortalBasePath}}" placeholder="/portal">
+                                <p class="form-hint">Customer dashboard for API key management</p>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="routes_portal_auth_base_path">Portal Auth API Path</label>
+                                <input type="text" id="routes_portal_auth_base_path" name="routes_portal_auth_base_path" class="form-input" value="{{.Settings.PortalAuthBasePath}}" placeholder="/api/portal/auth">
+                                <p class="form-hint">JSON API auth endpoints for SPA frontends</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Developer Handlers -->
+                    <div style="border-bottom: 1px solid #e5e7eb; padding-bottom: 24px; margin-bottom: 24px;">
+                        <h4 class="mb-3" style="font-size: 16px; font-weight: 600;">Developer Handlers (Optional)</h4>
+
+                        <div class="form-group">
+                            <label class="form-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="checkbox" id="routes_docs_enabled" name="routes_docs_enabled" {{if .Settings.DocsEnabled}}checked{{end}} style="width: 18px; height: 18px;">
+                                Enable Documentation Portal
+                            </label>
+                            <input type="text" id="routes_docs_base_path" name="routes_docs_base_path" class="form-input mt-2" value="{{.Settings.DocsBasePath}}" placeholder="/docs">
+                            <p class="form-hint">Developer documentation and API reference</p>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="checkbox" id="routes_module_enabled" name="routes_module_enabled" {{if .Settings.ModuleEnabled}}checked{{end}} style="width: 18px; height: 18px;">
+                                Enable Module Handler
+                            </label>
+                            <input type="text" id="routes_module_base_path" name="routes_module_base_path" class="form-input mt-2" value="{{.Settings.ModuleBasePath}}" placeholder="/mod">
+                            <p class="form-hint">Declarative YAML modules API endpoints</p>
+                        </div>
+                    </div>
+
+                    <!-- Advanced/Internal Handlers -->
+                    <div>
+                        <h4 class="mb-3" style="font-size: 16px; font-weight: 600;">Advanced Handlers (Optional)</h4>
+
+                        <div class="form-group">
+                            <label class="form-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="checkbox" id="routes_payment_webhook_enabled" name="routes_payment_webhook_enabled" {{if .Settings.PaymentWebhookEnabled}}checked{{end}} style="width: 18px; height: 18px;">
+                                Enable Payment Webhooks
+                            </label>
+                            <input type="text" id="routes_payment_webhook_base_path" name="routes_payment_webhook_base_path" class="form-input mt-2" value="{{.Settings.PaymentWebhookBasePath}}" placeholder="/payment-webhooks">
+                            <p class="form-hint">Stripe, Paddle, and LemonSqueezy webhook receivers</p>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="checkbox" id="routes_meter_enabled" name="routes_meter_enabled" {{if .Settings.MeterEnabled}}checked{{end}} style="width: 18px; height: 18px;">
+                                Enable Metering API
+                            </label>
+                            <input type="text" id="routes_meter_base_path" name="routes_meter_base_path" class="form-input mt-2" value="{{.Settings.MeterBasePath}}" placeholder="/api/v1/meter">
+                            <p class="form-hint">External usage event submission endpoint</p>
+                        </div>
+                    </div>
+
+                    <div class="mt-4" style="background: #f0f9ff; border: 1px solid #3b82f6; padding: 12px; border-radius: 4px;">
+                        <strong>Example Use Case:</strong> If you want to serve your own content at <code>/portal/</code>,
+                        change "Customer Portal Path" to <code>/apigate-portal/</code> so both can coexist.
+                    </div>
+                </div>
+            </div>
+
             <!-- Branding & Customization -->
             <div class="card-body" style="border-bottom: 1px solid #e5e7eb;">
                 <h3 class="card-title mb-4">Branding & Customization</h3>

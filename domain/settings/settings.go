@@ -80,6 +80,22 @@ const (
 	KeyWebUIEnabled  = "webui.enabled"   // Enable/disable web UI entirely
 	KeyWebUIBasePath = "webui.base_path" // Base path to mount UI (empty = root)
 
+	// Handler route path settings
+	KeyAdminBasePath          = "routes.admin_base_path"
+	KeyAuthBasePath           = "routes.auth_base_path"
+	KeyPortalBasePath         = "routes.portal_base_path"
+	KeyPortalAuthBasePath     = "routes.portal_auth_base_path"
+	KeyDocsBasePath           = "routes.docs_base_path"
+	KeyModuleBasePath         = "routes.module_base_path"
+	KeyPaymentWebhookBasePath = "routes.payment_webhook_base_path"
+	KeyMeterBasePath          = "routes.meter_base_path"
+
+	// Optional handler enable/disable
+	KeyDocsEnabled            = "routes.docs_enabled"
+	KeyModuleEnabled          = "routes.module_enabled"
+	KeyPaymentWebhookEnabled  = "routes.payment_webhook_enabled"
+	KeyMeterEnabled           = "routes.meter_enabled"
+
 	// Customization settings (HTML/CSS for branding)
 	KeyCustomDocsHomeHTML     = "custom.docs_home_html"      // Full HTML override for docs home page
 	KeyCustomDocsCSS          = "custom.docs_css"            // Custom CSS injected into all docs pages
@@ -224,6 +240,20 @@ func Defaults() Settings {
 		KeyPortalAppName:                "APIGate",
 		KeyWebUIEnabled:                 "true", // Web UI enabled by default (backward compatible)
 		KeyWebUIBasePath:                "",     // Empty = root mount (backward compatible)
+		// Handler paths (backward compatible)
+		KeyAdminBasePath:          "/admin",
+		KeyAuthBasePath:           "/auth",
+		KeyPortalBasePath:         "/portal",
+		KeyPortalAuthBasePath:     "/api/portal/auth",
+		KeyDocsBasePath:           "/docs",
+		KeyModuleBasePath:         "/mod",
+		KeyPaymentWebhookBasePath: "/payment-webhooks",
+		KeyMeterBasePath:          "/api/v1/meter",
+		// Optional handlers (enabled by default)
+		KeyDocsEnabled:            "true",
+		KeyModuleEnabled:          "true",
+		KeyPaymentWebhookEnabled:  "true",
+		KeyMeterEnabled:           "true",
 		KeyAuthRequireEmailVerification: "false",
 		KeyEmailProvider:       "none",
 		KeyPaymentProvider:     "none",

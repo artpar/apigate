@@ -495,7 +495,8 @@ func (a *App) initHTTPServer() error {
 			return fmt.Errorf("create portal handler: %w", err)
 		}
 		portalRouter = portalHandler.Router()
-		a.Logger.Info().Msg("user portal enabled at /portal")
+		portalPath := s.GetOrDefault(settings.KeyPortalBasePath, "/portal")
+		a.Logger.Info().Str("path", portalPath).Msg("user portal enabled")
 	}
 
 	// Register payment provider with capability container
@@ -538,7 +539,8 @@ func (a *App) initHTTPServer() error {
 		AppName:        s.GetOrDefault(settings.KeyPortalAppName, "APIGate"),
 	})
 	docsRouter := docsHandler.Router()
-	a.Logger.Info().Msg("developer documentation portal enabled at /docs")
+	docsPath := s.GetOrDefault(settings.KeyDocsBasePath, "/docs")
+	a.Logger.Info().Str("path", docsPath).Msg("developer documentation portal enabled")
 
 	// Create router
 	// Create pointer for WebUIEnabled to distinguish between "not set" and "explicitly false"
@@ -557,22 +559,38 @@ func (a *App) initHTTPServer() error {
 		PaymentWebhookHandler: paymentWebhookHandler,
 		MeterHandler:          adminHandler.MeterRouter(),
 		RouteService:          a.routeService, // Enable priority-based routing
+
+		// Configurable handler paths (with backward-compatible defaults)
+		AdminBasePath:          s.GetOrDefault(settings.KeyAdminBasePath, "/admin"),
+		AuthBasePath:           s.GetOrDefault(settings.KeyAuthBasePath, "/auth"),
+		PortalBasePath:         s.GetOrDefault(settings.KeyPortalBasePath, "/portal"),
+		PortalAuthBasePath:     s.GetOrDefault(settings.KeyPortalAuthBasePath, "/api/portal/auth"),
+		DocsBasePath:           s.GetOrDefault(settings.KeyDocsBasePath, "/docs"),
+		ModuleBasePath:         s.GetOrDefault(settings.KeyModuleBasePath, "/mod"),
+		PaymentWebhookBasePath: s.GetOrDefault(settings.KeyPaymentWebhookBasePath, "/payment-webhooks"),
+		MeterBasePath:          s.GetOrDefault(settings.KeyMeterBasePath, "/api/v1/meter"),
+
+		// Handler enable/disable flags (default to true for backward compatibility)
+		DocsEnabled:            s.GetBool(settings.KeyDocsEnabled),
+		ModuleEnabled:          s.GetBool(settings.KeyModuleEnabled),
+		PaymentWebhookEnabled:  s.GetBool(settings.KeyPaymentWebhookEnabled),
+		MeterEnabled:           s.GetBool(settings.KeyMeterEnabled),
 	}
 
 	// Add portal auth handler for SPA frontends (if module runtime is initialized)
 	if a.ModuleRuntime != nil {
 		routerCfg.PortalAuthHandler = a.ModuleRuntime.AuthHandler()
-		a.Logger.Info().Msg("portal JSON API auth endpoints enabled at /api/portal/auth")
+		a.Logger.Info().Str("path", routerCfg.PortalAuthBasePath).Msg("portal JSON API auth endpoints enabled")
 	}
-	a.Logger.Info().Msg("payment webhook endpoints enabled at /payment-webhooks/{stripe,paddle,lemonsqueezy}")
+	a.Logger.Info().Str("path", routerCfg.PaymentWebhookBasePath).Msg("payment webhook endpoints enabled")
 	if adminHandler.MeterRouter() != nil {
-		a.Logger.Info().Msg("metering API enabled at /api/v1/meter")
+		a.Logger.Info().Str("path", routerCfg.MeterBasePath).Msg("metering API enabled")
 	}
 
 	// Add module handler if runtime is initialized
 	if a.ModuleRuntime != nil {
 		routerCfg.ModuleHandler = a.ModuleRuntime.Handler()
-		a.Logger.Info().Msg("module handler mounted at /mod")
+		a.Logger.Info().Str("path", routerCfg.ModuleBasePath).Msg("module handler mounted")
 
 		// Add metrics handler from exporter
 		if metricsHandler := a.ModuleRuntime.MetricsHandler(); metricsHandler != nil {

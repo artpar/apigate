@@ -565,6 +565,41 @@ type RouterConfig struct {
 	PaymentWebhookHandler http.Handler  // Optional payment webhook handler for Stripe/Paddle/LemonSqueezy
 	MeterHandler          http.Handler  // Optional metering API handler (mounted at /api/v1/meter)
 	RouteService          interface{}   // Optional route service for priority-based routing (uses reflection to avoid circular dependency)
+
+	// Configurable handler paths (backward compatible defaults if empty)
+	AdminBasePath          string // Default: /admin
+	AuthBasePath           string // Default: /auth
+	PortalBasePath         string // Default: /portal
+	PortalAuthBasePath     string // Default: /api/portal/auth
+	DocsBasePath           string // Default: /docs
+	ModuleBasePath         string // Default: /mod
+	PaymentWebhookBasePath string // Default: /payment-webhooks
+	MeterBasePath          string // Default: /api/v1/meter
+
+	// Handler enable/disable flags
+	DocsEnabled            bool // Default: true (if DocsHandler provided)
+	ModuleEnabled          bool // Default: true (if ModuleHandler provided)
+	PaymentWebhookEnabled  bool // Default: true (if PaymentWebhookHandler provided)
+	MeterEnabled           bool // Default: true (if MeterHandler provided)
+}
+
+// normalizeBasePath ensures base path starts with / and doesn't end with /.
+// Returns empty string if path is empty, "/", or invalid.
+func normalizeBasePath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" || path == "/" {
+		return ""
+	}
+
+	// Ensure starts with /
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+
+	// Remove trailing /
+	path = strings.TrimSuffix(path, "/")
+
+	return path
 }
 
 // NewRouter creates the main HTTP router.
@@ -624,49 +659,95 @@ func NewRouterWithConfig(proxyHandler *ProxyHandler, healthHandler *HealthHandle
 	// Version endpoint
 	r.Get("/version", Version)
 
-	// Admin API (if enabled)
+	// Admin API (always enabled if provided)
 	if cfg.AdminHandler != nil {
-		r.Mount("/admin", cfg.AdminHandler)
+		adminPath := normalizeBasePath(cfg.AdminBasePath)
+		if adminPath == "" {
+			adminPath = "/admin"
+		}
+		logger.Debug().Str("path", adminPath).Msg("mounting admin handler")
+		r.Mount(adminPath, cfg.AdminHandler)
 	}
 
-	// Auth API alias (if enabled) - maps /auth/* to admin auth endpoints
+	// Auth API alias (always enabled if provided) - maps to admin auth endpoints
 	if cfg.AuthHandler != nil {
-		r.Mount("/auth", cfg.AuthHandler)
+		authPath := normalizeBasePath(cfg.AuthBasePath)
+		if authPath == "" {
+			authPath = "/auth"
+		}
+		logger.Debug().Str("path", authPath).Msg("mounting auth handler")
+		r.Mount(authPath, cfg.AuthHandler)
 	}
 
-	// User portal (if enabled)
+	// User portal (always enabled if provided)
 	if cfg.PortalHandler != nil {
-		r.Mount("/portal", cfg.PortalHandler)
+		portalPath := normalizeBasePath(cfg.PortalBasePath)
+		if portalPath == "" {
+			portalPath = "/portal"
+		}
+		logger.Debug().Str("path", portalPath).Msg("mounting portal handler")
+		r.Mount(portalPath, cfg.PortalHandler)
 	}
 
 	// Portal JSON API auth endpoints (for SPA frontends)
-	// Enables login/register/logout/me at /api/portal/auth/* without API key
+	// Enables login/register/logout/me without API key
 	if cfg.PortalAuthHandler != nil {
-		r.Mount("/api/portal/auth", cfg.PortalAuthHandler)
+		portalAuthPath := normalizeBasePath(cfg.PortalAuthBasePath)
+		if portalAuthPath == "" {
+			portalAuthPath = "/api/portal/auth"
+		}
+		logger.Debug().Str("path", portalAuthPath).Msg("mounting portal auth handler")
+		r.Mount(portalAuthPath, cfg.PortalAuthHandler)
 	}
 
-	// Developer documentation portal (if enabled)
-	if cfg.DocsHandler != nil {
-		r.Mount("/docs", cfg.DocsHandler)
+	// Developer documentation portal (optional)
+	if cfg.DocsHandler != nil && cfg.DocsEnabled {
+		docsPath := normalizeBasePath(cfg.DocsBasePath)
+		if docsPath == "" {
+			docsPath = "/docs"
+		}
+		logger.Debug().Str("path", docsPath).Msg("mounting docs handler")
+		r.Mount(docsPath, cfg.DocsHandler)
+	} else if cfg.DocsHandler != nil && !cfg.DocsEnabled {
+		logger.Debug().Msg("docs handler disabled via configuration")
 	}
 
-	// Module API (declarative modules, if enabled)
-	// Mounted at root since modules define their own base paths (e.g., /api/users)
-	if cfg.ModuleHandler != nil {
-		r.Mount("/mod", cfg.ModuleHandler)
+	// Module API (declarative modules, optional)
+	if cfg.ModuleHandler != nil && cfg.ModuleEnabled {
+		modulePath := normalizeBasePath(cfg.ModuleBasePath)
+		if modulePath == "" {
+			modulePath = "/mod"
+		}
+		logger.Debug().Str("path", modulePath).Msg("mounting module handler")
+		r.Mount(modulePath, cfg.ModuleHandler)
+	} else if cfg.ModuleHandler != nil && !cfg.ModuleEnabled {
+		logger.Debug().Msg("module handler disabled via configuration")
 	}
 
-	// Payment provider webhooks (Stripe, Paddle, LemonSqueezy)
+	// Payment provider webhooks (Stripe, Paddle, LemonSqueezy, optional)
 	// These endpoints receive POST requests from payment providers
 	// They are NOT authenticated - signature verification happens inside the handler
-	if cfg.PaymentWebhookHandler != nil {
-		r.Mount("/payment-webhooks", cfg.PaymentWebhookHandler)
+	if cfg.PaymentWebhookHandler != nil && cfg.PaymentWebhookEnabled {
+		webhookPath := normalizeBasePath(cfg.PaymentWebhookBasePath)
+		if webhookPath == "" {
+			webhookPath = "/payment-webhooks"
+		}
+		logger.Debug().Str("path", webhookPath).Msg("mounting payment webhook handler")
+		r.Mount(webhookPath, cfg.PaymentWebhookHandler)
+	} else if cfg.PaymentWebhookHandler != nil && !cfg.PaymentWebhookEnabled {
+		logger.Debug().Msg("payment webhook handler disabled via configuration")
 	}
 
-	// Metering API (for external usage event submission)
-	// Mounted at /api/v1/meter for service account access
-	if cfg.MeterHandler != nil {
-		r.Mount("/api/v1/meter", cfg.MeterHandler)
+	// Metering API (for external usage event submission, optional)
+	if cfg.MeterHandler != nil && cfg.MeterEnabled {
+		meterPath := normalizeBasePath(cfg.MeterBasePath)
+		if meterPath == "" {
+			meterPath = "/api/v1/meter"
+		}
+		logger.Debug().Str("path", meterPath).Msg("mounting meter handler")
+		r.Mount(meterPath, cfg.MeterHandler)
+	} else if cfg.MeterHandler != nil && !cfg.MeterEnabled {
+		logger.Debug().Msg("meter handler disabled via configuration")
 	}
 
 	// Web UI (if enabled) - pass through specific paths to the web handler

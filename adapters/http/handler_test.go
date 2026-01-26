@@ -789,6 +789,7 @@ func TestNewRouterWithConfig_DocsHandler(t *testing.T) {
 
 	cfg := apihttp.RouterConfig{
 		DocsHandler: docsHandler,
+		DocsEnabled: true, // Must be explicitly enabled for tests
 	}
 	router := apihttp.NewRouterWithConfig(handler, healthHandler, logger, cfg)
 
@@ -814,6 +815,7 @@ func TestNewRouterWithConfig_ModuleHandler(t *testing.T) {
 
 	cfg := apihttp.RouterConfig{
 		ModuleHandler: moduleHandler,
+		ModuleEnabled: true, // Must be explicitly enabled for tests
 	}
 	router := apihttp.NewRouterWithConfig(handler, healthHandler, logger, cfg)
 
@@ -1414,6 +1416,89 @@ func TestProxyHandlerWithMetrics_SuccessfulRequest(t *testing.T) {
 	if rec.Result().StatusCode != 200 {
 		body, _ := io.ReadAll(rec.Result().Body)
 		t.Errorf("status = %d, want 200, body: %s", rec.Result().StatusCode, body)
+	}
+}
+
+// TestConfigurableHandlerPaths tests that handlers can be mounted at custom paths.
+func TestConfigurableHandlerPaths(t *testing.T) {
+	tests := []struct {
+		name       string
+		config     apihttp.RouterConfig
+		wantPaths  []string // Paths that should exist
+		wantStatus int      // Expected status for test requests
+	}{
+		{
+			name: "default paths",
+			config: apihttp.RouterConfig{
+				AdminHandler:  http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }),
+				AuthHandler:   http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }),
+				PortalHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }),
+			},
+			wantPaths:  []string{"/admin/test", "/auth/login", "/portal/dashboard"},
+			wantStatus: 200,
+		},
+		{
+			name: "custom paths",
+			config: apihttp.RouterConfig{
+				AdminHandler:   http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }),
+				AuthHandler:    http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }),
+				PortalHandler:  http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }),
+				AdminBasePath:  "/custom-admin",
+				AuthBasePath:   "/custom-auth",
+				PortalBasePath: "/custom-portal",
+			},
+			wantPaths:  []string{"/custom-admin/test", "/custom-auth/login", "/custom-portal/dashboard"},
+			wantStatus: 200,
+		},
+		{
+			name: "docs disabled",
+			config: apihttp.RouterConfig{
+				DocsHandler:  http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }),
+				DocsEnabled:  false,
+				DocsBasePath: "/docs",
+			},
+			wantPaths:  []string{},
+			wantStatus: 404, // Should 404 since docs is disabled
+		},
+		{
+			name: "docs enabled at custom path",
+			config: apihttp.RouterConfig{
+				DocsHandler:  http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }),
+				DocsEnabled:  true,
+				DocsBasePath: "/api-docs",
+			},
+			wantPaths:  []string{"/api-docs/test"},
+			wantStatus: 200,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			proxyHandler, _ := setupTestHandler()
+			healthHandler := &apihttp.HealthHandler{}
+			router := apihttp.NewRouterWithConfig(proxyHandler, healthHandler, zerolog.Nop(), tt.config)
+
+			for _, path := range tt.wantPaths {
+				req := httptest.NewRequest("GET", path, nil)
+				rec := httptest.NewRecorder()
+				router.ServeHTTP(rec, req)
+
+				if rec.Result().StatusCode != tt.wantStatus {
+					t.Errorf("path %s: status = %d, want %d", path, rec.Result().StatusCode, tt.wantStatus)
+				}
+			}
+
+			// Test docs disabled scenario
+			if tt.name == "docs disabled" {
+				req := httptest.NewRequest("GET", "/docs/test", nil)
+				rec := httptest.NewRecorder()
+				router.ServeHTTP(rec, req)
+
+				if rec.Result().StatusCode == 200 {
+					t.Error("docs should be inaccessible when disabled")
+				}
+			}
+		})
 	}
 }
 

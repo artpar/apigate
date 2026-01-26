@@ -1421,6 +1421,20 @@ func (h *Handler) SettingsPage(w http.ResponseWriter, r *http.Request) {
 			CustomFooterHTML       string
 			CustomDocsHeroTitle    string
 			CustomDocsHeroSubtitle string
+			// Handler route paths
+			AdminBasePath          string
+			AuthBasePath           string
+			PortalBasePath         string
+			PortalAuthBasePath     string
+			DocsBasePath           string
+			ModuleBasePath         string
+			PaymentWebhookBasePath string
+			MeterBasePath          string
+			// Handler enable/disable
+			DocsEnabled            bool
+			ModuleEnabled          bool
+			PaymentWebhookEnabled  bool
+			MeterEnabled           bool
 		}
 		Success string
 		Error   string
@@ -1473,6 +1487,22 @@ func (h *Handler) SettingsPage(w http.ResponseWriter, r *http.Request) {
 	data.Settings.CustomFooterHTML = allSettings.Get(settings.KeyCustomFooterHTML)
 	data.Settings.CustomDocsHeroTitle = allSettings.Get(settings.KeyCustomDocsHeroTitle)
 	data.Settings.CustomDocsHeroSubtitle = allSettings.Get(settings.KeyCustomDocsHeroSubtitle)
+
+	// Handler route path settings
+	data.Settings.AdminBasePath = allSettings.GetOrDefault(settings.KeyAdminBasePath, "/admin")
+	data.Settings.AuthBasePath = allSettings.GetOrDefault(settings.KeyAuthBasePath, "/auth")
+	data.Settings.PortalBasePath = allSettings.GetOrDefault(settings.KeyPortalBasePath, "/portal")
+	data.Settings.PortalAuthBasePath = allSettings.GetOrDefault(settings.KeyPortalAuthBasePath, "/api/portal/auth")
+	data.Settings.DocsBasePath = allSettings.GetOrDefault(settings.KeyDocsBasePath, "/docs")
+	data.Settings.ModuleBasePath = allSettings.GetOrDefault(settings.KeyModuleBasePath, "/mod")
+	data.Settings.PaymentWebhookBasePath = allSettings.GetOrDefault(settings.KeyPaymentWebhookBasePath, "/payment-webhooks")
+	data.Settings.MeterBasePath = allSettings.GetOrDefault(settings.KeyMeterBasePath, "/api/v1/meter")
+
+	// Handler enable/disable settings
+	data.Settings.DocsEnabled = allSettings.GetBool(settings.KeyDocsEnabled)
+	data.Settings.ModuleEnabled = allSettings.GetBool(settings.KeyModuleEnabled)
+	data.Settings.PaymentWebhookEnabled = allSettings.GetBool(settings.KeyPaymentWebhookEnabled)
+	data.Settings.MeterEnabled = allSettings.GetBool(settings.KeyMeterEnabled)
 
 	// Check for success/error messages in query params
 	data.Success = r.URL.Query().Get("success")
@@ -1583,6 +1613,27 @@ func (h *Handler) SettingsUpdate(w http.ResponseWriter, r *http.Request) {
 	for key, value := range customizationSettings {
 		settingsToSave[key] = value
 	}
+
+	// Handler route path settings
+	routeSettings := map[string]string{
+		settings.KeyAdminBasePath:          strings.TrimSpace(r.FormValue("routes_admin_base_path")),
+		settings.KeyAuthBasePath:           strings.TrimSpace(r.FormValue("routes_auth_base_path")),
+		settings.KeyPortalBasePath:         strings.TrimSpace(r.FormValue("routes_portal_base_path")),
+		settings.KeyPortalAuthBasePath:     strings.TrimSpace(r.FormValue("routes_portal_auth_base_path")),
+		settings.KeyDocsBasePath:           strings.TrimSpace(r.FormValue("routes_docs_base_path")),
+		settings.KeyModuleBasePath:         strings.TrimSpace(r.FormValue("routes_module_base_path")),
+		settings.KeyPaymentWebhookBasePath: strings.TrimSpace(r.FormValue("routes_payment_webhook_base_path")),
+		settings.KeyMeterBasePath:          strings.TrimSpace(r.FormValue("routes_meter_base_path")),
+	}
+	for key, value := range routeSettings {
+		settingsToSave[key] = value
+	}
+
+	// Handler enable/disable settings
+	settingsToSave[settings.KeyDocsEnabled] = boolToString(r.FormValue("routes_docs_enabled") == "on")
+	settingsToSave[settings.KeyModuleEnabled] = boolToString(r.FormValue("routes_module_enabled") == "on")
+	settingsToSave[settings.KeyPaymentWebhookEnabled] = boolToString(r.FormValue("routes_payment_webhook_enabled") == "on")
+	settingsToSave[settings.KeyMeterEnabled] = boolToString(r.FormValue("routes_meter_enabled") == "on")
 
 	for key, value := range settingsToSave {
 		encrypted := settings.IsSensitive(key)
