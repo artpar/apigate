@@ -30,6 +30,42 @@ const (
 	letsEncryptStaging = "https://acme-staging-v02.api.letsencrypt.org/directory"
 )
 
+// loggingRoundTripper wraps an http.RoundTripper to log ACME requests/responses.
+type loggingRoundTripper struct {
+	wrapped http.RoundTripper
+	logger  *slog.Logger
+}
+
+func (l *loggingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	start := time.Now()
+	l.logger.Info("[ACME:HTTP:REQ]",
+		"method", req.Method,
+		"url", req.URL.String(),
+		"content_type", req.Header.Get("Content-Type"))
+
+	resp, err := l.wrapped.RoundTrip(req)
+	duration := time.Since(start)
+
+	if err != nil {
+		l.logger.Error("[ACME:HTTP:ERR]",
+			"method", req.Method,
+			"url", req.URL.String(),
+			"duration", duration,
+			"error", err)
+		return nil, err
+	}
+
+	l.logger.Info("[ACME:HTTP:RESP]",
+		"method", req.Method,
+		"url", req.URL.String(),
+		"status", resp.StatusCode,
+		"duration", duration,
+		"content_type", resp.Header.Get("Content-Type"),
+		"retry_after", resp.Header.Get("Retry-After"))
+
+	return resp, nil
+}
+
 // ACMEProvider implements TLS certificate provisioning via ACME (Let's Encrypt).
 type ACMEProvider struct {
 	certStore   ports.CertificateStore
@@ -44,6 +80,10 @@ type ACMEProvider struct {
 	domains      []string
 	acmeClient   *acme.Client
 	accountKey   crypto.Signer
+
+	// Challenge tokens for HTTP-01 (used by direct ACME flow)
+	challengeMu     sync.RWMutex
+	challengeTokens map[string]string // token -> key authorization
 }
 
 // ACMEConfig holds configuration for ACME provider.
@@ -111,9 +151,9 @@ func NewACMEProvider(certStore ports.CertificateStore, cfg ACMEConfig) (*ACMEPro
 		Timeout:   10 * time.Second,
 		KeepAlive: 30 * time.Second,
 	}
-	acmeHTTPClient := &http.Client{
-		Timeout: 60 * time.Second,
-		Transport: &http.Transport{
+	// Create a logging round tripper to see ACME request/response
+	loggingTransport := &loggingRoundTripper{
+		wrapped: &http.Transport{
 			// Force IPv4 by using custom dial function with "tcp4" network
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 				logger.Debug("[ACME:HTTP] Dialing", "network", "tcp4", "addr", addr)
@@ -132,18 +172,24 @@ func NewACMEProvider(certStore ports.CertificateStore, cfg ACMEConfig) (*ACMEPro
 			MaxIdleConns:          10,
 			IdleConnTimeout:       90 * time.Second,
 		},
+		logger: logger,
+	}
+	acmeHTTPClient := &http.Client{
+		Timeout:   60 * time.Second,
+		Transport: loggingTransport,
 	}
 	logger.Info("[ACME:INIT] HTTP client created")
 
 	provider := &ACMEProvider{
-		certStore:   certStore,
-		cache:       cache,
-		email:       cfg.Email,
-		staging:     cfg.Staging,
-		renewalDays: renewalDays,
-		domains:     cfg.Domains,
-		accountKey:  accountKey,
-		logger:      logger,
+		certStore:       certStore,
+		cache:           cache,
+		email:           cfg.Email,
+		staging:         cfg.Staging,
+		renewalDays:     renewalDays,
+		domains:         cfg.Domains,
+		accountKey:      accountKey,
+		logger:          logger,
+		challengeTokens: make(map[string]string),
 		acmeClient: &acme.Client{
 			DirectoryURL: directoryURL,
 			Key:          accountKey,
