@@ -1080,9 +1080,30 @@ func isReservedPath(path string, cfg RouterConfig) bool {
 		}
 	}
 
-	// Note: Web UI at root (/, /login, etc.) is NOT reserved.
-	// It can be overridden by custom routes with higher priority.
-	// This allows users to deploy their own frontend while still accessing /admin.
+	// Admin Web UI management pages (when mounted at root)
+	// These are admin-specific pages that should not be overridden by catch-all routes
+	webUIEnabled := cfg.WebUIEnabled == nil || *cfg.WebUIEnabled
+	if cfg.WebHandler != nil && webUIEnabled && cfg.WebUIBasePath == "" {
+		adminPages := []string{
+			"/dashboard", "/users", "/keys", "/plans", "/usage", "/settings",
+			"/payments", "/email", "/webhooks", "/system",
+			"/invites", "/entitlements", "/routes", "/upstreams",
+			"/setup", // Initial setup wizard
+		}
+		for _, page := range adminPages {
+			if path == page || strings.HasPrefix(path, page+"/") {
+				return true
+			}
+		}
+		// UI helper API endpoints
+		if strings.HasPrefix(path, "/api/expr/") || strings.HasPrefix(path, "/api/routes/") {
+			return true
+		}
+	}
+
+	// Note: Generic Web UI paths (/, /login, /terms, /privacy) are NOT reserved.
+	// They can be overridden by custom routes with higher priority.
+	// This allows users to deploy their own frontend while still accessing admin pages.
 
 	return false
 }
