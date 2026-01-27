@@ -310,38 +310,52 @@ All implementations MUST be tested for:
 
 ## Implementation Notes
 
-### File Location
+### File Locations
 
-Implementation: `core/channel/http/auth.go`
+APIGate has **two authentication handlers** serving different purposes:
+
+1. **Admin Handler** (`adapters/http/admin/admin.go`)
+   - **Routes**: `/auth/*` and `/admin/*`
+   - **Purpose**: Admin API for user/plan management
+   - **Storage**: In-memory SessionStore
+   - **Tests**: `adapters/http/admin/auth_cookie_test.go`
+
+2. **Module Runtime Handler** (`core/channel/http/auth.go`)
+   - **Routes**: `/api/portal/auth/*`
+   - **Purpose**: Module-based authentication system
+   - **Storage**: Database via module runtime
+   - **Tests**: `core/channel/http/auth_cookie_attributes_test.go`
+
+Both handlers implement **identical cookie behavior** as specified in this document.
 
 ### Key Functions
 
 ```go
 // setSessionCookie sets the session cookie with protocol-aware Secure flag
-func (h *AuthHandler) setSessionCookie(w http.ResponseWriter, r *http.Request, session Session)
+func (h *Handler) setSessionCookie(w http.ResponseWriter, r *http.Request, userID, email, name string)
 ```
 
-**Protocol Detection**:
+**Protocol Detection** (identical in both handlers):
 ```go
 isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
 ```
 
 ### Testing
 
-Tests: `core/channel/http/auth_secure_cookie_test.go`
-
-Required test coverage:
-- HTTP request → `Secure=false`
-- HTTPS request → `Secure=true`
-- Proxied HTTPS → `Secure=true`
-- All cookie attributes validated
-- Cookie expiration validated
+**Required test coverage** (BOTH handlers MUST have these tests):
+- ✅ HTTP request → `Secure=false`
+- ✅ HTTPS request (direct) → `Secure=true` via `r.TLS != nil`
+- ✅ HTTPS request (proxied) → `Secure=true` via `X-Forwarded-Proto: https`
+- ✅ All 7 cookie attributes validated (Name, Value, Path, HttpOnly, SameSite, Secure, Expires)
+- ✅ Cookie expiration validated (7 days)
+- ✅ Cookie value encoding validated (Base64 JSON)
+- ✅ Logout cookie clearing validated (MaxAge=-1)
 
 ---
 
 ## Historical Issues
 
-### Issue #54: Cookies Not Set on HTTPS
+### Issue #54: Cookies Not Set on HTTPS (Module Runtime Handler)
 
 **Problem**: Session cookies were being set by the server but rejected by browsers on HTTPS deployments.
 
@@ -349,7 +363,43 @@ Required test coverage:
 
 **Fix**: Implemented dynamic `Secure` flag based on protocol detection (commit `aa1ffe4`).
 
+**Handler**: `core/channel/http/auth.go` (module runtime handler, `/api/portal/auth/*`)
+
 **Lesson**: Cookie behavior differs significantly between HTTP and HTTPS. Always test authentication in production-like environments (HTTPS).
+
+### Issue #55: Cookies Not Set on HTTPS (Admin Handler)
+
+**Problem**: Session cookies not being set on HTTPS for admin authentication endpoints.
+
+**Root Cause**: v0.2.4 fixed the module runtime handler but production uses the admin handler (`adapters/http/admin/admin.go`) for `/auth/*` endpoints. The admin handler lacked session cookie support entirely.
+
+**Multiple Failures**:
+1. **v0.2.4 Release**: Fixed wrong handler (module runtime instead of admin)
+2. **Commit dcf3538**: Added cookie support to admin handler but with **zero tests**
+3. **Coverage Illusion**: 74.8% coverage but 0% cookie attribute validation
+
+**Fix**:
+- Commit `dcf3538`: Added `setSessionCookie()` to admin handler
+- Comprehensive testing: 11 tests validating all 7 cookie attributes across all protocols
+- Coverage improved: 74.8% → 76.1% with actual behavior validation
+
+**Handler**: `adapters/http/admin/admin.go` (admin handler, `/auth/*`)
+
+**Lessons Learned**:
+1. **Line coverage ≠ behavior validation**: A function with 100% line coverage can have 0% security attribute validation
+2. **Test critical attributes explicitly**: For security features (cookies, headers, permissions), test **actual values**, not just execution paths
+3. **Protocol-specific testing required**: Test HTTP, HTTPS (direct), and HTTPS (proxied) separately
+4. **Architecture understanding**: Map request routing before fixing bugs to ensure you're modifying the correct handler
+5. **No release without verification**: Even with tests, verify on production-like HTTPS environment before releasing
+
+**Testing Improvements**:
+- Added `auth_cookie_test.go` with 11 comprehensive tests
+- Each test validates all 7 cookie attributes (not just presence)
+- Tests cover register, login (password + API key), logout
+- Both HTTP and HTTPS protocol scenarios tested
+- Proxy header detection (`X-Forwarded-Proto`) verified
+
+**Prevention**: See CLAUDE.md section "Security-Critical Attributes Testing" for testing requirements to prevent similar issues.
 
 ---
 

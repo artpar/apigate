@@ -157,6 +157,86 @@ func TestNewProvider(t *testing.T) {
 
 **Pre-commit hook enforces locally. CI is the final gate.**
 
+### 4. Security-Critical Attributes Testing (MANDATORY)
+
+**Lesson Learned from Issue #55 (Session Cookies):**
+
+Coverage metrics can be misleading. A function with 100% line coverage may still have 0% behavior validation.
+
+**CRITICAL**: For security-critical features (auth, cookies, headers, permissions), you MUST test **actual attribute values**, not just execution paths.
+
+#### Example: Cookie Testing (CORRECT)
+
+```go
+// BAD: This has 100% coverage but validates NOTHING
+func TestSetsCookie(t *testing.T) {
+    handler.Register(w, r)
+    if w.Code != 201 { t.Fatal("bad status") }
+    // ❌ Cookie could be missing, insecure, wrong attributes
+}
+
+// GOOD: This validates ALL 7 critical attributes
+func TestSetsCookie_HTTPS(t *testing.T) {
+    r.TLS = &tls.ConnectionState{} // Simulate HTTPS
+    handler.Register(w, r)
+
+    cookie := findCookie(w.Result().Cookies(), "session")
+    assert.Equal(t, "session", cookie.Name)       // ✅ Name
+    assert.NotEmpty(t, cookie.Value)              // ✅ Value
+    assert.Equal(t, "/", cookie.Path)             // ✅ Path
+    assert.True(t, cookie.HttpOnly)               // ✅ HttpOnly
+    assert.Equal(t, http.SameSiteLaxMode, cookie.SameSite) // ✅ SameSite
+    assert.True(t, cookie.Secure)                 // ✅ Secure (CRITICAL for HTTPS)
+    assert.False(t, cookie.Expires.IsZero())      // ✅ Expires
+}
+```
+
+#### Required Test Coverage for Security Features
+
+| Feature | Must Test | Example |
+|---------|-----------|---------|
+| **Cookies** | All 7 attributes (Name, Value, Path, HttpOnly, SameSite, Secure, Expires) | `auth_cookie_test.go` |
+| **CORS Headers** | All 5 headers (Origin, Methods, Headers, Credentials, Max-Age) | `cors_test.go` |
+| **Auth Headers** | Authorization format, Bearer token, API key formats | `auth_middleware_test.go` |
+| **Rate Limiting** | Actual limit enforcement, reset behavior, headers | `ratelimit_test.go` |
+| **TLS/HTTPS** | Certificate validation, protocol version, cipher suites | `tls_test.go` |
+
+#### Protocol-Specific Testing (MANDATORY)
+
+For features that behave differently on HTTP vs HTTPS (like cookies), you MUST test **both protocols**:
+
+```go
+func TestFeature_HTTP(t *testing.T) {
+    // r.TLS = nil (implicit)
+    // Verify HTTP-specific behavior
+}
+
+func TestFeature_HTTPS(t *testing.T) {
+    r.TLS = &tls.ConnectionState{}
+    // Verify HTTPS-specific behavior
+}
+
+func TestFeature_ProxiedHTTPS(t *testing.T) {
+    r.Header.Set("X-Forwarded-Proto", "https")
+    // Verify reverse proxy HTTPS detection
+}
+```
+
+**Why This Matters:**
+
+- Issue #55: Cookie `Secure` flag not set on HTTPS
+- Root cause: Tests checked response status, NOT cookie attributes
+- Result: Bug reached production despite 74.8% coverage
+- Solution: 11 comprehensive cookie tests validating all 7 attributes
+
+**Testing Checklist for Auth/Security Features:**
+
+- [ ] Test all protocol scenarios (HTTP, HTTPS, proxied)
+- [ ] Validate ALL critical attribute values
+- [ ] Don't rely on line coverage alone
+- [ ] Add tests for edge cases (expired, revoked, missing)
+- [ ] Verify security flags (Secure, HttpOnly, SameSite)
+
 ---
 
 ## Before Making Changes
