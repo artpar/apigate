@@ -4,6 +4,7 @@ package admin
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -25,6 +26,9 @@ const (
 	TypeKey     = "api_keys"
 	TypeSession = "sessions"
 )
+
+// SessionCookie is the name of the session cookie.
+const SessionCookie = "apigate_session"
 
 // Handler provides admin API endpoints.
 type Handler struct {
@@ -289,12 +293,14 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 			// For API key auth without email, create a session for "admin"
 			session := h.sessions.Create("admin", "admin@apigate", 24*time.Hour)
 			token := h.generateTokenIfAvailable("admin", "admin@apigate")
+			h.setSessionCookie(w, r, "admin", "admin@apigate", "Admin")
 			jsonapi.WriteResource(w, http.StatusOK, sessionToResource(session, "admin", "admin@apigate", token))
 			return
 		}
 
 		session := h.sessions.Create(user.ID, user.Email, 24*time.Hour)
 		token := h.generateTokenIfAvailable(user.ID, user.Email)
+		h.setSessionCookie(w, r, user.ID, user.Email, user.Name)
 		jsonapi.WriteResource(w, http.StatusOK, sessionToResource(session, user.ID, user.Email, token))
 		return
 	}
@@ -338,6 +344,10 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	// Create session and generate JWT token
 	session := h.sessions.Create(user.ID, user.Email, 24*time.Hour)
 	token := h.generateTokenIfAvailable(user.ID, user.Email)
+
+	// Set session cookie
+	h.setSessionCookie(w, r, user.ID, user.Email, user.Name)
+
 	jsonapi.WriteResource(w, http.StatusOK, sessionToResource(session, user.ID, user.Email, token))
 }
 
@@ -351,6 +361,38 @@ func (h *Handler) generateTokenIfAvailable(userID, email string) string {
 		return ""
 	}
 	return token
+}
+
+// setSessionCookie sets the session cookie with protocol-aware Secure flag.
+func (h *Handler) setSessionCookie(w http.ResponseWriter, r *http.Request, userID, email, name string) {
+	// Create session object for cookie
+	session := struct {
+		UserID    string    `json:"user_id"`
+		Email     string    `json:"email"`
+		Name      string    `json:"name"`
+		ExpiresAt time.Time `json:"expires_at"`
+	}{
+		UserID:    userID,
+		Email:     email,
+		Name:      name,
+		ExpiresAt: time.Now().Add(24 * time.Hour * 7), // 7 days
+	}
+
+	data, _ := json.Marshal(session)
+	encoded := base64.StdEncoding.EncodeToString(data)
+
+	// Detect if request is over HTTPS
+	isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     SessionCookie,
+		Value:    encoded,
+		Path:     "/",
+		Expires:  session.ExpiresAt,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   isSecure,
+	})
 }
 
 func (h *Handler) authenticateByAPIKey(ctx context.Context, apiKey string) error {
@@ -390,6 +432,17 @@ func (h *Handler) authenticateByAPIKey(ctx context.Context, apiKey string) error
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.Context().Value(ctxSessionKey).(string)
 	h.sessions.Delete(sessionID)
+
+	// Clear session cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     SessionCookie,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1, // Delete cookie
+	})
+
 	jsonapi.WriteMeta(w, http.StatusOK, jsonapi.Meta{"status": "logged_out"})
 }
 
@@ -492,6 +545,9 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 
 	// Generate JWT token for immediate login
 	token := h.generateTokenIfAvailable(user.ID, user.Email)
+
+	// Set session cookie
+	h.setSessionCookie(w, r, user.ID, user.Email, user.Name)
 
 	// Return user with token
 	rb := jsonapi.NewResource(TypeUser, user.ID).
