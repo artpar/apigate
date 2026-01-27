@@ -209,6 +209,7 @@ jobs:
             "docs/spec/error-codes.md"
             "docs/spec/pagination.md"
             "docs/spec/resource-types.md"
+            "docs/spec/authentication.md"
             "docs/spec/tls-certificates.md"
             "docs/spec/metering-api.md"
           )
