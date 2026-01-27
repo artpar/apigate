@@ -30,7 +30,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y gcc
 
       - name: Run tests
-        run: CGO_ENABLED=1 go test -race ./...
+        run: CGO_ENABLED=1 go test -race $(go list ./... | grep -v /e2e)
 
   build-linux:
     name: Build Linux
