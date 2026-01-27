@@ -14,6 +14,7 @@
 | [Error Codes](error-codes.md) | All error codes and HTTP statuses | `pkg/jsonapi/errors.go` |
 | [Pagination](pagination.md) | Pagination behavior and parameters | `pkg/jsonapi/pagination.go` |
 | [Resource Types](resource-types.md) | All API resource types and attributes | `adapters/http/admin/` |
+| [Authentication](authentication.md) | Session cookies and API key authentication | `core/channel/http/auth.go` |
 | [Metering API](metering-api.md) | External usage event ingestion | `adapters/http/admin/meter.go` |
 | [TLS Certificates](tls-certificates.md) | ACME/TLS certificate management | `adapters/tls/` |
 
@@ -79,5 +80,6 @@ See [Resource Types](resource-types.md) for Settings and Certificates module end
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.2.0 | 2026-01-27 | Added authentication specification, documented cookie security requirements |
 | 1.1.0 | 2025-01-25 | Added module-generated endpoints (Settings, Certificates) |
 | 1.0.0 | 2025-01-19 | Initial JSON:API alignment |
