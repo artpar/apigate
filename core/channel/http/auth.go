@@ -141,7 +141,7 @@ func (h *AuthHandler) handleSetup(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt: time.Now().Add(24 * time.Hour * 7), // 7 days
 	}
 
-	h.setSessionCookie(w, session)
+	h.setSessionCookie(w, r, session)
 
 	authWriteJSON(w, map[string]any{
 		"success": true,
@@ -220,7 +220,7 @@ func (h *AuthHandler) handleRegister(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt: time.Now().Add(24 * time.Hour * 7), // 7 days
 	}
 
-	h.setSessionCookie(w, session)
+	h.setSessionCookie(w, r, session)
 
 	w.WriteHeader(http.StatusCreated)
 	authWriteJSON(w, map[string]any{
@@ -307,7 +307,7 @@ func (h *AuthHandler) handleLogin(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt: time.Now().Add(24 * time.Hour * 7), // 7 days
 	}
 
-	h.setSessionCookie(w, session)
+	h.setSessionCookie(w, r, session)
 
 	authWriteJSON(w, map[string]any{
 		"success": true,
@@ -364,9 +364,12 @@ func (h *AuthHandler) handleMe(w http.ResponseWriter, r *http.Request) {
 }
 
 // setSessionCookie sets the session cookie.
-func (h *AuthHandler) setSessionCookie(w http.ResponseWriter, session Session) {
+func (h *AuthHandler) setSessionCookie(w http.ResponseWriter, r *http.Request, session Session) {
 	data, _ := json.Marshal(session)
 	encoded := base64.StdEncoding.EncodeToString(data)
+
+	// Detect if request is over HTTPS
+	isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     SessionCookie,
@@ -375,7 +378,7 @@ func (h *AuthHandler) setSessionCookie(w http.ResponseWriter, session Session) {
 		Expires:  session.ExpiresAt,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   false, // Set to true in production with HTTPS
+		Secure:   isSecure,
 	})
 }
 

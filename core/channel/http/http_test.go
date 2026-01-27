@@ -873,6 +873,7 @@ func TestAuthHandler_HandleMe_NoSession(t *testing.T) {
 func TestAuthHandler_SetSessionCookie(t *testing.T) {
 	h := NewAuthHandler(nil)
 	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/test", nil)
 
 	session := Session{
 		UserID:    "user123",
@@ -881,7 +882,7 @@ func TestAuthHandler_SetSessionCookie(t *testing.T) {
 		ExpiresAt: time.Now().Add(time.Hour),
 	}
 
-	h.setSessionCookie(w, session)
+	h.setSessionCookie(w, r, session)
 
 	// Check cookie was set
 	cookies := w.Result().Cookies()
