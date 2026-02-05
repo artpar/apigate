@@ -581,10 +581,34 @@ func (h *Handler) AuthRouter() chi.Router {
 	return r
 }
 
+// sessionCookieData represents the data stored in the apigate_session cookie.
+type sessionCookieData struct {
+	UserID    string    `json:"user_id"`
+	Email     string    `json:"email"`
+	Name      string    `json:"name"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
 // AuthMiddleware validates admin authentication.
 func (h *Handler) AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Try Admin API session cookie first
+		// Try apigate_session cookie first (set by Login/Register handlers)
+		if cookie, err := r.Cookie(SessionCookie); err == nil {
+			if data, err := base64.StdEncoding.DecodeString(cookie.Value); err == nil {
+				var session sessionCookieData
+				if err := json.Unmarshal(data, &session); err == nil {
+					// Validate expiration
+					if session.ExpiresAt.After(time.Now()) && session.UserID != "" {
+						ctx := context.WithValue(r.Context(), ctxSessionKey, "cookie_session")
+						ctx = context.WithValue(ctx, ctxUserIDKey, session.UserID)
+						next.ServeHTTP(w, r.WithContext(ctx))
+						return
+					}
+				}
+			}
+		}
+
+		// Try Admin API session cookie (legacy)
 		if cookie, err := r.Cookie("session_id"); err == nil {
 			if session := h.sessions.Get(cookie.Value); session != nil {
 				ctx := context.WithValue(r.Context(), ctxSessionKey, session.ID)
