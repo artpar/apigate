@@ -1,15 +1,15 @@
 {
-  "_vendor-BEEOvD6K.js": {
-    "file": "assets/vendor-BEEOvD6K.js",
+  "_vendor-Cqz2NN3K.js": {
+    "file": "assets/vendor-Cqz2NN3K.js",
     "name": "vendor"
   },
   "index.html": {
-    "file": "assets/index-Bl_CiGth.js",
+    "file": "assets/index-Bjt9r56f.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
     "imports": [
-      "_vendor-BEEOvD6K.js"
+      "_vendor-Cqz2NN3K.js"
     ],
     "css": [
       "assets/index-Bxp4Cskl.css"
