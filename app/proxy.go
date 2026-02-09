@@ -562,10 +562,27 @@ func (s *ProxyService) handlePublicRoute(
 ) HandleResult {
 	now := s.clock.Now()
 
+	// Opportunistic auth: validate JWT if present (don't require it)
+	var auth *proxy.AuthContext
+	if req.APIKey != "" && s.tokens != nil {
+		_, isAPIKeyFormat := key.ValidateFormat(req.APIKey, s.keyPrefix)
+		if !isAPIKeyFormat {
+			if claims, err := s.tokens.ValidateToken(req.APIKey); err == nil {
+				auth = &proxy.AuthContext{
+					KeyID:  "session:" + claims.UserID,
+					UserID: claims.UserID,
+					Email:  claims.Email,
+					Role:   claims.Role,
+					PlanID: claims.PlanID,
+				}
+			}
+		}
+	}
+
 	// Apply request transform (PURE + Expr eval)
 	if matchedRoute.RequestTransform != nil && s.transformService != nil {
 		var err error
-		req, err = s.transformService.TransformRequest(ctx, req, matchedRoute.RequestTransform, nil)
+		req, err = s.transformService.TransformRequest(ctx, req, matchedRoute.RequestTransform, auth)
 		if err != nil {
 			return HandleResult{Error: &proxy.ErrorResponse{
 				Status:  500,
@@ -618,10 +635,10 @@ func (s *ProxyService) handlePublicRoute(
 
 	// Apply response transform (PURE + Expr eval)
 	if matchedRoute.ResponseTransform != nil && s.transformService != nil {
-		resp, _ = s.transformService.TransformResponse(ctx, resp, matchedRoute.ResponseTransform, nil)
+		resp, _ = s.transformService.TransformResponse(ctx, resp, matchedRoute.ResponseTransform, auth)
 	}
 
-	// Calculate cost/metering value for anonymous tracking (PURE + Expr eval)
+	// Calculate cost/metering value for tracking (PURE + Expr eval)
 	var costMult float64 = 1.0
 	if matchedRoute.MeteringExpr != "" && s.transformService != nil {
 		meteringCtx := map[string]any{
@@ -630,6 +647,10 @@ func (s *ProxyService) handlePublicRoute(
 			"requestBytes":  int64(len(req.Body)),
 			"path":          originalPath,
 			"method":        req.Method,
+		}
+		if auth != nil {
+			meteringCtx["userID"] = auth.UserID
+			meteringCtx["keyID"] = auth.KeyID
 		}
 		if len(resp.Body) > 0 {
 			var respBody any
@@ -645,12 +666,18 @@ func (s *ProxyService) handlePublicRoute(
 		costMult = plan.GetCostMultiplier(dynCfg.Endpoints, req.Method, originalPath)
 	}
 
-	// Record anonymous usage event (async I/O)
-	// Use special "anonymous" identifiers for public routes
+	// Record usage event (async I/O)
+	// Use auth context if available, otherwise anonymous
+	eventKeyID := "anonymous"
+	eventUserID := "anonymous"
+	if auth != nil {
+		eventKeyID = auth.KeyID
+		eventUserID = auth.UserID
+	}
 	event := usage.Event{
 		ID:             s.idGen.New(),
-		KeyID:          "anonymous",
-		UserID:         "anonymous",
+		KeyID:          eventKeyID,
+		UserID:         eventUserID,
 		Method:         req.Method,
 		Path:           originalPath,
 		StatusCode:     resp.Status,
@@ -672,7 +699,7 @@ func (s *ProxyService) handlePublicRoute(
 	// No rate limit or quota headers for public routes
 	return HandleResult{
 		Response: resp,
-		// No Auth context for public routes
+		Auth:     auth,
 	}
 }
 
@@ -688,10 +715,27 @@ func (s *ProxyService) handlePublicStreamingRoute(
 ) StreamingHandleResult {
 	var routeUpstream *route.Upstream
 
+	// Opportunistic auth: validate JWT if present (don't require it)
+	var auth *proxy.AuthContext
+	if req.APIKey != "" && s.tokens != nil {
+		_, isAPIKeyFormat := key.ValidateFormat(req.APIKey, s.keyPrefix)
+		if !isAPIKeyFormat {
+			if claims, err := s.tokens.ValidateToken(req.APIKey); err == nil {
+				auth = &proxy.AuthContext{
+					KeyID:  "session:" + claims.UserID,
+					UserID: claims.UserID,
+					Email:  claims.Email,
+					Role:   claims.Role,
+					PlanID: claims.PlanID,
+				}
+			}
+		}
+	}
+
 	// Apply request transform
 	if matchedRoute.RequestTransform != nil && s.transformService != nil {
 		var transformErr error
-		req, transformErr = s.transformService.TransformRequest(ctx, req, matchedRoute.RequestTransform, nil)
+		req, transformErr = s.transformService.TransformRequest(ctx, req, matchedRoute.RequestTransform, auth)
 		if transformErr != nil {
 			return StreamingHandleResult{Error: &proxy.ErrorResponse{
 				Status:  500,
@@ -726,20 +770,27 @@ func (s *ProxyService) handlePublicStreamingRoute(
 		}
 	}
 
+	// Use auth context if available, otherwise anonymous
+	streamKeyID := "anonymous"
+	streamUserID := "anonymous"
+	if auth != nil {
+		streamKeyID = auth.KeyID
+		streamUserID = auth.UserID
+	}
+
 	// Return streaming context with modified request and upstream for public route
-	// Use anonymous identifiers since no auth context
 	return StreamingHandleResult{
 		StreamingResponse: &StreamingResponseContext{
 			Headers:      make(map[string]string),
 			MatchedRoute: matchedRoute,
 			OriginalPath: originalPath,
-			KeyID:        "anonymous",
-			UserID:       "anonymous",
+			KeyID:        streamKeyID,
+			UserID:       streamUserID,
 		},
 		ModifiedRequest: &req,
 		RouteUpstream:   routeUpstream,
-		// No Auth context for public routes
-		Headers: make(map[string]string), // No rate limit headers for public routes
+		Auth:            auth,
+		Headers:         make(map[string]string), // No rate limit headers for public routes
 	}
 }
 

@@ -715,11 +715,12 @@ curl -X POST http://localhost:8080/admin/routes \
 When a request hits a public route (`auth_required: false`):
 
 1. **No API key required** - requests without API keys are accepted
-2. **No rate limiting** - requests are not rate limited
-3. **No quota tracking** - requests don't count against user quotas
-4. **Anonymous usage** - usage is logged with `anonymous` user/key IDs
-5. **Transforms still apply** - request/response transformations work normally
-6. **Upstream auth works** - backend authentication headers are still injected
+2. **Opportunistic JWT auth** - if a JWT Bearer token is present, it is validated and auth context is populated from claims; invalid/missing tokens are silently ignored (anonymous)
+3. **No rate limiting** - requests are not rate limited
+4. **No quota tracking** - requests don't count against user quotas
+5. **Auth-aware usage tracking** - usage is logged with JWT user/key IDs if authenticated, or `anonymous` if not
+6. **Transforms still apply** - request/response transformations work normally, with auth variables resolved from JWT if present
+7. **Upstream auth works** - backend authentication headers are still injected
 
 ### Security Considerations
 

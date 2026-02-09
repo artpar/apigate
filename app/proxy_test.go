@@ -2,9 +2,11 @@ package app_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/artpar/apigate/adapters/auth"
 	"github.com/artpar/apigate/adapters/clock"
 	"github.com/artpar/apigate/adapters/memory"
 	"github.com/artpar/apigate/app"
@@ -959,5 +961,376 @@ func TestProxyService_Handle_HashMismatch(t *testing.T) {
 
 	if result.Error == nil {
 		t.Fatal("expected error for hash mismatch")
+	}
+}
+
+// capturingUpstream records the last forwarded request for header inspection.
+type capturingUpstream struct {
+	mu      sync.Mutex
+	lastReq proxy.Request
+}
+
+func (u *capturingUpstream) Forward(ctx context.Context, req proxy.Request) (proxy.Response, error) {
+	u.mu.Lock()
+	u.lastReq = req
+	u.mu.Unlock()
+	return proxy.Response{
+		Status:    200,
+		Body:      []byte(`{"ok":true}`),
+		LatencyMs: 10,
+	}, nil
+}
+
+func (u *capturingUpstream) HealthCheck(ctx context.Context) error { return nil }
+
+func (u *capturingUpstream) ForwardTo(ctx context.Context, req proxy.Request, upstream *route.Upstream) (proxy.Response, error) {
+	return u.Forward(ctx, req)
+}
+
+func (u *capturingUpstream) LastRequest() proxy.Request {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.lastReq
+}
+
+func newTestProxyServiceWithUpstream(up ports.Upstream) (*app.ProxyService, *testStores) {
+	stores := &testStores{
+		keys:      memory.NewKeyStore(),
+		users:     memory.NewUserStore(),
+		rateLimit: memory.NewRateLimitStore(),
+		usage:     &testUsageRecorder{},
+	}
+
+	deps := app.ProxyDeps{
+		Keys:      stores.keys,
+		Users:     stores.users,
+		RateLimit: stores.rateLimit,
+		Usage:     stores.usage,
+		Upstream:  up,
+		Clock:     clock.NewFake(baseTime),
+		IDGen:     &testIDGen{},
+	}
+
+	cfg := app.ProxyConfig{
+		KeyPrefix:  "ak_",
+		RateBurst:  2,
+		RateWindow: 60,
+		Plans: []plan.Plan{
+			{ID: "free", Name: "Free", RateLimitPerMinute: 60, RequestsPerMonth: 1000},
+		},
+	}
+
+	return app.NewProxyService(deps, cfg), stores
+}
+
+func TestProxyService_Handle_PublicRouteWithJWT(t *testing.T) {
+	ctx := context.Background()
+	upstream := &capturingUpstream{}
+	svc, stores := newTestProxyServiceWithUpstream(upstream)
+
+	// Create a public route with set_headers transform referencing auth variables
+	routes := []route.Route{
+		{
+			ID:           "r1",
+			Name:         "Public API",
+			PathPattern:  "/public/*",
+			MatchType:    route.MatchPrefix,
+			AuthRequired: false,
+			Enabled:      true,
+			Priority:     10,
+			RequestTransform: &route.Transform{
+				SetHeaders: map[string]string{
+					"X-User-ID": "userID",
+					"X-Email":   "email",
+					"X-Role":    "role",
+					"X-Plan-ID": "planID",
+					"X-Key-ID":  "keyID",
+				},
+			},
+		},
+	}
+	routeStore := &mockRouteStore{routes: routes}
+	upstreamStore := &mockUpstreamStore{}
+	clk := clock.NewFake(baseTime)
+	logger := zerolog.Nop()
+
+	routeService := app.NewRouteService(routeStore, upstreamStore, clk, logger, app.RouteServiceConfig{})
+	_ = routeService.Start(ctx)
+	defer routeService.Stop()
+
+	transformService := app.NewTransformService()
+
+	svc.SetRouteService(routeService)
+	svc.SetTransformService(transformService)
+
+	// Create token service and generate a valid JWT
+	tokenService := auth.NewTokenService("test-secret-key", time.Hour)
+	svc.SetTokenService(tokenService)
+
+	jwt, _, err := tokenService.GenerateToken("user-42", "alice@example.com", "admin", "pro")
+	if err != nil {
+		t.Fatalf("failed to generate JWT: %v", err)
+	}
+
+	// No user in store needed — public routes skip user lookup
+	_ = stores
+
+	req := proxy.Request{
+		APIKey:    jwt,
+		Method:    "GET",
+		Path:      "/public/data",
+		Headers:   map[string]string{},
+		RemoteIP:  "1.2.3.4",
+		UserAgent: "test-agent",
+	}
+	result := svc.Handle(ctx, req)
+
+	if result.Error != nil {
+		t.Fatalf("expected no error, got %v", result.Error)
+	}
+	if result.Response.Status != 200 {
+		t.Errorf("status = %d, want 200", result.Response.Status)
+	}
+
+	// Verify auth context is populated
+	if result.Auth == nil {
+		t.Fatal("expected auth context on public route with valid JWT")
+	}
+	if result.Auth.UserID != "user-42" {
+		t.Errorf("auth.UserID = %q, want %q", result.Auth.UserID, "user-42")
+	}
+	if result.Auth.Email != "alice@example.com" {
+		t.Errorf("auth.Email = %q, want %q", result.Auth.Email, "alice@example.com")
+	}
+
+	// Verify transform resolved auth variables in forwarded headers
+	forwarded := upstream.LastRequest()
+	if forwarded.Headers["X-User-ID"] != "user-42" {
+		t.Errorf("X-User-ID = %q, want %q", forwarded.Headers["X-User-ID"], "user-42")
+	}
+	if forwarded.Headers["X-Email"] != "alice@example.com" {
+		t.Errorf("X-Email = %q, want %q", forwarded.Headers["X-Email"], "alice@example.com")
+	}
+	if forwarded.Headers["X-Role"] != "admin" {
+		t.Errorf("X-Role = %q, want %q", forwarded.Headers["X-Role"], "admin")
+	}
+	if forwarded.Headers["X-Plan-ID"] != "pro" {
+		t.Errorf("X-Plan-ID = %q, want %q", forwarded.Headers["X-Plan-ID"], "pro")
+	}
+	if forwarded.Headers["X-Key-ID"] != "session:user-42" {
+		t.Errorf("X-Key-ID = %q, want %q", forwarded.Headers["X-Key-ID"], "session:user-42")
+	}
+}
+
+func TestProxyService_Handle_PublicRouteWithoutToken(t *testing.T) {
+	ctx := context.Background()
+	upstream := &capturingUpstream{}
+	svc, _ := newTestProxyServiceWithUpstream(upstream)
+
+	// Public route with set_headers transform
+	routes := []route.Route{
+		{
+			ID:           "r1",
+			Name:         "Public API",
+			PathPattern:  "/public/*",
+			MatchType:    route.MatchPrefix,
+			AuthRequired: false,
+			Enabled:      true,
+			Priority:     10,
+			RequestTransform: &route.Transform{
+				SetHeaders: map[string]string{
+					"X-User-ID": "userID",
+					"X-Email":   "email",
+				},
+			},
+		},
+	}
+	routeStore := &mockRouteStore{routes: routes}
+	upstreamStore := &mockUpstreamStore{}
+	clk := clock.NewFake(baseTime)
+	logger := zerolog.Nop()
+
+	routeService := app.NewRouteService(routeStore, upstreamStore, clk, logger, app.RouteServiceConfig{})
+	_ = routeService.Start(ctx)
+	defer routeService.Stop()
+
+	transformService := app.NewTransformService()
+
+	svc.SetRouteService(routeService)
+	svc.SetTransformService(transformService)
+
+	tokenService := auth.NewTokenService("test-secret-key", time.Hour)
+	svc.SetTokenService(tokenService)
+
+	// No APIKey at all
+	req := proxy.Request{
+		Method:    "GET",
+		Path:      "/public/data",
+		Headers:   map[string]string{},
+		RemoteIP:  "1.2.3.4",
+		UserAgent: "test-agent",
+	}
+	result := svc.Handle(ctx, req)
+
+	if result.Error != nil {
+		t.Fatalf("expected no error for public route without token, got %v", result.Error)
+	}
+	if result.Response.Status != 200 {
+		t.Errorf("status = %d, want 200", result.Response.Status)
+	}
+
+	// Auth should be nil (anonymous)
+	if result.Auth != nil {
+		t.Error("expected nil auth for public route without token")
+	}
+
+	// Transform should resolve auth variables to empty strings
+	forwarded := upstream.LastRequest()
+	if forwarded.Headers["X-User-ID"] != "" {
+		t.Errorf("X-User-ID = %q, want empty", forwarded.Headers["X-User-ID"])
+	}
+	if forwarded.Headers["X-Email"] != "" {
+		t.Errorf("X-Email = %q, want empty", forwarded.Headers["X-Email"])
+	}
+}
+
+func TestProxyService_Handle_PublicRouteWithInvalidJWT(t *testing.T) {
+	ctx := context.Background()
+	upstream := &capturingUpstream{}
+	svc, _ := newTestProxyServiceWithUpstream(upstream)
+
+	// Public route with set_headers transform
+	routes := []route.Route{
+		{
+			ID:           "r1",
+			Name:         "Public API",
+			PathPattern:  "/public/*",
+			MatchType:    route.MatchPrefix,
+			AuthRequired: false,
+			Enabled:      true,
+			Priority:     10,
+			RequestTransform: &route.Transform{
+				SetHeaders: map[string]string{
+					"X-User-ID": "userID",
+				},
+			},
+		},
+	}
+	routeStore := &mockRouteStore{routes: routes}
+	upstreamStore := &mockUpstreamStore{}
+	clk := clock.NewFake(baseTime)
+	logger := zerolog.Nop()
+
+	routeService := app.NewRouteService(routeStore, upstreamStore, clk, logger, app.RouteServiceConfig{})
+	_ = routeService.Start(ctx)
+	defer routeService.Stop()
+
+	transformService := app.NewTransformService()
+
+	svc.SetRouteService(routeService)
+	svc.SetTransformService(transformService)
+
+	tokenService := auth.NewTokenService("test-secret-key", time.Hour)
+	svc.SetTokenService(tokenService)
+
+	// Send an invalid JWT (not API key format, but not valid JWT)
+	req := proxy.Request{
+		APIKey:    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.invalid.signature",
+		Method:    "GET",
+		Path:      "/public/data",
+		Headers:   map[string]string{},
+		RemoteIP:  "1.2.3.4",
+		UserAgent: "test-agent",
+	}
+	result := svc.Handle(ctx, req)
+
+	// Should succeed (no 401) — public route ignores invalid JWT
+	if result.Error != nil {
+		t.Fatalf("expected no error for public route with invalid JWT, got %v", result.Error)
+	}
+	if result.Response.Status != 200 {
+		t.Errorf("status = %d, want 200", result.Response.Status)
+	}
+
+	// Auth should be nil (invalid JWT silently ignored)
+	if result.Auth != nil {
+		t.Error("expected nil auth for public route with invalid JWT")
+	}
+
+	// Auth variables should be empty
+	forwarded := upstream.LastRequest()
+	if forwarded.Headers["X-User-ID"] != "" {
+		t.Errorf("X-User-ID = %q, want empty", forwarded.Headers["X-User-ID"])
+	}
+}
+
+func TestProxyService_Handle_PublicRouteWithAPIKey(t *testing.T) {
+	ctx := context.Background()
+	upstream := &capturingUpstream{}
+	svc, _ := newTestProxyServiceWithUpstream(upstream)
+
+	// Public route with set_headers transform
+	routes := []route.Route{
+		{
+			ID:           "r1",
+			Name:         "Public API",
+			PathPattern:  "/public/*",
+			MatchType:    route.MatchPrefix,
+			AuthRequired: false,
+			Enabled:      true,
+			Priority:     10,
+			RequestTransform: &route.Transform{
+				SetHeaders: map[string]string{
+					"X-User-ID": "userID",
+				},
+			},
+		},
+	}
+	routeStore := &mockRouteStore{routes: routes}
+	upstreamStore := &mockUpstreamStore{}
+	clk := clock.NewFake(baseTime)
+	logger := zerolog.Nop()
+
+	routeService := app.NewRouteService(routeStore, upstreamStore, clk, logger, app.RouteServiceConfig{})
+	_ = routeService.Start(ctx)
+	defer routeService.Stop()
+
+	transformService := app.NewTransformService()
+
+	svc.SetRouteService(routeService)
+	svc.SetTransformService(transformService)
+
+	tokenService := auth.NewTokenService("test-secret-key", time.Hour)
+	svc.SetTokenService(tokenService)
+
+	// Send API key format token — should be ignored (no DB lookup for public routes)
+	rawKey := "ak_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	req := proxy.Request{
+		APIKey:    rawKey,
+		Method:    "GET",
+		Path:      "/public/data",
+		Headers:   map[string]string{},
+		RemoteIP:  "1.2.3.4",
+		UserAgent: "test-agent",
+	}
+	result := svc.Handle(ctx, req)
+
+	// Should succeed — API keys are silently ignored on public routes
+	if result.Error != nil {
+		t.Fatalf("expected no error for public route with API key, got %v", result.Error)
+	}
+	if result.Response.Status != 200 {
+		t.Errorf("status = %d, want 200", result.Response.Status)
+	}
+
+	// Auth should be nil (API key not validated on public routes)
+	if result.Auth != nil {
+		t.Error("expected nil auth for public route with API key format token")
+	}
+
+	// Auth variables should be empty
+	forwarded := upstream.LastRequest()
+	if forwarded.Headers["X-User-ID"] != "" {
+		t.Errorf("X-User-ID = %q, want empty", forwarded.Headers["X-User-ID"])
 	}
 }

@@ -116,9 +116,11 @@ All transform values use the **Expr** expression language. Values are expression
 
 Available in `request_transform.set_headers`, `request_transform.set_query`, and `request_transform.body_expr`:
 
+Auth variables (`userID`, `email`, `role`, `planID`, `keyID`) are available on all routes. On public routes (`auth_required=false`), they resolve from the JWT Bearer token if present, or to empty strings if absent. Invalid or expired tokens are silently ignored — the request proceeds anonymously.
+
 | Variable | Type | Description |
 |----------|------|-------------|
-| `userID` | string | Authenticated user ID (empty if public route) |
+| `userID` | string | Authenticated user ID (empty if no valid JWT on public routes) |
 | `email` | string | User email from JWT claims |
 | `role` | string | User role from JWT claims (e.g., "admin", "user") |
 | `planID` | string | User's plan ID |

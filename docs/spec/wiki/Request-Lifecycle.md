@@ -362,26 +362,31 @@ When a route has `auth_required: false`, the request follows a shortened path:
 1. Match Route
    └── auth_required = false
        ▼
-12. Transform Request
+2. Opportunistic JWT Auth (if Bearer token present)
+   ├── Valid JWT → populate auth context from claims
+   └── Invalid/missing → continue anonymously
+       ▼
+12. Transform Request (with auth context if available)
 13. Rewrite Path
 14. Forward to Upstream
-15. Transform Response
+15. Transform Response (with auth context if available)
 16. Calculate Cost
-17. Record Usage (with anonymous user/key)
+17. Record Usage (with JWT user/key if authenticated, else anonymous)
 ```
 
 **What's skipped for public routes:**
-- Session auth and API key extraction/validation (steps 2-7)
+- API key extraction and bcrypt validation
 - User lookup and status check (step 8)
 - Quota enforcement (step 9)
 - Rate limiting (step 10)
 - Entitlement headers (step 11)
 
 **What still applies:**
-- Request/response transformations
+- Opportunistic JWT validation (Bearer token parsed if present, silently ignored if invalid)
+- Request/response transformations (auth variables populated from JWT if valid)
 - Path rewriting
 - Upstream authentication (backend credentials injected by transform)
-- Usage logging (with `anonymous` user/key IDs)
+- Usage logging (with JWT user/key IDs if authenticated, or `anonymous`)
 
 **Use cases:**
 - Reverse proxy for deployed applications
