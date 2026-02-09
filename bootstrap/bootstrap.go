@@ -402,7 +402,7 @@ func (a *App) initHTTPServer() error {
 		Plans:         planStore,
 		Logger:        a.Logger,
 		Hasher:        bcryptHasher,
-		JWTSecret:     s.Get(settings.KeyAuthJWTSecret), // Enables Web UI session to authenticate Admin API calls
+		JWTSecret:     jwtSecret, // Use the local var, not stale snapshot — s was copied before secret was generated
 		OnRouteChange: openAPIService.InvalidateCache,
 		ReloadCallback: func(ctx context.Context) error {
 			// Reload routes and upstreams from database
@@ -446,7 +446,7 @@ func (a *App) initHTTPServer() error {
 		},
 		Logger:        a.Logger,
 		Hasher:        bcryptHasher,
-		JWTSecret:     s.Get(settings.KeyAuthJWTSecret),
+		JWTSecret:     jwtSecret,
 		ExprValidator: a.transformService,
 		RouteTester:   a.routeService,
 		IsSetup: func() bool {
@@ -500,7 +500,7 @@ func (a *App) initHTTPServer() error {
 				users, err := deps.Users.List(context.Background(), 1, 0)
 				return err == nil && len(users) > 0
 			},
-			JWTSecret:        s.Get(settings.KeyAuthJWTSecret),
+			JWTSecret:        jwtSecret,
 			BaseURL:          s.Get(settings.KeyPortalBaseURL),
 			AppName:          s.GetOrDefault(settings.KeyPortalAppName, "APIGate"),
 		})

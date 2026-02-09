@@ -598,6 +598,49 @@ func TestBootstrap_LoadEntitlements_WithData(t *testing.T) {
 	}
 }
 
+func TestBootstrap_FreshInstall_JWTSecretConsistency(t *testing.T) {
+	// On a fresh install (empty DB, no pre-existing jwt_secret),
+	// bootstrap auto-generates a secret and must use the SAME secret
+	// for all handlers (admin, web, portal) — not re-read from a stale
+	// settings snapshot that still has "".
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "fresh-jwt-test.db")
+
+	os.Setenv(bootstrap.EnvDatabaseDSN, dbPath)
+	defer os.Unsetenv(bootstrap.EnvDatabaseDSN)
+
+	app, err := bootstrap.New()
+	if err != nil {
+		t.Fatalf("create app: %v", err)
+	}
+	defer app.Shutdown()
+
+	// After bootstrap, the auto-generated secret must be persisted in settings
+	s := app.Settings.Get()
+	secret := s.Get("auth.jwt_secret")
+	if secret == "" {
+		t.Fatal("fresh install should auto-generate a non-empty JWT secret")
+	}
+
+	// Verify the secret has reasonable length (GenerateSecret returns 32-byte hex = 64 chars)
+	if len(secret) < 32 {
+		t.Errorf("JWT secret too short (%d chars), expected >=32", len(secret))
+	}
+
+	// Verify the secret is persisted in the database (not just in-memory cache)
+	ctx := context.Background()
+	var dbSecret string
+	err = app.DB.DB.QueryRowContext(ctx,
+		"SELECT value FROM settings WHERE key = 'auth.jwt_secret'",
+	).Scan(&dbSecret)
+	if err != nil {
+		t.Fatalf("query jwt_secret from DB: %v", err)
+	}
+	if dbSecret != secret {
+		t.Errorf("DB secret %q != settings cache secret %q", dbSecret, secret)
+	}
+}
+
 func TestBootstrap_LoadPlans_WithMeterType(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "meter-type-test.db")
