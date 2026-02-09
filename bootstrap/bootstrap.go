@@ -304,15 +304,23 @@ func (a *App) initHTTPServer() error {
 	a.transformService = app.NewTransformService()
 	a.proxyService.SetTransformService(a.transformService)
 
-	// Wire token service for session-based authentication on proxy routes
-	if jwtSecret := s.Get(settings.KeyAuthJWTSecret); jwtSecret != "" {
-		tokenService := auth.NewTokenService(jwtSecret, 7*24*time.Hour)
-		a.proxyService.SetTokenService(tokenService)
-
-		// Also inject into module HTTP channel so auth uses the shared secret
-		if a.ModuleRuntime != nil && a.ModuleRuntime.HTTP != nil {
-			a.ModuleRuntime.HTTP.SetTokenService(tokenService)
+	// Wire token service for JWT authentication across all components
+	jwtSecret := s.Get(settings.KeyAuthJWTSecret)
+	if jwtSecret == "" {
+		// Auto-generate and persist a JWT secret for fresh installs
+		jwtSecret = auth.GenerateSecret()
+		if err := a.Settings.Set(context.Background(), settings.KeyAuthJWTSecret, jwtSecret); err != nil {
+			a.Logger.Warn().Err(err).Msg("failed to persist auto-generated JWT secret")
+		} else {
+			a.Logger.Info().Msg("auto-generated JWT secret and stored in database")
 		}
+	}
+	tokenService := auth.NewTokenService(jwtSecret, 7*24*time.Hour)
+	a.proxyService.SetTokenService(tokenService)
+
+	// Also inject into module HTTP channel so auth uses the shared secret
+	if a.ModuleRuntime != nil && a.ModuleRuntime.HTTP != nil {
+		a.ModuleRuntime.HTTP.SetTokenService(tokenService)
 	}
 
 	a.Logger.Info().Msg("route and transform services initialized")

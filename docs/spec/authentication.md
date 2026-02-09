@@ -325,9 +325,14 @@ All implementations MUST be tested for:
 
 ### Architecture
 
-A single `TokenService` instance is created in `bootstrap/bootstrap.go` and injected into all components:
+A single `TokenService` instance is created in `bootstrap/bootstrap.go` and injected into all components. If no JWT secret exists in settings, one is auto-generated and persisted to the database on first startup:
 
 ```go
+jwtSecret := s.Get(settings.KeyAuthJWTSecret)
+if jwtSecret == "" {
+    jwtSecret = auth.GenerateSecret() // 32-byte random hex
+    a.Settings.Set(ctx, settings.KeyAuthJWTSecret, jwtSecret)
+}
 tokenService := auth.NewTokenService(jwtSecret, 7*24*time.Hour)
 proxyService.SetTokenService(tokenService)
 moduleRuntime.HTTP.SetTokenService(tokenService)

@@ -1,4 +1,6 @@
 // Package http provides Web UI serving from embedded assets.
+//
+//go:generate make -C ../../.. webui
 package http
 
 import (
