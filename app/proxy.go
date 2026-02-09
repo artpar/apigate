@@ -180,6 +180,7 @@ func (s *ProxyService) Handle(ctx context.Context, req proxy.Request) HandleResu
 	var user ports.User
 	var matchedKey key.Key
 	var err error
+	var authEmail, authRole string
 
 	if req.APIKey == "" {
 		return HandleResult{Error: &proxy.ErrMissingKey}
@@ -201,6 +202,8 @@ func (s *ProxyService) Handle(ctx context.Context, req proxy.Request) HandleResu
 					ID:     "session:" + claims.UserID,
 					UserID: claims.UserID,
 				}
+				authEmail = claims.Email
+				authRole = claims.Role
 			} else if err != nil {
 				return HandleResult{Error: &proxy.ErrInvalidKey}
 			} else {
@@ -263,6 +266,7 @@ func (s *ProxyService) Handle(ctx context.Context, req proxy.Request) HandleResu
 				Message: "Account is suspended",
 			}}
 		}
+		authEmail = user.Email
 	}
 
 	// 9. Get plan and rate limit config (PURE) - uses dynamic config
@@ -354,6 +358,8 @@ func (s *ProxyService) Handle(ctx context.Context, req proxy.Request) HandleResu
 	auth := proxy.AuthContext{
 		KeyID:     matchedKey.ID,
 		UserID:    matchedKey.UserID,
+		Email:     authEmail,
+		Role:      authRole,
 		PlanID:    user.PlanID,
 		RateLimit: rlConfig.Limit,
 		Scopes:    matchedKey.Scopes,
@@ -446,6 +452,11 @@ func (s *ProxyService) Handle(ctx context.Context, req proxy.Request) HandleResu
 			"requestBytes":  int64(len(req.Body)),
 			"path":          originalPath,
 			"method":        req.Method,
+			"userID":        auth.UserID,
+			"planID":        auth.PlanID,
+			"keyID":         auth.KeyID,
+			"email":         auth.Email,
+			"role":          auth.Role,
 		}
 		// Try to parse response body as JSON for metering expressions
 		if len(resp.Body) > 0 {
@@ -815,6 +826,7 @@ func (s *ProxyService) HandleStreaming(ctx context.Context, req proxy.Request, s
 	var user ports.User
 	var matchedKey key.Key
 	var err error
+	var authEmail, authRole string
 
 	if req.APIKey == "" {
 		return StreamingHandleResult{Error: &proxy.ErrMissingKey}
@@ -836,6 +848,8 @@ func (s *ProxyService) HandleStreaming(ctx context.Context, req proxy.Request, s
 					ID:     "session:" + claims.UserID,
 					UserID: claims.UserID,
 				}
+				authEmail = claims.Email
+				authRole = claims.Role
 			} else if err != nil {
 				return StreamingHandleResult{Error: &proxy.ErrInvalidKey}
 			} else {
@@ -898,6 +912,7 @@ func (s *ProxyService) HandleStreaming(ctx context.Context, req proxy.Request, s
 				Message: "Account is suspended",
 			}}
 		}
+		authEmail = user.Email
 	}
 
 	// 8. Get plan and rate limit config
@@ -933,6 +948,8 @@ func (s *ProxyService) HandleStreaming(ctx context.Context, req proxy.Request, s
 	auth := proxy.AuthContext{
 		KeyID:     matchedKey.ID,
 		UserID:    matchedKey.UserID,
+		Email:     authEmail,
+		Role:      authRole,
 		PlanID:    user.PlanID,
 		RateLimit: rlConfig.Limit,
 		Scopes:    matchedKey.Scopes,
@@ -1070,12 +1087,16 @@ func (s *ProxyService) EvalStreamingMetering(
 		"lastChunk":     lastChunk,
 		"allData":       allData,
 		"userID":        "",
+		"email":         "",
+		"role":          "",
 		"planID":        "",
 		"keyID":         "",
 	}
 
 	if auth != nil {
 		meteringCtx["userID"] = auth.UserID
+		meteringCtx["email"] = auth.Email
+		meteringCtx["role"] = auth.Role
 		meteringCtx["planID"] = auth.PlanID
 		meteringCtx["keyID"] = auth.KeyID
 	}

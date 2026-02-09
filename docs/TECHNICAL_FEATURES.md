@@ -445,39 +445,47 @@ plan:
 
 ## 9. Request/Response Transformation
 
+Transforms use the [Expr expression language](https://expr-lang.org/). Values are expressions, not template strings. See [[Transformations]] wiki for full reference.
+
 ### 9.1 Request Transform
 
-```yaml
-request_transform:
-  headers:
-    add:
-      X-Custom-Header: "value"
-    remove:
-      - "X-Unwanted-Header"
-    rename:
-      Old-Header: New-Header
-  body:
-    set:
-      api_version: "2.0"
-    remove:
-      - "internal_field"
+```json
+{
+  "request_transform": {
+    "set_headers": {
+      "X-User-ID": "userID",
+      "X-Email": "email",
+      "X-Forwarded-For": "clientIP",
+      "Authorization": "\"Bearer \" + env(\"UPSTREAM_KEY\")"
+    },
+    "delete_headers": ["Cookie", "X-Internal"],
+    "set_query": {
+      "format": "\"json\""
+    },
+    "delete_query": ["debug"],
+    "body_expr": "{\"wrapped\": body, \"user\": userID}"
+  }
+}
 ```
+
+Available request variables: `userID`, `email`, `role`, `planID`, `keyID`, `clientIP`, `host`, `userAgent`, `method`, `path`, `query`, `headers`, `body`, `rawBody`.
 
 ### 9.2 Response Transform
 
-```yaml
-response_transform:
-  headers:
-    add:
-      X-Powered-By: "APIGate"
-    remove:
-      - "X-Internal-Header"
-  body:
-    wrap: "data"  # Wrap response in {data: ...}
-    flatten: true  # Remove nesting
-    rename:
-      old_field: new_field
+```json
+{
+  "response_transform": {
+    "set_headers": {
+      "X-Powered-By": "\"APIGate\"",
+      "X-Request-User": "userID"
+    },
+    "delete_headers": ["Server", "X-Internal-Header"],
+    "body_expr": "{\"success\": status < 400, \"data\": respBody}"
+  }
+}
 ```
+
+Available response variables: `userID`, `email`, `role`, `planID`, `keyID`, `status`, `respHeaders`, `respBody`, `responseBytes`.
 
 ---
 

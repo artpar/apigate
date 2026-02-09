@@ -1,6 +1,6 @@
 # Transformations
 
-**Transformations** modify requests and responses as they pass through APIGate.
+**Transformations** modify requests and responses as they pass through APIGate using the [Expr expression language](https://expr-lang.org/).
 
 ---
 
@@ -43,116 +43,266 @@ Transform requests before sending to upstream, and responses before returning to
 
 ---
 
+## Transform JSON Structure
+
+Transforms are configured per-route as JSON objects:
+
+```json
+{
+  "request_transform": {
+    "set_headers": {
+      "X-User-ID": "userID",
+      "X-Custom": "\"static-value\""
+    },
+    "delete_headers": ["Cookie", "X-Internal"],
+    "set_query": {
+      "format": "\"json\""
+    },
+    "delete_query": ["debug"],
+    "body_expr": "{\"wrapped\": body, \"user\": userID}"
+  },
+  "response_transform": {
+    "set_headers": {
+      "X-Powered-By": "\"APIGate\""
+    },
+    "delete_headers": ["Server", "X-Debug"],
+    "body_expr": "{\"success\": true, \"result\": respBody}"
+  }
+}
+```
+
+### Transform Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `set_headers` | `map[string]string` | Header name → Expr expression. Sets or adds headers. |
+| `delete_headers` | `string[]` | Header names to remove. |
+| `set_query` | `map[string]string` | Query param name → Expr expression. (Request only.) |
+| `delete_query` | `string[]` | Query param names to remove. (Request only.) |
+| `body_expr` | `string` | Expr expression that produces the new body (JSON). |
+
+---
+
+## Expr Expression Language
+
+All transform values use the **Expr** expression language. Values are expressions, not template strings.
+
+### Syntax Rules
+
+- **Bare identifiers** resolve to context variables: `userID`, `email`, `path`
+- **Quoted strings** are literal values: `"static-value"`, `"Bearer " + env("API_KEY")`
+- **String concatenation**: `"prefix_" + userID`
+- **Map access**: `headers["Content-Type"]`, `query["page"]`
+- **Ternary**: `role == "admin" ? "true" : "false"`
+- **Nil coalescing**: `email ?? "anonymous"`
+- **Function calls**: `lower(email)`, `sha256(userID)`
+
+### Examples
+
+```
+"userID"                         → resolves to user ID (e.g., "user-42")
+"\"static\""                     → literal string "static"
+"\"Bearer \" + env(\"API_KEY\")" → "Bearer sk-abc123"
+"\"user_\" + userID"             → "user_user-42"
+"lower(email)"                   → "alice@example.com"
+"nowRFC3339()"                   → "2024-01-15T10:30:00Z"
+```
+
+---
+
+## Available Variables
+
+### Request Context
+
+Available in `request_transform.set_headers`, `request_transform.set_query`, and `request_transform.body_expr`:
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `userID` | string | Authenticated user ID (empty if public route) |
+| `email` | string | User email from JWT claims |
+| `role` | string | User role from JWT claims (e.g., "admin", "user") |
+| `planID` | string | User's plan ID |
+| `keyID` | string | API key ID, or "session:{uid}" for JWT auth |
+| `clientIP` | string | Client IP address |
+| `host` | string | Request Host header |
+| `userAgent` | string | User-Agent header |
+| `method` | string | HTTP method (GET, POST, etc.) |
+| `path` | string | Request path |
+| `query` | map | Query parameters (`query["page"]`) |
+| `headers` | map | Request headers (`headers["Content-Type"]`) |
+| `body` | any | Parsed JSON request body |
+| `rawBody` | bytes | Raw request body bytes |
+
+### Response Context
+
+Available in `response_transform.set_headers` and `response_transform.body_expr`:
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `userID` | string | Authenticated user ID |
+| `email` | string | User email from JWT claims |
+| `role` | string | User role from JWT claims |
+| `planID` | string | User's plan ID |
+| `keyID` | string | API key ID |
+| `status` | int | HTTP status code |
+| `respHeaders` | map | Response headers (`respHeaders["Content-Type"]`) |
+| `respBody` | any | Parsed JSON response body |
+| `responseBytes` | int64 | Response body size in bytes |
+
+### Streaming/Metering Context
+
+Available in `metering_expr`:
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `userID` | string | Authenticated user ID |
+| `email` | string | User email |
+| `role` | string | User role |
+| `planID` | string | User's plan ID |
+| `keyID` | string | API key ID |
+| `status` | int | HTTP status code |
+| `responseBytes` | int64 | Total response bytes |
+| `requestBytes` | int64 | Request body bytes |
+| `allData` | bytes | All streamed data |
+| `lastChunk` | bytes | Last data chunk |
+
+---
+
+## Available Functions
+
+### String Functions
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `lower(s)` | Lowercase | `lower("HELLO")` → `"hello"` |
+| `upper(s)` | Uppercase | `upper("hello")` → `"HELLO"` |
+| `trim(s)` | Trim whitespace | `trim("  hi  ")` → `"hi"` |
+| `trimPrefix(s, prefix)` | Remove prefix | `trimPrefix("/v1/users", "/v1")` → `"/users"` |
+| `trimSuffix(s, suffix)` | Remove suffix | `trimSuffix("/api/", "/")` → `"/api"` |
+| `replace(s, old, new)` | Replace all | `replace("a-b", "-", "_")` → `"a_b"` |
+| `split(s, sep)` | Split string | `split("a,b,c", ",")` → `["a","b","c"]` |
+| `join(arr, sep)` | Join array | `join(split("a,b", ","), "-")` → `"a-b"` |
+
+### Encoding Functions
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `base64Encode(s)` | Base64 encode | `base64Encode("hello")` → `"aGVsbG8="` |
+| `base64Decode(s)` | Base64 decode | `base64Decode("aGVsbG8=")` → `"hello"` |
+| `urlEncode(s)` | URL encode | `urlEncode("a b")` → `"a+b"` |
+| `urlDecode(s)` | URL decode | `urlDecode("a%20b")` → `"a b"` |
+| `jsonEncode(v)` | JSON encode | `jsonEncode(body)` → `"{...}"` |
+| `jsonDecode(s)` | JSON decode | `jsonDecode(rawStr).key` |
+
+### Crypto Functions
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `sha256(s)` | SHA-256 hash | `sha256("test")` → `"9f86d0..."` |
+| `hmacSha256(data, key)` | HMAC-SHA256 | `hmacSha256("data", "secret")` |
+
+### Utility Functions
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `env(name)` | Environment variable | `env("API_KEY")` |
+| `now()` | Unix timestamp | `now()` → `1705312200` |
+| `nowRFC3339()` | RFC3339 time | `nowRFC3339()` → `"2024-01-15T..."` |
+| `coalesce(a, b, ...)` | First non-nil/empty | `coalesce(email, "anon")` |
+| `default(val, fallback)` | Default if empty | `default(role, "user")` |
+| `toString(v)` | Convert to string | `toString(123)` → `"123"` |
+| `toInt(v)` | Convert to int | `toInt("42")` → `42` |
+| `toFloat(v)` | Convert to float | `toFloat("3.14")` → `3.14` |
+| `get(obj, path)` | Nested field access | `get(body, "a.b.c")` |
+
+### Data Functions (Metering/Streaming)
+
+| Function | Description |
+|----------|-------------|
+| `json(data)` | Parse JSON from bytes/string |
+| `lines(data)` | Split into lines |
+| `linesNonEmpty(data)` | Split into non-empty lines |
+| `sseEvents(data)` | Parse SSE events |
+| `sseLastData(data)` | Last SSE event data |
+| `sseAllData(data)` | All SSE data concatenated |
+| `first(arr)` | First array element |
+| `last(arr)` | Last array element |
+| `count(arr)` | Array length |
+| `sum(arr)` / `sum(arr, field)` | Sum values |
+| `avg(arr)` / `avg(arr, field)` | Average values |
+| `max(arr)` / `max(arr, field)` | Maximum value |
+| `min(arr)` / `min(arr, field)` | Minimum value |
+
+---
+
 ## Request Transformations
 
 ### Header Modifications
 
-#### Add Headers
+#### Set Headers
 
-```yaml
-request_transform:
-  headers:
-    add:
-      X-Custom-Header: "value"
-      X-Request-ID: "${uuid}"
-      X-Forwarded-For: "${client_ip}"
+```json
+{
+  "request_transform": {
+    "set_headers": {
+      "X-User-ID": "userID",
+      "X-Email": "email",
+      "X-Request-Time": "nowRFC3339()",
+      "X-Forwarded-For": "clientIP",
+      "Authorization": "\"Bearer \" + env(\"UPSTREAM_KEY\")"
+    }
+  }
+}
 ```
 
 #### Remove Headers
 
-```yaml
-request_transform:
-  headers:
-    remove:
-      - Cookie
-      - Authorization  # Let APIGate handle auth
-```
-
-#### Modify Headers
-
-```yaml
-request_transform:
-  headers:
-    set:
-      Host: "internal-api.local"
-      Accept: "application/json"
+```json
+{
+  "request_transform": {
+    "delete_headers": ["Cookie", "Authorization"]
+  }
+}
 ```
 
 ### Path Rewriting
 
-#### Prefix Stripping
+Path rewriting uses the `path_rewrite` field (Expr expression):
 
-```yaml
-path_pattern: /api/v1/*
-path_rewrite: /$1
-
-# /api/v1/users → /users
-# /api/v1/orders/123 → /orders/123
+```json
+{
+  "path_pattern": "/api/v1/**",
+  "path_rewrite": "trimPrefix(path, \"/api/v1\")"
+}
 ```
 
-#### Prefix Adding
-
-```yaml
-path_pattern: /public/*
-path_rewrite: /api/v2/$1
-
-# /public/users → /api/v2/users
-```
-
-#### Version Transformation
-
-```yaml
-path_pattern: /v1/*
-path_rewrite: /2024-01/$1
-
-# /v1/users → /2024-01/users
-```
+Examples:
+- Strip prefix: `trimPrefix(path, "/api/v1")` — `/api/v1/users` → `/users`
+- Add prefix: `"/api/v2" + path` — `/users` → `/api/v2/users`
+- Version swap: `replace(path, "/v1/", "/v2/")`
 
 ### Query Parameter Transformations
 
-#### Add Parameters
-
-```yaml
-request_transform:
-  query:
-    add:
-      format: json
-      api_version: "2024-01"
+```json
+{
+  "request_transform": {
+    "set_query": {
+      "format": "\"json\"",
+      "api_version": "\"2024-01\""
+    },
+    "delete_query": ["debug", "internal_flag"]
+  }
+}
 ```
 
-#### Remove Parameters
+### Body Transformation
 
-```yaml
-request_transform:
-  query:
-    remove:
-      - debug
-      - internal_flag
-```
-
-### Body Transformations
-
-#### JSON Field Injection
-
-```yaml
-request_transform:
-  body:
-    json:
-      inject:
-        metadata:
-          source: "apigate"
-          user_id: "${user_id}"
-```
-
-#### JSON Field Removal
-
-```yaml
-request_transform:
-  body:
-    json:
-      remove:
-        - internal_field
-        - debug_info
+```json
+{
+  "request_transform": {
+    "body_expr": "{\"wrapped\": body, \"metadata\": {\"source\": \"apigate\", \"user\": userID}}"
+  }
+}
 ```
 
 ---
@@ -161,215 +311,104 @@ request_transform:
 
 ### Header Modifications
 
-#### Add Headers
-
-```yaml
-response_transform:
-  headers:
-    add:
-      X-Powered-By: "APIGate"
-      X-Request-ID: "${request_id}"
+```json
+{
+  "response_transform": {
+    "set_headers": {
+      "X-Powered-By": "\"APIGate\"",
+      "X-Request-User": "userID"
+    },
+    "delete_headers": ["Server", "X-Internal-Version", "X-Debug-Info"]
+  }
+}
 ```
 
-#### Remove Headers
+### Body Transformation
 
-```yaml
-response_transform:
-  headers:
-    remove:
-      - Server
-      - X-Internal-Version
-      - X-Debug-Info
-```
-
-### Body Transformations
-
-#### JSON Field Removal
-
-```yaml
-response_transform:
-  body:
-    json:
-      remove:
-        - internal_id
-        - _links.internal
-```
-
-#### JSON Field Masking
-
-```yaml
-response_transform:
-  body:
-    json:
-      mask:
-        - email  # user@domain.com → u***@d***.com
-        - phone  # +1234567890 → +1***890
-```
-
-#### JSON Field Renaming
-
-```yaml
-response_transform:
-  body:
-    json:
-      rename:
-        _id: id
-        created_at: createdAt
-```
-
----
-
-## Variable Substitution
-
-Use variables in transformations:
-
-| Variable | Description |
-|----------|-------------|
-| `${uuid}` | Random UUID |
-| `${timestamp}` | Current Unix timestamp |
-| `${iso_time}` | Current ISO 8601 time |
-| `${client_ip}` | Client IP address |
-| `${user_id}` | Authenticated user ID |
-| `${user_email}` | Authenticated user email |
-| `${plan_name}` | User's plan name |
-| `${api_key_id}` | API key ID |
-| `${api_key_prefix}` | API key prefix |
-| `${request_id}` | Unique request ID |
-| `${path}` | Request path |
-| `${method}` | HTTP method |
-| `${host}` | Request host |
-| `${header.X-Custom}` | Request header value |
-| `${query.param}` | Query parameter value |
-
-### Example
-
-```yaml
-request_transform:
-  headers:
-    add:
-      X-Request-ID: "${uuid}"
-      X-User-ID: "${user_id}"
-      X-Timestamp: "${timestamp}"
-      X-Original-Path: "${path}"
-```
-
----
-
-## Conditional Transformations
-
-Apply transformations based on conditions:
-
-### By Method
-
-```yaml
-request_transform:
-  conditions:
-    - when:
-        method: POST
-      headers:
-        add:
-          X-Idempotency-Key: "${uuid}"
-```
-
-### By Path
-
-```yaml
-request_transform:
-  conditions:
-    - when:
-        path_matches: "/admin/*"
-      headers:
-        add:
-          X-Admin-Request: "true"
-```
-
-### By Header
-
-```yaml
-request_transform:
-  conditions:
-    - when:
-        header_exists: X-Debug
-      headers:
-        add:
-          X-Debug-Enabled: "true"
+```json
+{
+  "response_transform": {
+    "body_expr": "{\"success\": status < 400, \"data\": respBody}"
+  }
+}
 ```
 
 ---
 
 ## Common Use Cases
 
-### 1. Add Upstream Authentication
+### 1. Pass Authenticated User to Upstream
 
-```yaml
-# Route uses bearer token for upstream
-upstream_auth_type: bearer
-upstream_auth_value: "${UPSTREAM_API_KEY}"
-
-# Or via transformation
-request_transform:
-  headers:
-    add:
-      Authorization: "Bearer ${env.UPSTREAM_API_KEY}"
+```json
+{
+  "request_transform": {
+    "set_headers": {
+      "X-User-ID": "userID",
+      "X-User-Email": "email",
+      "X-User-Role": "role",
+      "X-Plan-ID": "planID"
+    }
+  }
+}
 ```
 
-### 2. CORS Headers
+### 2. Add Upstream Authentication
 
-```yaml
-response_transform:
-  headers:
-    add:
-      Access-Control-Allow-Origin: "*"
-      Access-Control-Allow-Methods: "GET, POST, PUT, DELETE"
-      Access-Control-Allow-Headers: "Content-Type, X-API-Key"
+```json
+{
+  "request_transform": {
+    "set_headers": {
+      "Authorization": "\"Bearer \" + env(\"UPSTREAM_API_KEY\")"
+    }
+  }
+}
 ```
 
-### 3. Remove Internal Headers
+### 3. CORS Headers
 
-```yaml
-response_transform:
-  headers:
-    remove:
-      - X-Internal-Request-ID
-      - X-Backend-Server
-      - X-Debug-Timing
+```json
+{
+  "response_transform": {
+    "set_headers": {
+      "Access-Control-Allow-Origin": "\"*\"",
+      "Access-Control-Allow-Methods": "\"GET, POST, PUT, DELETE\"",
+      "Access-Control-Allow-Headers": "\"Content-Type, X-API-Key\""
+    }
+  }
+}
 ```
 
-### 4. Add Request Metadata
+### 4. Remove Internal Headers
 
-```yaml
-request_transform:
-  headers:
-    add:
-      X-Forwarded-For: "${client_ip}"
-      X-Forwarded-Proto: "https"
-      X-User-ID: "${user_id}"
-      X-Plan-Name: "${plan_name}"
+```json
+{
+  "response_transform": {
+    "delete_headers": ["X-Internal-Request-ID", "X-Backend-Server", "X-Debug-Timing"]
+  }
+}
 ```
 
-### 5. Version Header to Path
+### 5. Add Request Metadata
 
-```yaml
-# Client sends: GET /users, X-API-Version: 2
-# Transform to: GET /v2/users
-
-request_transform:
-  path_rewrite: "/v${header.X-API-Version}${path}"
+```json
+{
+  "request_transform": {
+    "set_headers": {
+      "X-Forwarded-For": "clientIP",
+      "X-Forwarded-Proto": "\"https\"",
+      "X-User-ID": "userID",
+      "X-User-Agent": "userAgent"
+    }
+  }
+}
 ```
 
-### 6. Sanitize Response
+### 6. Metering by Token Usage
 
-```yaml
-response_transform:
-  body:
-    json:
-      remove:
-        - password_hash
-        - internal_notes
-        - admin_only_field
-      mask:
-        - ssn
-        - credit_card
+```json
+{
+  "metering_expr": "get(json(sseLastData(allData)), \"usage.total_tokens\") ?? 1"
+}
 ```
 
 ---
@@ -398,25 +437,16 @@ curl -X POST http://localhost:8080/admin/routes \
     "name": "api-v1",
     "path_pattern": "/api/v1/*",
     "upstream_id": "upstream-id",
-    "path_rewrite": "/$1",
+    "path_rewrite": "trimPrefix(path, \"/api/v1\")",
     "request_transform": {
-      "headers": {
-        "add": {
-          "X-Source": "apigate",
-          "X-Request-ID": "${uuid}"
-        },
-        "remove": ["Cookie"]
-      }
+      "set_headers": {
+        "X-Source": "\"apigate\"",
+        "X-User-ID": "userID"
+      },
+      "delete_headers": ["Cookie"]
     },
     "response_transform": {
-      "headers": {
-        "remove": ["Server", "X-Powered-By"]
-      },
-      "body": {
-        "json": {
-          "remove": ["internal_id"]
-        }
-      }
+      "delete_headers": ["Server", "X-Powered-By"]
     }
   }'
 ```
@@ -428,11 +458,34 @@ curl -X POST http://localhost:8080/admin/routes \
 1. Go to **Routes** → Select route
 2. Click **Transformations** tab
 3. Configure:
-   - **Request Headers**: Add/Remove/Set
-   - **Response Headers**: Add/Remove/Set
-   - **Path Rewrite**: Pattern and replacement
-   - **Body Transforms**: JSON operations
+   - **Request Headers**: Set/Delete
+   - **Response Headers**: Set/Delete
+   - **Path Rewrite**: Expr expression
+   - **Body Expression**: Expr expression
 4. Click **Save**
+
+---
+
+## Expression Validation
+
+Use the validation API to check expressions before saving:
+
+```bash
+curl -X POST http://localhost:8080/admin/validate-expr \
+  -H "Content-Type: application/json" \
+  -d '{
+    "expression": "\"user_\" + userID",
+    "context": "request"
+  }'
+```
+
+Response:
+```json
+{
+  "valid": true,
+  "message": "Expression is valid"
+}
+```
 
 ---
 
@@ -440,21 +493,20 @@ curl -X POST http://localhost:8080/admin/routes \
 
 ### Fast Operations
 
-- Header add/remove: Negligible overhead
+- Header set/delete: Negligible overhead
 - Path rewrite: Negligible overhead
 - Query parameter changes: Minimal overhead
 
 ### Slower Operations
 
 - Body JSON parsing: ~1-5ms per request
-- Body field injection: ~1-2ms per operation
-- Body masking: ~2-5ms depending on field count
+- Body expression evaluation: ~1-2ms per operation
 
 ### Best Practices
 
 1. **Minimize body transformations** for high-throughput routes
 2. **Use header-only transforms** when possible
-3. **Cache compiled patterns** (handled automatically)
+3. **Compiled expressions are cached** automatically
 
 ---
 
@@ -462,12 +514,15 @@ curl -X POST http://localhost:8080/admin/routes \
 
 ### Enable Debug Headers
 
-```yaml
-response_transform:
-  headers:
-    add:
-      X-Transform-Applied: "true"
-      X-Original-Path: "${path}"
+```json
+{
+  "response_transform": {
+    "set_headers": {
+      "X-Transform-Applied": "\"true\"",
+      "X-Original-User": "userID"
+    }
+  }
+}
 ```
 
 ### Check Server Logs

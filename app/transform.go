@@ -492,15 +492,20 @@ func NewTransformService() *TransformService {
 // TransformContext contains data available to Expr expressions.
 type TransformContext struct {
 	// Request fields
-	Method   string            `expr:"method"`
-	Path     string            `expr:"path"`
-	Query    map[string]string `expr:"query"`
-	Headers  map[string]string `expr:"headers"`
-	Body     any               `expr:"body"`    // Parsed JSON body
-	RawBody  []byte            `expr:"rawBody"` // Raw body bytes
+	Method    string            `expr:"method"`
+	Path      string            `expr:"path"`
+	Query     map[string]string `expr:"query"`
+	Headers   map[string]string `expr:"headers"`
+	Body      any               `expr:"body"`    // Parsed JSON body
+	RawBody   []byte            `expr:"rawBody"` // Raw body bytes
+	ClientIP  string            `expr:"clientIP"`
+	Host      string            `expr:"host"`
+	UserAgent string            `expr:"userAgent"`
 
 	// Auth context
 	UserID string `expr:"userID"`
+	Email  string `expr:"email"`
+	Role   string `expr:"role"`
 	PlanID string `expr:"planID"`
 	KeyID  string `expr:"keyID"`
 
@@ -707,14 +712,19 @@ func (s *TransformService) getOrCompile(expression string, env any) (*vm.Program
 // buildRequestContext creates a TransformContext from a request.
 func (s *TransformService) buildRequestContext(req proxy.Request, auth *proxy.AuthContext) map[string]any {
 	ctx := map[string]any{
-		"method":   req.Method,
-		"path":     req.Path,
-		"query":    parseQuery(req.Query),
-		"headers":  req.Headers,
-		"rawBody":  req.Body,
-		"userID":   "",
-		"planID":   "",
-		"keyID":    "",
+		"method":    req.Method,
+		"path":      req.Path,
+		"query":     parseQuery(req.Query),
+		"headers":   req.Headers,
+		"rawBody":   req.Body,
+		"clientIP":  req.RemoteIP,
+		"host":      req.Headers["Host"],
+		"userAgent": req.UserAgent,
+		"userID":    "",
+		"email":     "",
+		"role":      "",
+		"planID":    "",
+		"keyID":     "",
 	}
 
 	// Parse body as JSON if possible
@@ -727,6 +737,8 @@ func (s *TransformService) buildRequestContext(req proxy.Request, auth *proxy.Au
 
 	if auth != nil {
 		ctx["userID"] = auth.UserID
+		ctx["email"] = auth.Email
+		ctx["role"] = auth.Role
 		ctx["planID"] = auth.PlanID
 		ctx["keyID"] = auth.KeyID
 	}
@@ -741,6 +753,8 @@ func (s *TransformService) buildResponseContext(resp proxy.Response, auth *proxy
 		"respHeaders":   resp.Headers,
 		"responseBytes": int64(len(resp.Body)),
 		"userID":        "",
+		"email":         "",
+		"role":          "",
 		"planID":        "",
 		"keyID":         "",
 	}
@@ -755,6 +769,8 @@ func (s *TransformService) buildResponseContext(resp proxy.Response, auth *proxy
 
 	if auth != nil {
 		ctx["userID"] = auth.UserID
+		ctx["email"] = auth.Email
+		ctx["role"] = auth.Role
 		ctx["planID"] = auth.PlanID
 		ctx["keyID"] = auth.KeyID
 	}
@@ -888,9 +904,9 @@ type ExprValidationResult struct {
 
 // ValidateExpr validates an Expr expression without executing it.
 // The context parameter determines which variables are available:
-// - "request": method, path, query, headers, body, rawBody, userID, planID, keyID
-// - "response": status, respBody, respHeaders, responseBytes, userID, planID, keyID
-// - "streaming": allData, lastChunk, status, responseBytes, requestBytes, userID, planID, keyID
+// - "request": method, path, query, headers, body, rawBody, clientIP, host, userAgent, userID, email, role, planID, keyID
+// - "response": status, respBody, respHeaders, responseBytes, userID, email, role, planID, keyID
+// - "streaming": allData, lastChunk, status, responseBytes, requestBytes, userID, email, role, planID, keyID
 func (s *TransformService) ValidateExpr(expression, context string) ExprValidationResult {
 	if expression == "" {
 		return ExprValidationResult{Valid: true, Message: "Empty expression is valid"}
@@ -919,6 +935,8 @@ func (s *TransformService) ValidateExpr(expression, context string) ExprValidati
 func (s *TransformService) buildValidationEnv(context string) map[string]any {
 	env := map[string]any{
 		"userID": "",
+		"email":  "",
+		"role":   "",
 		"planID": "",
 		"keyID":  "",
 	}
@@ -931,6 +949,9 @@ func (s *TransformService) buildValidationEnv(context string) map[string]any {
 		env["headers"] = map[string]string{}
 		env["body"] = map[string]any{}
 		env["rawBody"] = []byte{}
+		env["clientIP"] = ""
+		env["host"] = ""
+		env["userAgent"] = ""
 	case "response":
 		env["status"] = 0
 		env["respBody"] = map[string]any{}
@@ -950,6 +971,9 @@ func (s *TransformService) buildValidationEnv(context string) map[string]any {
 		env["headers"] = map[string]string{}
 		env["body"] = map[string]any{}
 		env["rawBody"] = []byte{}
+		env["clientIP"] = ""
+		env["host"] = ""
+		env["userAgent"] = ""
 		env["status"] = 0
 		env["respBody"] = map[string]any{}
 		env["respHeaders"] = map[string]string{}

@@ -39,6 +39,8 @@ type Response struct {
 type AuthContext struct {
 	KeyID     string
 	UserID    string
+	Email     string
+	Role      string
 	PlanID    string
 	RateLimit int
 	Scopes    []string

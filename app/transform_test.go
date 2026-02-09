@@ -1090,6 +1090,198 @@ func TestTransformService_JoinWithAnyArray(t *testing.T) {
 	}
 }
 
+func TestTransformService_TransformRequest_AllContextVariables(t *testing.T) {
+	svc := app.NewTransformService()
+	ctx := context.Background()
+
+	req := proxy.Request{
+		Method:    "POST",
+		Path:      "/api/data",
+		Headers:   map[string]string{"Host": "example.com", "Existing": "keep"},
+		RemoteIP:  "192.168.1.100",
+		UserAgent: "TestAgent/1.0",
+	}
+
+	auth := &proxy.AuthContext{
+		UserID: "user-42",
+		Email:  "alice@example.com",
+		Role:   "admin",
+		PlanID: "plan-pro",
+		KeyID:  "session:user-42",
+	}
+
+	transform := &route.Transform{
+		SetHeaders: map[string]string{
+			"X-User-ID":    "userID",
+			"X-Email":      "email",
+			"X-Role":       "role",
+			"X-Plan":       "planID",
+			"X-Key":        "keyID",
+			"X-Client-IP":  "clientIP",
+			"X-Host":       "host",
+			"X-User-Agent": "userAgent",
+		},
+	}
+
+	result, err := svc.TransformRequest(ctx, req, transform, auth)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+
+	checks := map[string]string{
+		"X-User-ID":    "user-42",
+		"X-Email":      "alice@example.com",
+		"X-Role":       "admin",
+		"X-Plan":       "plan-pro",
+		"X-Key":        "session:user-42",
+		"X-Client-IP":  "192.168.1.100",
+		"X-Host":       "example.com",
+		"X-User-Agent": "TestAgent/1.0",
+	}
+
+	for header, want := range checks {
+		if got := result.Headers[header]; got != want {
+			t.Errorf("%s = %q, want %q", header, got, want)
+		}
+	}
+
+	// Existing header should be preserved
+	if result.Headers["Existing"] != "keep" {
+		t.Error("Existing header should be preserved")
+	}
+}
+
+func TestTransformService_TransformResponse_AuthContext(t *testing.T) {
+	svc := app.NewTransformService()
+	ctx := context.Background()
+
+	resp := proxy.Response{
+		Status:  200,
+		Headers: map[string]string{},
+		Body:    []byte(`{"ok":true}`),
+	}
+
+	auth := &proxy.AuthContext{
+		UserID: "user-99",
+		Email:  "bob@example.com",
+		Role:   "user",
+		PlanID: "plan-free",
+		KeyID:  "ak_abc123",
+	}
+
+	transform := &route.Transform{
+		SetHeaders: map[string]string{
+			"X-User-ID": "userID",
+			"X-Email":   "email",
+			"X-Role":    "role",
+		},
+	}
+
+	result, err := svc.TransformResponse(ctx, resp, transform, auth)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+
+	if result.Headers["X-User-ID"] != "user-99" {
+		t.Errorf("X-User-ID = %q, want user-99", result.Headers["X-User-ID"])
+	}
+	if result.Headers["X-Email"] != "bob@example.com" {
+		t.Errorf("X-Email = %q, want bob@example.com", result.Headers["X-Email"])
+	}
+	if result.Headers["X-Role"] != "user" {
+		t.Errorf("X-Role = %q, want user", result.Headers["X-Role"])
+	}
+}
+
+func TestTransformService_ValidateExpr_NewVariables(t *testing.T) {
+	svc := app.NewTransformService()
+
+	tests := []struct {
+		name      string
+		expr      string
+		context   string
+		wantValid bool
+	}{
+		{"email in request", `email`, "request", true},
+		{"role in request", `role`, "request", true},
+		{"clientIP in request", `clientIP`, "request", true},
+		{"host in request", `host`, "request", true},
+		{"userAgent in request", `userAgent`, "request", true},
+		{"email in response", `email`, "response", true},
+		{"role in response", `role`, "response", true},
+		{"clientIP invalid in response", `clientIP`, "response", false},
+		{"host invalid in response", `host`, "response", false},
+		{"userAgent invalid in response", `userAgent`, "response", false},
+		{"email in streaming", `email`, "streaming", true},
+		{"role in streaming", `role`, "streaming", true},
+		{"email in default", `email`, "", true},
+		{"role in default", `role`, "", true},
+		{"clientIP in default", `clientIP`, "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := svc.ValidateExpr(tt.expr, tt.context)
+			if result.Valid != tt.wantValid {
+				t.Errorf("ValidateExpr(%q, %q) valid = %v, want %v, error = %s",
+					tt.expr, tt.context, result.Valid, tt.wantValid, result.Error)
+			}
+		})
+	}
+}
+
+func TestTransformService_TransformRequest_NilAuth_NewVariables(t *testing.T) {
+	svc := app.NewTransformService()
+	ctx := context.Background()
+
+	req := proxy.Request{
+		Method:    "GET",
+		Path:      "/public",
+		Headers:   map[string]string{"Host": "pub.example.com"},
+		RemoteIP:  "10.0.0.1",
+		UserAgent: "PublicClient/2.0",
+	}
+
+	transform := &route.Transform{
+		SetHeaders: map[string]string{
+			"X-User-ID":    "userID",
+			"X-Email":      "email",
+			"X-Role":       "role",
+			"X-Client-IP":  "clientIP",
+			"X-Host":       "host",
+			"X-User-Agent": "userAgent",
+		},
+	}
+
+	// nil auth — should not panic, auth variables resolve to empty strings
+	result, err := svc.TransformRequest(ctx, req, transform, nil)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+
+	// Auth variables should be empty
+	if result.Headers["X-User-ID"] != "" {
+		t.Errorf("X-User-ID = %q, want empty", result.Headers["X-User-ID"])
+	}
+	if result.Headers["X-Email"] != "" {
+		t.Errorf("X-Email = %q, want empty", result.Headers["X-Email"])
+	}
+	if result.Headers["X-Role"] != "" {
+		t.Errorf("X-Role = %q, want empty", result.Headers["X-Role"])
+	}
+
+	// Request metadata should still resolve
+	if result.Headers["X-Client-IP"] != "10.0.0.1" {
+		t.Errorf("X-Client-IP = %q, want 10.0.0.1", result.Headers["X-Client-IP"])
+	}
+	if result.Headers["X-Host"] != "pub.example.com" {
+		t.Errorf("X-Host = %q, want pub.example.com", result.Headers["X-Host"])
+	}
+	if result.Headers["X-User-Agent"] != "PublicClient/2.0" {
+		t.Errorf("X-User-Agent = %q, want PublicClient/2.0", result.Headers["X-User-Agent"])
+	}
+}
+
 func TestTransformService_ToSliceConversions(t *testing.T) {
 	svc := app.NewTransformService()
 	ctx := context.Background()

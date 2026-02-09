@@ -144,7 +144,7 @@ export function TransformField({ value, onChange, disabled, error, type }: Trans
                   type="text"
                   value={val}
                   onChange={(e) => updateSetHeader(key, key, e.target.value)}
-                  placeholder="value or {{expr}}"
+                  placeholder='Expr: "static" or userID'
                   disabled={disabled}
                   className="flex-1 px-2 py-1.5 text-sm border border-gray-300 rounded"
                 />
@@ -163,6 +163,10 @@ export function TransformField({ value, onChange, disabled, error, type }: Trans
             >
               + Add header to set
             </button>
+            <p className="text-xs text-gray-500 mt-2">
+              Values use <span className="font-mono">Expr</span> syntax. Variables: <span className="font-mono">userID</span>, <span className="font-mono">email</span>, <span className="font-mono">role</span>, <span className="font-mono">planID</span>, <span className="font-mono">keyID</span>, <span className="font-mono">clientIP</span>, <span className="font-mono">host</span>, <span className="font-mono">userAgent</span>, <span className="font-mono">method</span>, <span className="font-mono">path</span>.
+              Use <span className="font-mono">"static"</span> for literal strings. Functions: <span className="font-mono">lower()</span>, <span className="font-mono">upper()</span>, <span className="font-mono">env()</span>, <span className="font-mono">nowRFC3339()</span>, <span className="font-mono">sha256()</span>.
+            </p>
           </div>
 
           <div>
@@ -267,7 +271,9 @@ export function TransformField({ value, onChange, disabled, error, type }: Trans
             className="w-full px-3 py-2 text-sm border border-gray-300 rounded font-mono"
           />
           <p className="text-xs text-gray-500 mt-1">
-            Use expressions to transform the {type} body. Available: body, headers, path, query
+            Expr syntax. {type === 'request'
+              ? 'Available: body, headers, path, query, method, userID, email, role, planID, keyID, clientIP, host, userAgent'
+              : 'Available: respBody, respHeaders, status, responseBytes, userID, email, role, planID, keyID'}
           </p>
         </div>
       )}
