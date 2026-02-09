@@ -1,100 +1,68 @@
 # Authentication Specification
 
 **Status**: Authoritative
-**Last Updated**: 2026-01-27
-**Version**: 1.0
+**Last Updated**: 2026-02-09
+**Version**: 2.0
 
 ## Overview
 
-APIGate provides two authentication mechanisms:
-1. **Session-based authentication** (cookie-based) for web UI and customer portal
-2. **API key authentication** (header-based) for programmatic API access
+APIGate uses **JWT (JSON Web Token) authentication** as the single auth mechanism across all components:
 
-This document specifies the behavior, security requirements, and implementation details for both mechanisms.
+1. **JWT Bearer authentication** for the module WebUI (React SPA), admin API, and customer portal
+2. **API key authentication** (header-based) for programmatic proxy access
+3. **JWT cookie transport** for SSR Go template pages (same JWT, cookie transport)
+
+A shared `TokenService` is injected at bootstrap into all components — proxy, admin handler, web handler, portal handler, and module HTTP channel. There is **no session store** and **no unsigned cookie sessions**.
 
 ---
 
-## Session-Based Authentication
+## JWT Bearer Authentication
 
-Session-based authentication is used for browser-based access to the Web UI and customer portal. It uses HTTP cookies to maintain state across requests.
+JWT Bearer authentication is the primary mechanism for all browser-based and SPA access. Tokens are returned in response bodies and sent via `Authorization: Bearer` headers.
+
+### JWT Claims
+
+```json
+{
+  "uid": "user_abc123",
+  "email": "user@example.com",
+  "role": "user",
+  "pid": "free",
+  "exp": 1738000000,
+  "iat": 1737395200
+}
+```
+
+| Claim | Type | Description |
+|-------|------|-------------|
+| `uid` | string | User ID |
+| `email` | string | User email address |
+| `role` | string | User role (`user`, `admin`) |
+| `pid` | string | Plan ID (used by proxy for `X-Plan-ID` headers and rate limiting) |
+| `exp` | int | Expiration timestamp (Unix) |
+| `iat` | int | Issued-at timestamp (Unix) |
+
+### Token Lifetime
+
+- **Default**: 7 days (module HTTP channel), 24 hours (admin API)
+- **Signing**: HMAC-SHA256 with shared `auth.jwt_secret` from settings
+- **Refresh**: `POST /auth/refresh` returns a new token
 
 ### Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/auth/register` | Create user account and return session cookie |
-| POST | `/auth/login` | Authenticate user and return session cookie |
-| POST | `/auth/logout` | Invalidate session |
-| GET | `/auth/me` | Get current authenticated user |
-| GET | `/auth/setup-required` | Check if first-time setup is needed |
-| POST | `/auth/setup` | Create first admin user (setup mode only) |
-
-For SPA frontends, these are also available at:
-- `/api/portal/auth/*` (same routes, same behavior)
-
-### Session Cookie Specification
-
-#### Cookie Name
-```
-apigate_session
-```
-
-#### Cookie Attributes
-
-| Attribute | Value | Requirement | Rationale |
-|-----------|-------|-------------|-----------|
-| **Name** | `apigate_session` | MUST | Identifies the session cookie |
-| **Value** | Base64-encoded JSON | MUST | Contains serialized `Session` object |
-| **Path** | `/` | MUST | Cookie valid for entire application |
-| **HttpOnly** | `true` | MUST | Prevents XSS attacks (no JavaScript access) |
-| **SameSite** | `Lax` | MUST | Prevents CSRF attacks while allowing navigation |
-| **Secure** | Dynamic | MUST | `true` for HTTPS, `false` for HTTP |
-| **Expires** | 7 days from creation | MUST | Automatic session expiration |
-
-#### Secure Flag Behavior
-
-The `Secure` flag MUST be set dynamically based on the request protocol:
-
-**HTTPS Requests**:
-```
-Secure: true
-```
-- Direct HTTPS: Detected via `r.TLS != nil`
-- Proxied HTTPS: Detected via `X-Forwarded-Proto: https` header
-
-**HTTP Requests**:
-```
-Secure: false
-```
-
-**Rationale**: Modern browsers **reject cookies with `Secure: false` on HTTPS connections**. This is a security measure to prevent downgrade attacks. The server MUST detect the protocol and set the flag appropriately.
-
-**Critical**: Failure to set `Secure: true` on HTTPS connections causes browsers to **silently discard** session cookies, resulting in authentication failure.
-
-### Session Object Structure
-
-The cookie value is a Base64-encoded JSON object:
-
-```json
-{
-  "user_id": "user_abc123",
-  "email": "user@example.com",
-  "name": "John Doe",
-  "expires_at": "2026-02-03T12:00:00Z"
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `user_id` | string | Unique user identifier |
-| `email` | string | User email address |
-| `name` | string | User display name |
-| `expires_at` | timestamp | Session expiration (ISO 8601) |
+| POST | `/mod/auth/register` | Create user account, return JWT in response body |
+| POST | `/mod/auth/login` | Authenticate user, return JWT in response body |
+| POST | `/mod/auth/logout` | Stateless — returns `{"success": true}` |
+| GET | `/mod/auth/me` | Get current user (requires `Authorization: Bearer` header) |
+| GET | `/mod/auth/setup-required` | Check if first-time setup is needed |
+| POST | `/mod/auth/setup` | Create first admin user (setup mode only) |
 
 ### Registration Flow
 
 ```http
-POST /auth/register HTTP/1.1
+POST /mod/auth/register HTTP/1.1
 Content-Type: application/json
 
 {
@@ -107,11 +75,12 @@ Content-Type: application/json
 **Success Response (201 Created)**:
 ```http
 HTTP/1.1 201 Created
-Set-Cookie: apigate_session=eyJ1c2VyX2lkIjoi...; Path=/; HttpOnly; SameSite=Lax; Secure; Expires=Mon, 03 Feb 2026 12:00:00 GMT
 Content-Type: application/json
 
 {
   "success": true,
+  "token": "eyJhbGciOiJIUzI1NiIs...",
+  "expires_at": "2026-02-16T12:00:00Z",
   "user": {
     "id": "user_abc123",
     "email": "user@example.com",
@@ -133,7 +102,7 @@ Content-Type: application/json
 ### Login Flow
 
 ```http
-POST /auth/login HTTP/1.1
+POST /mod/auth/login HTTP/1.1
 Content-Type: application/json
 
 {
@@ -145,11 +114,12 @@ Content-Type: application/json
 **Success Response (200 OK)**:
 ```http
 HTTP/1.1 200 OK
-Set-Cookie: apigate_session=eyJ1c2VyX2lkIjoi...; Path=/; HttpOnly; SameSite=Lax; Secure; Expires=Mon, 03 Feb 2026 12:00:00 GMT
 Content-Type: application/json
 
 {
   "success": true,
+  "token": "eyJhbGciOiJIUzI1NiIs...",
+  "expires_at": "2026-02-16T12:00:00Z",
   "user": {
     "id": "user_abc123",
     "email": "user@example.com",
@@ -168,13 +138,13 @@ Content-Type: application/json
 }
 ```
 
-### Session Validation
+### Authenticated Requests
 
-To use the session for authenticated requests, the browser automatically includes the cookie:
+Include the JWT token in the `Authorization` header:
 
 ```http
-GET /auth/me HTTP/1.1
-Cookie: apigate_session=eyJ1c2VyX2lkIjoi...
+GET /mod/auth/me HTTP/1.1
+Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
 ```
 
 **Success Response (200 OK)**:
@@ -204,15 +174,16 @@ Content-Type: application/json
 
 ### Logout Flow
 
+Logout is stateless. The client discards the token.
+
 ```http
-POST /auth/logout HTTP/1.1
-Cookie: apigate_session=eyJ1c2VyX2lkIjoi...
+POST /mod/auth/logout HTTP/1.1
+Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
 ```
 
 **Response (200 OK)**:
 ```http
 HTTP/1.1 200 OK
-Set-Cookie: apigate_session=; Path=/; HttpOnly; SameSite=Lax; MaxAge=-1
 Content-Type: application/json
 
 {
@@ -220,7 +191,54 @@ Content-Type: application/json
 }
 ```
 
-The `MaxAge=-1` directive instructs the browser to delete the cookie immediately.
+### React SPA Integration
+
+The React frontend stores the JWT in `localStorage` and sends it via `Authorization: Bearer` header:
+
+```typescript
+// Store token after login/register
+localStorage.setItem('auth_token', data.token);
+
+// Send on every request
+const token = localStorage.getItem('auth_token');
+fetch('/mod/auth/me', {
+  headers: { 'Authorization': `Bearer ${token}` }
+});
+
+// Clear on logout
+localStorage.removeItem('auth_token');
+```
+
+---
+
+## Admin API Authentication
+
+The admin API (`/admin/*`) accepts two authentication methods:
+
+### 1. JWT Bearer Token
+
+```http
+GET /admin/users HTTP/1.1
+Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
+```
+
+### 2. API Key
+
+```http
+GET /admin/users HTTP/1.1
+X-API-Key: ak_1234567890abcdef
+```
+
+Or using Bearer format:
+```http
+GET /admin/users HTTP/1.1
+Authorization: Bearer ak_1234567890abcdef
+```
+
+The admin middleware checks in order:
+1. `Authorization: Bearer <jwt>` — validate as JWT
+2. `Authorization: Bearer <api-key>` — validate as API key (if JWT validation fails)
+3. `X-API-Key` header — validate as API key
 
 ---
 
@@ -257,41 +275,35 @@ X-API-Key: ak_1234567890abcdef
 
 ---
 
+## SSR Web Handlers (Go Templates)
+
+The root web handlers (`web/handlers.go`) use a `token` JWT cookie for SSR Go template pages. This is **not** a dual auth path — it is the same JWT token, transported via cookie because HTML form submissions cannot set `Authorization` headers.
+
+The `token` cookie:
+- Contains a signed JWT (same format as Bearer tokens)
+- Is set on login/register via Go template handlers
+- Is read by middleware to extract user identity
+- Is separate from the removed `apigate_session` unsigned cookie
+
+---
+
 ## Security Considerations
 
-### Cookie Security
+### JWT Security
 
-1. **XSS Protection**: `HttpOnly` flag prevents JavaScript from accessing session cookies
-2. **CSRF Protection**: `SameSite=Lax` prevents cross-site request forgery
-3. **Transport Security**: `Secure` flag (on HTTPS) prevents cookie transmission over insecure connections
-4. **Path Scoping**: `Path=/` limits cookie to application scope
+1. **Signing**: HMAC-SHA256 with server-side secret
+2. **Expiration**: All tokens have an `exp` claim, validated on every request
+3. **Stateless**: No server-side session storage, no session invalidation
+4. **No cookies for SPA**: JWT is stored in `localStorage`, sent via header (no CSRF risk)
 
 ### Password Requirements
 
 - **Minimum length**: 8 characters
-- **Complexity**: Must contain uppercase, lowercase, and digit
-- **Storage**: Passwords MUST be hashed using bcrypt (cost 10)
-
-### Session Expiration
-
-- **Default lifetime**: 7 days
-- **Expiration checking**: Server validates `expires_at` on each request
-- **Expired sessions**: Return 401 Unauthorized
+- **Storage**: Passwords MUST be hashed using bcrypt (cost 10+)
 
 ### Production Deployment
 
-**Critical HTTPS Requirements**:
-1. The `Secure` cookie flag MUST be `true` on HTTPS connections
-2. Server MUST detect HTTPS via `r.TLS != nil` or `X-Forwarded-Proto` header
-3. Browsers **will reject** cookies with `Secure: false` on HTTPS
-
-**Reverse Proxy Configuration**:
-If APIGate runs behind a reverse proxy (nginx, Caddy, etc.), the proxy MUST set:
-```
-X-Forwarded-Proto: https
-```
-
-This allows APIGate to detect the original protocol and set the `Secure` flag correctly.
+The JWT secret (`auth.jwt_secret` setting) MUST be a strong random value in production. If not set, one is generated at startup and stored in the database.
 
 ---
 
@@ -299,57 +311,48 @@ This allows APIGate to detect the original protocol and set the `Secure` flag co
 
 All implementations MUST be tested for:
 
-1. **HTTP cookie behavior**: `Secure=false` on HTTP requests
-2. **HTTPS cookie behavior**: `Secure=true` on HTTPS requests
-3. **Proxied HTTPS behavior**: `Secure=true` when `X-Forwarded-Proto: https`
-4. **Cookie attributes**: HttpOnly, SameSite, Path, Expires all set correctly
-5. **Session expiration**: Cookies expire after 7 days
-6. **Cookie encoding**: Value is valid Base64-encoded JSON
+1. **Valid JWT**: Middleware accepts valid Bearer token and sets user context
+2. **Missing header**: Returns 401 when `Authorization` header is absent
+3. **Invalid token**: Returns 401 for malformed or tampered tokens
+4. **Expired token**: Returns 401 for expired JWT
+5. **No TokenService**: Returns 401 when token service is not configured
+6. **PlanID roundtrip**: JWT claims preserve planID through generate → validate cycle
+7. **API key auth**: Admin middleware accepts API keys via `X-API-Key` and `Authorization: Bearer`
 
 ---
 
 ## Implementation Notes
 
+### Architecture
+
+A single `TokenService` instance is created in `bootstrap/bootstrap.go` and injected into all components:
+
+```go
+tokenService := auth.NewTokenService(jwtSecret, 7*24*time.Hour)
+proxyService.SetTokenService(tokenService)
+moduleRuntime.HTTP.SetTokenService(tokenService)
+// Admin and web handlers receive JWTSecret string in their Deps
+```
+
 ### File Locations
 
-APIGate has **two authentication handlers** serving different purposes:
-
-1. **Admin Handler** (`adapters/http/admin/admin.go`)
-   - **Routes**: `/auth/*` and `/admin/*`
-   - **Purpose**: Admin API for user/plan management
-   - **Storage**: In-memory SessionStore
-   - **Tests**: `adapters/http/admin/auth_cookie_test.go`
-
-2. **Module Runtime Handler** (`core/channel/http/auth.go`)
-   - **Routes**: `/api/portal/auth/*`
-   - **Purpose**: Module-based authentication system
-   - **Storage**: Database via module runtime
-   - **Tests**: `core/channel/http/auth_cookie_attributes_test.go`
-
-Both handlers implement **identical cookie behavior** as specified in this document.
+| File | Purpose |
+|------|---------|
+| `adapters/auth/jwt.go` | `TokenService`, `Claims`, `GenerateToken`, `ValidateToken` |
+| `core/channel/http/auth.go` | Module WebUI auth (JWT Bearer only) |
+| `adapters/http/admin/admin.go` | Admin API auth (JWT Bearer + API key) |
+| `bootstrap/bootstrap.go` | Wires shared TokenService into all components |
+| `web/handlers.go` | SSR web handlers (`token` JWT cookie for Go templates) |
 
 ### Key Functions
 
 ```go
-// setSessionCookie sets the session cookie with protocol-aware Secure flag
-func (h *Handler) setSessionCookie(w http.ResponseWriter, r *http.Request, userID, email, name string)
+// Generate a JWT token with user claims
+func (s *TokenService) GenerateToken(userID, email, role, planID string) (string, time.Time, error)
+
+// Validate a JWT token and return claims
+func (s *TokenService) ValidateToken(tokenString string) (*Claims, error)
 ```
-
-**Protocol Detection** (identical in both handlers):
-```go
-isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
-```
-
-### Testing
-
-**Required test coverage** (BOTH handlers MUST have these tests):
-- ✅ HTTP request → `Secure=false`
-- ✅ HTTPS request (direct) → `Secure=true` via `r.TLS != nil`
-- ✅ HTTPS request (proxied) → `Secure=true` via `X-Forwarded-Proto: https`
-- ✅ All 7 cookie attributes validated (Name, Value, Path, HttpOnly, SameSite, Secure, Expires)
-- ✅ Cookie expiration validated (7 days)
-- ✅ Cookie value encoding validated (Base64 JSON)
-- ✅ Logout cookie clearing validated (MaxAge=-1)
 
 ---
 
@@ -357,55 +360,32 @@ isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
 
 ### Issue #54: Cookies Not Set on HTTPS (Module Runtime Handler)
 
-**Problem**: Session cookies were being set by the server but rejected by browsers on HTTPS deployments.
-
-**Root Cause**: The `Secure` flag was hardcoded to `false`, causing browsers to silently reject cookies on HTTPS connections.
-
-**Fix**: Implemented dynamic `Secure` flag based on protocol detection (commit `aa1ffe4`).
-
-**Handler**: `core/channel/http/auth.go` (module runtime handler, `/api/portal/auth/*`)
-
-**Lesson**: Cookie behavior differs significantly between HTTP and HTTPS. Always test authentication in production-like environments (HTTPS).
+**Problem**: Session cookies were being set but rejected by browsers on HTTPS.
+**Root Cause**: `Secure` flag hardcoded to `false`.
+**Resolution**: Superseded by Issue #58 — cookies removed entirely from module auth.
 
 ### Issue #55: Cookies Not Set on HTTPS (Admin Handler)
 
-**Problem**: Session cookies not being set on HTTPS for admin authentication endpoints.
+**Problem**: Session cookies not being set on HTTPS for admin auth.
+**Resolution**: Superseded by Issue #58 — cookies and sessions removed from admin handler.
 
-**Root Cause**: v0.2.4 fixed the module runtime handler but production uses the admin handler (`adapters/http/admin/admin.go`) for `/auth/*` endpoints. The admin handler lacked session cookie support entirely.
+### Issue #58: Replace Cookie/Session Auth with JWT-Only Auth
 
-**Multiple Failures**:
-1. **v0.2.4 Release**: Fixed wrong handler (module runtime instead of admin)
-2. **Commit dcf3538**: Added cookie support to admin handler but with **zero tests**
-3. **Coverage Illusion**: 74.8% coverage but 0% cookie attribute validation
+**Problem**: The `apigate_session` cookie was unsigned base64 JSON, creating a broken dual-auth path. Browser users authenticated via cookie couldn't access proxy routes because the proxy's auth context (`userID`, `planID`) doesn't resolve from unsigned cookies. Upstream services received no `X-User-ID` header → 401 errors.
+
+**Root Cause**: The module HTTP channel's `AuthHandler` created its own isolated random JWT secret, disconnected from the shared `TokenService`. It then used unsigned base64 JSON cookies instead of JWT.
 
 **Fix**:
-- Commit `dcf3538`: Added `setSessionCookie()` to admin handler
-- Comprehensive testing: 11 tests validating all 7 cookie attributes across all protocols
-- Coverage improved: 74.8% → 76.1% with actual behavior validation
-
-**Handler**: `adapters/http/admin/admin.go` (admin handler, `/auth/*`)
-
-**Lessons Learned**:
-1. **Line coverage ≠ behavior validation**: A function with 100% line coverage can have 0% security attribute validation
-2. **Test critical attributes explicitly**: For security features (cookies, headers, permissions), test **actual values**, not just execution paths
-3. **Protocol-specific testing required**: Test HTTP, HTTPS (direct), and HTTPS (proxied) separately
-4. **Architecture understanding**: Map request routing before fixing bugs to ensure you're modifying the correct handler
-5. **No release without verification**: Even with tests, verify on production-like HTTPS environment before releasing
-
-**Testing Improvements**:
-- Added `auth_cookie_test.go` with 11 comprehensive tests
-- Each test validates all 7 cookie attributes (not just presence)
-- Tests cover register, login (password + API key), logout
-- Both HTTP and HTTPS protocol scenarios tested
-- Proxy header detection (`X-Forwarded-Proto`) verified
-
-**Prevention**: See CLAUDE.md section "Security-Critical Attributes Testing" for testing requirements to prevent similar issues.
+- Removed all cookie/session infrastructure from module auth, admin auth, and web handlers
+- Injected shared `TokenService` into module HTTP channel via `SetTokenService()`
+- Added `PlanID` to JWT claims for proxy auth context resolution
+- React SPA stores JWT in `localStorage`, sends via `Authorization: Bearer` header
+- Single auth path: JWT tokens everywhere
 
 ---
 
 ## References
 
-- [MDN: Set-Cookie](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie)
-- [MDN: Using HTTP cookies](https://developer.mozilla.org/en-US/docs/Web/HTTP/Cookies)
-- [OWASP: Session Management Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html)
-- [RFC 6265: HTTP State Management Mechanism](https://datatracker.ietf.org/doc/html/rfc6265)
+- [RFC 7519: JSON Web Token](https://datatracker.ietf.org/doc/html/rfc7519)
+- [RFC 6750: Bearer Token Usage](https://datatracker.ietf.org/doc/html/rfc6750)
+- [OWASP: JWT Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/JSON_Web_Token_for_Java_Cheat_Sheet.html)

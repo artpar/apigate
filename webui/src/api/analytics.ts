@@ -79,6 +79,12 @@ export interface AnalyticsSummary {
   cost_units: number;
 }
 
+/** Build fetch options with Bearer auth header */
+function authFetchOptions(): RequestInit {
+  const token = localStorage.getItem('auth_token');
+  return token ? { headers: { 'Authorization': `Bearer ${token}` } } : {};
+}
+
 /**
  * Fetch usage statistics.
  */
@@ -95,7 +101,7 @@ export async function fetchUsage(params?: {
   if (params?.end_date) searchParams.set('end_date', params.end_date);
 
   const url = `/admin/usage${searchParams.toString() ? `?${searchParams}` : ''}`;
-  const response = await fetch(url, { credentials: 'include' });
+  const response = await fetch(url, authFetchOptions());
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: response.statusText }));
@@ -121,7 +127,7 @@ export async function fetchRecentEvents(params?: {
   if (params?.user_id) searchParams.set('user_id', params.user_id);
 
   const url = `/admin/analytics/events${searchParams.toString() ? `?${searchParams}` : ''}`;
-  const response = await fetch(url, { credentials: 'include' });
+  const response = await fetch(url, authFetchOptions());
 
   if (!response.ok) {
     // Fall back to empty if endpoint doesn't exist
@@ -151,7 +157,7 @@ export async function fetchAnalyticsSummary(params?: {
   if (params?.end) searchParams.set('end', params.end);
 
   const url = `/admin/analytics/summary${searchParams.toString() ? `?${searchParams}` : ''}`;
-  const response = await fetch(url, { credentials: 'include' });
+  const response = await fetch(url, authFetchOptions());
 
   if (!response.ok) {
     // Fall back to empty if endpoint doesn't exist

@@ -906,7 +906,7 @@ func TestPortalHandler_PortalAuthMiddleware_ValidToken(t *testing.T) {
 
 	// Generate a valid token
 	tokenService := auth.NewTokenService("test-secret", 24*time.Hour)
-	token, _, _ := tokenService.GenerateToken("user1", "user@example.com", "user")
+	token, _, _ := tokenService.GenerateToken("user1", "user@example.com", "user", "free")
 
 	// Create a protected handler
 	var gotUser *PortalUser
@@ -1095,7 +1095,7 @@ func TestPortalHandler_PortalLogout(t *testing.T) {
 
 	// Generate token
 	tokenService := auth.NewTokenService("test-secret", 24*time.Hour)
-	token, _, _ := tokenService.GenerateToken("user1", "user@example.com", "user")
+	token, _, _ := tokenService.GenerateToken("user1", "user@example.com", "user", "free")
 
 	req := httptest.NewRequest("POST", "/portal/logout", nil)
 	req.AddCookie(&http.Cookie{Name: "portal_token", Value: token})
@@ -1135,7 +1135,7 @@ func TestPortalHandler_PortalDashboard(t *testing.T) {
 
 	// Generate token
 	tokenService := auth.NewTokenService("test-secret", 24*time.Hour)
-	token, _, _ := tokenService.GenerateToken("user1", "user@example.com", "user")
+	token, _, _ := tokenService.GenerateToken("user1", "user@example.com", "user", "free")
 
 	req := httptest.NewRequest("GET", "/portal/dashboard", nil)
 	req.AddCookie(&http.Cookie{Name: "portal_token", Value: token})
@@ -1665,7 +1665,7 @@ func TestPortalHandler_PortalAuthMiddleware_UserNotFound(t *testing.T) {
 	handler, _, _, _ := newTestPortalHandler()
 
 	tokenService := auth.NewTokenService("test-secret", 24*time.Hour)
-	token, _, _ := tokenService.GenerateToken("nonexistent", "user@example.com", "user")
+	token, _, _ := tokenService.GenerateToken("nonexistent", "user@example.com", "user", "free")
 
 	protected := handler.PortalAuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -1692,7 +1692,7 @@ func TestPortalHandler_PortalAuthMiddleware_UserNotActive(t *testing.T) {
 	}
 
 	tokenService := auth.NewTokenService("test-secret", 24*time.Hour)
-	token, _, _ := tokenService.GenerateToken("user1", "user@example.com", "user")
+	token, _, _ := tokenService.GenerateToken("user1", "user@example.com", "user", "free")
 
 	protected := handler.PortalAuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -2465,7 +2465,7 @@ func TestPortalHandler_LandingPage_LoggedIn(t *testing.T) {
 
 	// Generate a valid token
 	tokenService := auth.NewTokenService("test-secret", 24*time.Hour)
-	token, _, _ := tokenService.GenerateToken("user1", "test@example.com", "user")
+	token, _, _ := tokenService.GenerateToken("user1", "test@example.com", "user", "free")
 
 	req := httptest.NewRequest("GET", "/portal", nil)
 	req.AddCookie(&http.Cookie{
@@ -2497,7 +2497,7 @@ func TestPortalHandler_LandingPage_LoggedInButInactive(t *testing.T) {
 
 	// Generate a valid token
 	tokenService := auth.NewTokenService("test-secret", 24*time.Hour)
-	token, _, _ := tokenService.GenerateToken("user1", "test@example.com", "user")
+	token, _, _ := tokenService.GenerateToken("user1", "test@example.com", "user", "free")
 
 	req := httptest.NewRequest("GET", "/portal", nil)
 	req.AddCookie(&http.Cookie{

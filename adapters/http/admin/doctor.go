@@ -128,7 +128,7 @@ func (h *Handler) Doctor(w http.ResponseWriter, r *http.Request) {
 	response.Statistics = StatisticsInfo{
 		TotalUsers:     userCount,
 		TotalKeys:      totalKeys,
-		ActiveSessions: len(h.sessions.sessions),
+		ActiveSessions: 0, // JWT auth is stateless
 	}
 
 	// Set appropriate status code

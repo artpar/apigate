@@ -461,7 +461,7 @@ func (h *PortalHandler) SignupSubmit(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/portal/login?signup=success&email="+url.QueryEscape(req.Email), http.StatusFound)
 	} else {
 		// Auto-login: generate JWT and set cookie, then redirect to dashboard
-		token, _, err := h.tokens.GenerateToken(userID, req.Email, "user")
+		token, _, err := h.tokens.GenerateToken(userID, req.Email, "user", "")
 		if err != nil {
 			h.logger.Error().Err(err).Msg("failed to generate token after signup")
 			// Fall back to login redirect
@@ -561,7 +561,7 @@ func (h *PortalHandler) PortalLoginSubmit(w http.ResponseWriter, r *http.Request
 	}
 
 	// Generate JWT
-	token, _, err := h.tokens.GenerateToken(user.ID, user.Email, "user")
+	token, _, err := h.tokens.GenerateToken(user.ID, user.Email, "user", user.PlanID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("failed to generate token")
 		h.renderError(w, http.StatusInternalServerError, "Failed to log in")
@@ -1764,7 +1764,7 @@ func (h *PortalHandler) APIRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Auto-login: generate JWT
-	token, _, err := h.tokens.GenerateToken(userID, req.Email, "user")
+	token, _, err := h.tokens.GenerateToken(userID, req.Email, "user", "")
 	if err != nil {
 		h.logger.Error().Err(err).Msg("failed to generate token after signup")
 		h.writeJSON(w, http.StatusCreated, map[string]interface{}{
@@ -1839,7 +1839,7 @@ func (h *PortalHandler) APILogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate JWT
-	token, _, err := h.tokens.GenerateToken(user.ID, user.Email, "user")
+	token, _, err := h.tokens.GenerateToken(user.ID, user.Email, "user", user.PlanID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("failed to generate token")
 		h.writeJSONError(w, http.StatusInternalServerError, "server_error", "Failed to log in")

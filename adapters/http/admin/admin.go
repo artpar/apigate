@@ -4,12 +4,10 @@ package admin
 import (
 	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/artpar/apigate/adapters/auth"
@@ -27,9 +25,6 @@ const (
 	TypeSession = "sessions"
 )
 
-// SessionCookie is the name of the session cookie.
-const SessionCookie = "apigate_session"
-
 // Handler provides admin API endpoints.
 type Handler struct {
 	users          ports.UserStore
@@ -40,8 +35,7 @@ type Handler struct {
 	plans          ports.PlanStore
 	logger         zerolog.Logger
 	hasher         ports.Hasher
-	sessions       *SessionStore
-	tokens         *auth.TokenService // JWT token service for Web UI session validation
+	tokens         *auth.TokenService
 	routesHandler  *RoutesHandler
 	meterHandler   *MeterHandler
 	reloadCallback func(context.Context) error // Called when explicit reload is requested
@@ -73,11 +67,10 @@ func NewHandler(deps Deps) *Handler {
 		plans:          deps.Plans,
 		logger:         deps.Logger,
 		hasher:         deps.Hasher,
-		sessions:       NewSessionStore(),
 		reloadCallback: deps.ReloadCallback,
 	}
 
-	// Create token service for Web UI session validation (if JWT secret provided)
+	// Create token service for JWT authentication (if JWT secret provided)
 	if deps.JWTSecret != "" {
 		h.tokens = auth.NewTokenService(deps.JWTSecret, 24*time.Hour)
 	}
@@ -181,69 +174,6 @@ func (h *Handler) MeterRouter() chi.Router {
 // Authentication
 // -----------------------------------------------------------------------------
 
-// Session represents an admin session.
-type Session struct {
-	ID        string
-	UserID    string
-	Email     string
-	CreatedAt time.Time
-	ExpiresAt time.Time
-}
-
-// SessionStore manages admin sessions.
-type SessionStore struct {
-	mu       sync.RWMutex
-	sessions map[string]*Session
-}
-
-// NewSessionStore creates a new session store.
-func NewSessionStore() *SessionStore {
-	return &SessionStore{
-		sessions: make(map[string]*Session),
-	}
-}
-
-// Create creates a new session.
-func (s *SessionStore) Create(userID, email string, duration time.Duration) *Session {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	id := generateSessionID()
-	session := &Session{
-		ID:        id,
-		UserID:    userID,
-		Email:     email,
-		CreatedAt: time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(duration),
-	}
-	s.sessions[id] = session
-	return session
-}
-
-// Get retrieves a session by ID.
-func (s *SessionStore) Get(id string) *Session {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	session, ok := s.sessions[id]
-	if !ok || session.ExpiresAt.Before(time.Now().UTC()) {
-		return nil
-	}
-	return session
-}
-
-// Delete removes a session.
-func (s *SessionStore) Delete(id string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.sessions, id)
-}
-
-func generateSessionID() string {
-	b := make([]byte, 32)
-	rand.Read(b)
-	return hex.EncodeToString(b)
-}
 
 // LoginRequest represents a login request.
 type LoginRequest struct {
@@ -254,9 +184,8 @@ type LoginRequest struct {
 
 // LoginResponse represents a login response.
 type LoginResponse struct {
-	SessionID string `json:"session_id"`
-	ExpiresAt string `json:"expires_at"`
-	User      struct {
+	Token string `json:"token"`
+	User  struct {
 		ID    string `json:"id"`
 		Email string `json:"email"`
 	} `json:"user"`
@@ -287,21 +216,16 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Get user by email if provided, otherwise use first admin
+		// Get user by email if provided, otherwise use admin
 		user, err := h.users.GetByEmail(r.Context(), req.Email)
 		if err != nil {
-			// For API key auth without email, create a session for "admin"
-			session := h.sessions.Create("admin", "admin@apigate", 24*time.Hour)
-			token := h.generateTokenIfAvailable("admin", "admin@apigate")
-			h.setSessionCookie(w, r, "admin", "admin@apigate", "Admin")
-			jsonapi.WriteResource(w, http.StatusOK, sessionToResource(session, "admin", "admin@apigate", token))
+			token := h.generateTokenIfAvailable("admin", "admin@apigate", "")
+			jsonapi.WriteResource(w, http.StatusOK, loginToResource("admin", "admin@apigate", token))
 			return
 		}
 
-		session := h.sessions.Create(user.ID, user.Email, 24*time.Hour)
-		token := h.generateTokenIfAvailable(user.ID, user.Email)
-		h.setSessionCookie(w, r, user.ID, user.Email, user.Name)
-		jsonapi.WriteResource(w, http.StatusOK, sessionToResource(session, user.ID, user.Email, token))
+		token := h.generateTokenIfAvailable(user.ID, user.Email, user.PlanID)
+		jsonapi.WriteResource(w, http.StatusOK, loginToResource(user.ID, user.Email, token))
 		return
 	}
 
@@ -341,58 +265,22 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create session and generate JWT token
-	session := h.sessions.Create(user.ID, user.Email, 24*time.Hour)
-	token := h.generateTokenIfAvailable(user.ID, user.Email)
+	// Generate JWT token
+	token := h.generateTokenIfAvailable(user.ID, user.Email, user.PlanID)
 
-	// Set session cookie
-	h.setSessionCookie(w, r, user.ID, user.Email, user.Name)
-
-	jsonapi.WriteResource(w, http.StatusOK, sessionToResource(session, user.ID, user.Email, token))
+	jsonapi.WriteResource(w, http.StatusOK, loginToResource(user.ID, user.Email, token))
 }
 
 // generateTokenIfAvailable generates a JWT token if the token service is configured.
-func (h *Handler) generateTokenIfAvailable(userID, email string) string {
+func (h *Handler) generateTokenIfAvailable(userID, email, planID string) string {
 	if h.tokens == nil {
 		return ""
 	}
-	token, _, err := h.tokens.GenerateToken(userID, email, "admin")
+	token, _, err := h.tokens.GenerateToken(userID, email, "admin", planID)
 	if err != nil {
 		return ""
 	}
 	return token
-}
-
-// setSessionCookie sets the session cookie with protocol-aware Secure flag.
-func (h *Handler) setSessionCookie(w http.ResponseWriter, r *http.Request, userID, email, name string) {
-	// Create session object for cookie
-	session := struct {
-		UserID    string    `json:"user_id"`
-		Email     string    `json:"email"`
-		Name      string    `json:"name"`
-		ExpiresAt time.Time `json:"expires_at"`
-	}{
-		UserID:    userID,
-		Email:     email,
-		Name:      name,
-		ExpiresAt: time.Now().Add(24 * time.Hour * 7), // 7 days
-	}
-
-	data, _ := json.Marshal(session)
-	encoded := base64.StdEncoding.EncodeToString(data)
-
-	// Detect if request is over HTTPS
-	isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     SessionCookie,
-		Value:    encoded,
-		Path:     "/",
-		Expires:  session.ExpiresAt,
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		Secure:   isSecure,
-	})
 }
 
 func (h *Handler) authenticateByAPIKey(ctx context.Context, apiKey string) error {
@@ -430,19 +318,6 @@ func (h *Handler) authenticateByAPIKey(ctx context.Context, apiKey string) error
 //	@Security		AdminAuth
 //	@Router			/admin/logout [post]
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
-	sessionID := r.Context().Value(ctxSessionKey).(string)
-	h.sessions.Delete(sessionID)
-
-	// Clear session cookie
-	http.SetCookie(w, &http.Cookie{
-		Name:     SessionCookie,
-		Value:    "",
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   -1, // Delete cookie
-	})
-
 	jsonapi.WriteMeta(w, http.StatusOK, jsonapi.Meta{"status": "logged_out"})
 }
 
@@ -544,10 +419,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate JWT token for immediate login
-	token := h.generateTokenIfAvailable(user.ID, user.Email)
-
-	// Set session cookie
-	h.setSessionCookie(w, r, user.ID, user.Email, user.Name)
+	token := h.generateTokenIfAvailable(user.ID, user.Email, user.PlanID)
 
 	// Return user with token
 	rb := jsonapi.NewResource(TypeUser, user.ID).
@@ -581,57 +453,10 @@ func (h *Handler) AuthRouter() chi.Router {
 	return r
 }
 
-// sessionCookieData represents the data stored in the apigate_session cookie.
-type sessionCookieData struct {
-	UserID    string    `json:"user_id"`
-	Email     string    `json:"email"`
-	Name      string    `json:"name"`
-	ExpiresAt time.Time `json:"expires_at"`
-}
-
-// AuthMiddleware validates admin authentication.
+// AuthMiddleware validates admin authentication via JWT Bearer or API key.
 func (h *Handler) AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Try apigate_session cookie first (set by Login/Register handlers)
-		if cookie, err := r.Cookie(SessionCookie); err == nil {
-			if data, err := base64.StdEncoding.DecodeString(cookie.Value); err == nil {
-				var session sessionCookieData
-				if err := json.Unmarshal(data, &session); err == nil {
-					// Validate expiration
-					if session.ExpiresAt.After(time.Now()) && session.UserID != "" {
-						ctx := context.WithValue(r.Context(), ctxSessionKey, "cookie_session")
-						ctx = context.WithValue(ctx, ctxUserIDKey, session.UserID)
-						next.ServeHTTP(w, r.WithContext(ctx))
-						return
-					}
-				}
-			}
-		}
-
-		// Try Admin API session cookie (legacy)
-		if cookie, err := r.Cookie("session_id"); err == nil {
-			if session := h.sessions.Get(cookie.Value); session != nil {
-				ctx := context.WithValue(r.Context(), ctxSessionKey, session.ID)
-				ctx = context.WithValue(ctx, ctxUserIDKey, session.UserID)
-				next.ServeHTTP(w, r.WithContext(ctx))
-				return
-			}
-		}
-
-		// Try Web UI JWT token cookie (enables Admin UI to make Admin API calls)
-		if h.tokens != nil {
-			if cookie, err := r.Cookie("token"); err == nil {
-				if claims, err := h.tokens.ValidateToken(cookie.Value); err == nil {
-					// JWT token is valid - allow access
-					ctx := context.WithValue(r.Context(), ctxSessionKey, "jwt_token")
-					ctx = context.WithValue(ctx, ctxUserIDKey, claims.UserID)
-					next.ServeHTTP(w, r.WithContext(ctx))
-					return
-				}
-			}
-		}
-
-		// Try Authorization header (Bearer JWT, session_id, or API key)
+		// Try Authorization header: Bearer JWT or API key
 		authHeader := r.Header.Get("Authorization")
 		if authHeader != "" {
 			token := strings.TrimPrefix(authHeader, "Bearer ")
@@ -646,20 +471,24 @@ func (h *Handler) AuthMiddleware(next http.Handler) http.Handler {
 				}
 			}
 
-			// Check if it's a session ID
-			if session := h.sessions.Get(token); session != nil {
-				ctx := context.WithValue(r.Context(), ctxSessionKey, session.ID)
-				ctx = context.WithValue(ctx, ctxUserIDKey, session.UserID)
-				next.ServeHTTP(w, r.WithContext(ctx))
-				return
-			}
-
 			// Check if it's an API key
 			if err := h.authenticateByAPIKey(r.Context(), token); err == nil {
 				ctx := context.WithValue(r.Context(), ctxSessionKey, "api_key")
 				ctx = context.WithValue(ctx, ctxUserIDKey, "admin")
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
+			}
+		}
+
+		// Try Web UI JWT token cookie (enables SSR Admin UI to make Admin API calls)
+		if h.tokens != nil {
+			if cookie, err := r.Cookie("token"); err == nil {
+				if claims, err := h.tokens.ValidateToken(cookie.Value); err == nil {
+					ctx := context.WithValue(r.Context(), ctxSessionKey, "jwt_token")
+					ctx = context.WithValue(ctx, ctxUserIDKey, claims.UserID)
+					next.ServeHTTP(w, r.WithContext(ctx))
+					return
+				}
 			}
 		}
 
@@ -673,7 +502,7 @@ func (h *Handler) AuthMiddleware(next http.Handler) http.Handler {
 			}
 		}
 
-		jsonapi.WriteUnauthorized(w, "Valid session or API key required")
+		jsonapi.WriteUnauthorized(w, "Valid JWT token or API key required")
 	})
 }
 
@@ -1137,12 +966,9 @@ func keyToResource(k key.Key) jsonapi.Resource {
 	return rb.Build()
 }
 
-// sessionToResource converts a Session to a JSON:API Resource.
-// If token is provided, it's included in the response for API authentication.
-func sessionToResource(s *Session, userID, userEmail, token string) jsonapi.Resource {
-	rb := jsonapi.NewResource(TypeSession, s.ID).
-		Attr("expires_at", s.ExpiresAt.Format(time.RFC3339)).
-		Attr("created_at", s.CreatedAt.Format(time.RFC3339)).
+// loginToResource creates a JSON:API Resource for a login response.
+func loginToResource(userID, userEmail, token string) jsonapi.Resource {
+	rb := jsonapi.NewResource(TypeSession, userID).
 		BelongsTo("user", TypeUser, userID).
 		Meta("user_email", userEmail)
 	if token != "" {

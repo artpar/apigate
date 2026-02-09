@@ -157,7 +157,7 @@ func TestHandler_InvitesPage(t *testing.T) {
 	h.templates["invites"] = tmpl
 
 	// Create authenticated request
-	token, _, _ := h.tokens.GenerateToken("admin-1", "admin@example.com", "admin")
+	token, _, _ := h.tokens.GenerateToken("admin-1", "admin@example.com", "admin", "free")
 
 	req := httptest.NewRequest("GET", "/invites", nil)
 	req.AddCookie(&http.Cookie{Name: "token", Value: token})

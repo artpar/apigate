@@ -8,6 +8,7 @@ interface User {
 
 interface AuthContextType {
   user: User | null;
+  token: string | null;
   isLoading: boolean;
   isAuthenticated: boolean;
   setupRequired: boolean;
@@ -20,15 +21,31 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+function getAuthHeaders(): HeadersInit {
+  const token = localStorage.getItem('auth_token');
+  return token ? { 'Authorization': `Bearer ${token}` } : {};
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [token, setToken] = useState<string | null>(localStorage.getItem('auth_token'));
   const [isLoading, setIsLoading] = useState(true);
   const [setupRequired, setSetupRequired] = useState(false);
+
+  const storeToken = (newToken: string) => {
+    localStorage.setItem('auth_token', newToken);
+    setToken(newToken);
+  };
+
+  const clearToken = () => {
+    localStorage.removeItem('auth_token');
+    setToken(null);
+  };
 
   const checkAuth = async () => {
     try {
       // First check if setup is required
-      const setupRes = await fetch('/mod/auth/setup-required', { credentials: 'include' });
+      const setupRes = await fetch('/mod/auth/setup-required');
       const setupData = await setupRes.json();
 
       if (setupData.setup_required) {
@@ -41,12 +58,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSetupRequired(false);
 
       // Then check current user
-      const res = await fetch('/mod/auth/me', { credentials: 'include' });
+      const res = await fetch('/mod/auth/me', {
+        headers: getAuthHeaders(),
+      });
       if (res.ok) {
         const data = await res.json();
         setUser(data.user);
       } else {
         setUser(null);
+        clearToken();
       }
     } catch (error) {
       setUser(null);
@@ -63,7 +83,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const res = await fetch('/mod/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
       body: JSON.stringify({ email, password }),
     });
 
@@ -72,6 +91,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error(data.error || 'Login failed');
     }
 
+    if (data.token) {
+      storeToken(data.token);
+    }
     setUser(data.user);
   };
 
@@ -79,7 +101,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const res = await fetch('/mod/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
       body: JSON.stringify({ email, password, name }),
     });
 
@@ -88,6 +109,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error(data.error || 'Registration failed');
     }
 
+    if (data.token) {
+      storeToken(data.token);
+    }
     setUser(data.user);
   };
 
@@ -95,7 +119,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const res = await fetch('/mod/auth/setup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
       body: JSON.stringify({ email, password, name }),
     });
 
@@ -104,6 +127,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error(data.error || 'Setup failed');
     }
 
+    if (data.token) {
+      storeToken(data.token);
+    }
     setSetupRequired(false);
     setUser(data.user);
   };
@@ -111,8 +137,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     await fetch('/mod/auth/logout', {
       method: 'POST',
-      credentials: 'include',
+      headers: getAuthHeaders(),
     });
+    clearToken();
     setUser(null);
   };
 
@@ -120,6 +147,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     <AuthContext.Provider
       value={{
         user,
+        token,
         isLoading,
         isAuthenticated: !!user,
         setupRequired,

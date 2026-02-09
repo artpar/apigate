@@ -17,16 +17,21 @@ const API_BASE = '/mod';
 const schemaCache = new Map<string, { data: ModuleSchema; timestamp: number }>();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
-/** Default fetch options with credentials for session cookies */
-const fetchOptions: RequestInit = {
-  credentials: 'include',
-};
+/** Build fetch options with Bearer auth header */
+function authFetchOptions(extra?: RequestInit): RequestInit {
+  const token = localStorage.getItem('auth_token');
+  const headers: HeadersInit = token ? { 'Authorization': `Bearer ${token}` } : {};
+  if (extra?.headers) {
+    Object.assign(headers, extra.headers);
+  }
+  return { ...extra, headers };
+}
 
 /**
  * Fetch all available modules (summary list).
  */
 export async function fetchModules(): Promise<ModuleSummary[]> {
-  const response = await fetch(`${API_BASE}/_schema`, fetchOptions);
+  const response = await fetch(`${API_BASE}/_schema`, authFetchOptions());
   if (!response.ok) {
     throw new Error(`Failed to fetch modules: ${response.statusText}`);
   }
@@ -50,7 +55,7 @@ export async function fetchModuleSchema(module: string): Promise<ModuleSchema> {
     return cached.data;
   }
 
-  const response = await fetch(`${API_BASE}/_schema/${module}`, fetchOptions);
+  const response = await fetch(`${API_BASE}/_schema/${module}`, authFetchOptions());
   if (!response.ok) {
     throw new Error(`Failed to fetch schema for ${module}: ${response.statusText}`);
   }
@@ -85,7 +90,7 @@ export async function fetchRecords(
 
   // Use the plural form for the API path (e.g., /mod/users)
   const url = `${API_BASE}/${modulePlural}${searchParams.toString() ? `?${searchParams}` : ''}`;
-  const response = await fetch(url, fetchOptions);
+  const response = await fetch(url, authFetchOptions());
   if (!response.ok) {
     throw new Error(`Failed to fetch ${modulePlural}: ${response.statusText}`);
   }
@@ -100,7 +105,7 @@ export async function fetchRecord(
   modulePlural: string,
   idOrLookup: string
 ): Promise<RecordResponse<Record>> {
-  const response = await fetch(`${API_BASE}/${modulePlural}/${encodeURIComponent(idOrLookup)}`, fetchOptions);
+  const response = await fetch(`${API_BASE}/${modulePlural}/${encodeURIComponent(idOrLookup)}`, authFetchOptions());
   if (!response.ok) {
     if (response.status === 404) {
       throw new Error(`Record not found: ${idOrLookup}`);
@@ -118,12 +123,11 @@ export async function createRecord(
   modulePlural: string,
   data: Record
 ): Promise<RecordResponse<Record>> {
-  const response = await fetch(`${API_BASE}/${modulePlural}`, {
-    ...fetchOptions,
+  const response = await fetch(`${API_BASE}/${modulePlural}`, authFetchOptions({
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
-  });
+  }));
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || `Failed to create record`);
@@ -140,12 +144,11 @@ export async function updateRecord(
   idOrLookup: string,
   data: Record
 ): Promise<RecordResponse<Record>> {
-  const response = await fetch(`${API_BASE}/${modulePlural}/${encodeURIComponent(idOrLookup)}`, {
-    ...fetchOptions,
+  const response = await fetch(`${API_BASE}/${modulePlural}/${encodeURIComponent(idOrLookup)}`, authFetchOptions({
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
-  });
+  }));
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || `Failed to update record`);
@@ -161,10 +164,9 @@ export async function deleteRecord(
   modulePlural: string,
   idOrLookup: string
 ): Promise<void> {
-  const response = await fetch(`${API_BASE}/${modulePlural}/${encodeURIComponent(idOrLookup)}`, {
-    ...fetchOptions,
+  const response = await fetch(`${API_BASE}/${modulePlural}/${encodeURIComponent(idOrLookup)}`, authFetchOptions({
     method: 'DELETE',
-  });
+  }));
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || `Failed to delete record`);
@@ -183,12 +185,11 @@ export async function executeAction(
 ): Promise<RecordResponse<Record>> {
   const response = await fetch(
     `${API_BASE}/${modulePlural}/${encodeURIComponent(idOrLookup)}/${action}`,
-    {
-      ...fetchOptions,
+    authFetchOptions({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: data ? JSON.stringify(data) : undefined,
-    }
+    })
   );
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: response.statusText }));

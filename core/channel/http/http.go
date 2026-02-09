@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/artpar/apigate/adapters/auth"
 	"github.com/artpar/apigate/core/convention"
 	"github.com/artpar/apigate/core/openapi"
 	"github.com/artpar/apigate/core/runtime"
@@ -76,6 +77,12 @@ func (c *Channel) Name() string {
 // Handler returns the HTTP handler.
 func (c *Channel) Handler() http.Handler {
 	return c.router
+}
+
+// SetTokenService injects the shared JWT token service.
+// This must be called before serving requests so that auth uses the shared secret.
+func (c *Channel) SetTokenService(ts *auth.TokenService) {
+	c.authHandler.SetTokenService(ts)
 }
 
 // AuthRoutes returns the auth router for mounting at additional paths.

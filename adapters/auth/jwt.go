@@ -15,7 +15,8 @@ import (
 type Claims struct {
 	UserID string `json:"uid"`
 	Email  string `json:"email"`
-	Role   string `json:"role"` // "admin" or "user"
+	Role   string `json:"role"`   // "admin" or "user"
+	PlanID string `json:"pid"`
 	jwt.RegisteredClaims
 }
 
@@ -50,7 +51,7 @@ func NewTokenService(secret string, expiration time.Duration) *TokenService {
 }
 
 // GenerateToken creates a new JWT token for the given user.
-func (s *TokenService) GenerateToken(userID, email, role string) (string, time.Time, error) {
+func (s *TokenService) GenerateToken(userID, email, role, planID string) (string, time.Time, error) {
 	now := time.Now().UTC()
 	expiresAt := now.Add(s.expiration)
 
@@ -58,6 +59,7 @@ func (s *TokenService) GenerateToken(userID, email, role string) (string, time.T
 		UserID: userID,
 		Email:  email,
 		Role:   role,
+		PlanID: planID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    s.issuer,
 			Subject:   userID,
@@ -103,7 +105,7 @@ func (s *TokenService) RefreshToken(tokenString string) (string, time.Time, erro
 		return "", time.Time{}, err
 	}
 
-	return s.GenerateToken(claims.UserID, claims.Email, claims.Role)
+	return s.GenerateToken(claims.UserID, claims.Email, claims.Role, claims.PlanID)
 }
 
 // GenerateSecret generates a random secret suitable for JWT signing.

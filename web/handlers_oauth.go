@@ -302,7 +302,7 @@ func (h *Handler) loginUser(w http.ResponseWriter, r *http.Request, u ports.User
 	// OAuth users are treated as customers (not admins) by default
 	role := "customer"
 
-	token, expiresAt, err := h.tokens.GenerateToken(u.ID, u.Email, role)
+	token, expiresAt, err := h.tokens.GenerateToken(u.ID, u.Email, role, u.PlanID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to generate token")
 		http.Redirect(w, r, "/login?error=token_generation_failed", http.StatusFound)
@@ -318,9 +318,6 @@ func (h *Handler) loginUser(w http.ResponseWriter, r *http.Request, u ports.User
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
 	})
-
-	// Also set apigate_session cookie for module WebUI compatibility
-	setModuleSessionCookie(w, u.ID, u.Email, u.Name, expiresAt)
 
 	// Redirect to the original destination or dashboard
 	if redirectURI == "" || !strings.HasPrefix(redirectURI, "/") {

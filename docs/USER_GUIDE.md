@@ -168,7 +168,6 @@ Configure global platform settings:
 #### Security
 - JWT token expiration
 - Password requirements
-- Session timeout
 
 #### Email
 - SMTP configuration for notifications

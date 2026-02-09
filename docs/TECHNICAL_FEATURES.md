@@ -134,10 +134,11 @@ route:
 | Feature | Description |
 |---------|-------------|
 | Login | Email/password with bcrypt verification |
-| Sessions | Cookie-based with configurable TTL |
-| JWT Tokens | HS256/HS384/HS512 signed tokens |
-| Refresh Tokens | Long-lived tokens for session renewal |
-| Token Rotation | Optional refresh token rotation |
+| JWT Tokens | HS256 signed tokens with user claims (uid, email, role, planID) |
+| Bearer Auth | `Authorization: Bearer <jwt>` header for all SPA/API requests |
+| Token in Response | Login/register returns JWT in response body |
+| Stateless Auth | No server-side sessions — JWT is self-contained |
+| Shared TokenService | Single JWT secret injected into all components at bootstrap |
 | Password Hashing | bcrypt with configurable cost factor |
 | Account Lockout | After configurable failed attempts |
 | Email Verification | Optional email confirmation flow |
@@ -931,7 +932,7 @@ apigate mod <module> delete <id>
 | `usage_summaries` | Aggregated stats |
 | `rate_limits` | Rate limit state |
 | `settings` | Configuration |
-| `sessions` | Web sessions |
+| `sessions` | Portal security sessions |
 | `schema_migrations` | Migration tracking |
 
 ### 17.3 Migrations
@@ -1030,8 +1031,7 @@ GET /health
 | Password hashing | bcrypt (cost 12) |
 | API key hashing | bcrypt |
 | Secret encryption | AES-256-GCM |
-| Session security | Signed cookies |
-| Token signing | HMAC-SHA256/384/512 |
+| JWT signing | HMAC-SHA256 with shared secret |
 
 ### 20.2 Access Control
 
@@ -1039,8 +1039,8 @@ GET /health
 |-------|--------------|
 | Anonymous | Public endpoints only |
 | API Key | Proxied API access |
-| User Session | Portal access |
-| Admin | Full management access |
+| JWT Bearer | Web UI and portal access |
+| Admin | Full management access (JWT or API key) |
 
 ### 20.3 Attack Prevention
 

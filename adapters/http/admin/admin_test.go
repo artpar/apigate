@@ -1078,71 +1078,6 @@ func doRequest(t *testing.T, h *admin.Handler, method, path string, body interfa
 	return rec.Result()
 }
 
-// ============================================================================
-// Session Management Tests
-// ============================================================================
-
-func TestSessionStore_CreateAndGet(t *testing.T) {
-	store := admin.NewSessionStore()
-
-	session := store.Create("user123", "test@example.com", time.Hour)
-
-	if session == nil {
-		t.Fatal("Expected session to be created")
-	}
-	if session.UserID != "user123" {
-		t.Errorf("Expected UserID=user123, got %s", session.UserID)
-	}
-	if session.Email != "test@example.com" {
-		t.Errorf("Expected Email=test@example.com, got %s", session.Email)
-	}
-
-	// Retrieve the session
-	retrieved := store.Get(session.ID)
-	if retrieved == nil {
-		t.Fatal("Expected to retrieve session")
-	}
-	if retrieved.ID != session.ID {
-		t.Errorf("Expected ID=%s, got %s", session.ID, retrieved.ID)
-	}
-}
-
-func TestSessionStore_GetExpired(t *testing.T) {
-	store := admin.NewSessionStore()
-
-	// Create a session with negative duration (expired immediately)
-	session := store.Create("user123", "test@example.com", -time.Hour)
-
-	// Should not be able to retrieve expired session
-	retrieved := store.Get(session.ID)
-	if retrieved != nil {
-		t.Error("Expected nil for expired session")
-	}
-}
-
-func TestSessionStore_GetNonExistent(t *testing.T) {
-	store := admin.NewSessionStore()
-
-	retrieved := store.Get("nonexistent-id")
-	if retrieved != nil {
-		t.Error("Expected nil for non-existent session")
-	}
-}
-
-func TestSessionStore_Delete(t *testing.T) {
-	store := admin.NewSessionStore()
-
-	session := store.Create("user123", "test@example.com", time.Hour)
-
-	// Delete the session
-	store.Delete(session.ID)
-
-	// Should not be able to retrieve deleted session
-	retrieved := store.Get(session.ID)
-	if retrieved != nil {
-		t.Error("Expected nil for deleted session")
-	}
-}
 
 // ============================================================================
 // Login Tests - Password Authentication
@@ -1322,23 +1257,12 @@ func TestLogin_RevokedAPIKey(t *testing.T) {
 // Logout Tests
 // ============================================================================
 
-func TestLogout_WithSession(t *testing.T) {
+func TestLogout_WithAPIKey(t *testing.T) {
 	h, rawKey := setupHandler(t)
 
-	// First login to get a session
-	loginBody := map[string]string{
-		"api_key": rawKey,
-		"email":   "admin@test.com",
-	}
-	loginResp := doRequest(t, h, "POST", "/login", loginBody, "")
-
-	var loginResult map[string]any
-	json.NewDecoder(loginResp.Body).Decode(&loginResult)
-	sessionID := getResourceID(loginResult)
-
-	// Now logout using the session
+	// Logout using API key auth (stateless — just returns success)
 	req := httptest.NewRequest("POST", "/logout", nil)
-	req.Header.Set("Authorization", "Bearer "+sessionID)
+	req.Header.Set("X-API-Key", rawKey)
 
 	rec := httptest.NewRecorder()
 	h.Router().ServeHTTP(rec, req)
@@ -1346,76 +1270,11 @@ func TestLogout_WithSession(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("Expected 200, got %d", rec.Code)
 	}
-
-	// Verify session is invalidated - subsequent request should fail
-	req2 := httptest.NewRequest("GET", "/users", nil)
-	req2.Header.Set("Authorization", "Bearer "+sessionID)
-	rec2 := httptest.NewRecorder()
-	h.Router().ServeHTTP(rec2, req2)
-
-	if rec2.Code != http.StatusUnauthorized {
-		t.Fatalf("Expected 401 after logout, got %d", rec2.Code)
-	}
 }
 
 // ============================================================================
 // Auth Middleware Tests
 // ============================================================================
-
-func TestAuthMiddleware_WithSessionCookie(t *testing.T) {
-	h, rawKey := setupHandler(t)
-
-	// First login to get a session
-	loginBody := map[string]string{
-		"api_key": rawKey,
-		"email":   "admin@test.com",
-	}
-	loginResp := doRequest(t, h, "POST", "/login", loginBody, "")
-
-	var loginResult map[string]any
-	json.NewDecoder(loginResp.Body).Decode(&loginResult)
-	sessionID := getResourceID(loginResult)
-
-	// Make request with session cookie
-	req := httptest.NewRequest("GET", "/users", nil)
-	req.AddCookie(&http.Cookie{
-		Name:  "session_id",
-		Value: sessionID,
-	})
-
-	rec := httptest.NewRecorder()
-	h.Router().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 with cookie auth, got %d", rec.Code)
-	}
-}
-
-func TestAuthMiddleware_WithBearerSession(t *testing.T) {
-	h, rawKey := setupHandler(t)
-
-	// First login to get a session
-	loginBody := map[string]string{
-		"api_key": rawKey,
-		"email":   "admin@test.com",
-	}
-	loginResp := doRequest(t, h, "POST", "/login", loginBody, "")
-
-	var loginResult map[string]any
-	json.NewDecoder(loginResp.Body).Decode(&loginResult)
-	sessionID := getResourceID(loginResult)
-
-	// Make request with Bearer token (session ID)
-	req := httptest.NewRequest("GET", "/users", nil)
-	req.Header.Set("Authorization", "Bearer "+sessionID)
-
-	rec := httptest.NewRecorder()
-	h.Router().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Expected 200 with Bearer session, got %d", rec.Code)
-	}
-}
 
 func TestAuthMiddleware_WithBearerAPIKey(t *testing.T) {
 	h, rawKey := setupHandler(t)
@@ -1432,20 +1291,16 @@ func TestAuthMiddleware_WithBearerAPIKey(t *testing.T) {
 	}
 }
 
-func TestAuthMiddleware_InvalidCookie(t *testing.T) {
+func TestAuthMiddleware_NoAuth(t *testing.T) {
 	h, _ := setupHandler(t)
 
 	req := httptest.NewRequest("GET", "/users", nil)
-	req.AddCookie(&http.Cookie{
-		Name:  "session_id",
-		Value: "invalid-session-id",
-	})
 
 	rec := httptest.NewRecorder()
 	h.Router().ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("Expected 401 with invalid cookie, got %d", rec.Code)
+		t.Fatalf("Expected 401 with no auth, got %d", rec.Code)
 	}
 }
 

@@ -455,7 +455,7 @@ func TestHandler_AuthMiddleware_InvalidToken(t *testing.T) {
 func TestHandler_AuthMiddleware_ValidToken(t *testing.T) {
 	h, _, _, _ := newTestHandler()
 
-	token, _, _ := h.tokens.GenerateToken("user1", "user@example.com", "admin")
+	token, _, _ := h.tokens.GenerateToken("user1", "user@example.com", "admin", "free")
 
 	var gotContext bool
 	protected := h.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1163,7 +1163,7 @@ func TestHandler_LoginPage_NotSetup(t *testing.T) {
 func TestHandler_LoginPage_AlreadyLoggedIn(t *testing.T) {
 	h, _, _, _ := newTestHandler()
 
-	token, _, _ := h.tokens.GenerateToken("user1", "test@example.com", "admin")
+	token, _, _ := h.tokens.GenerateToken("user1", "test@example.com", "admin", "free")
 
 	req := httptest.NewRequest("GET", "/login", nil)
 	req.AddCookie(&http.Cookie{Name: "token", Value: token})
@@ -2555,26 +2555,6 @@ func TestHandler_KeyRevoke_HTMX(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Errorf("Status = %d, want %d", w.Code, http.StatusOK)
-	}
-}
-
-func TestSetModuleSessionCookie(t *testing.T) {
-	w := httptest.NewRecorder()
-	setModuleSessionCookie(w, "user1", "test@example.com", "Test User", time.Now().Add(24*time.Hour))
-
-	cookies := w.Result().Cookies()
-	found := false
-	for _, c := range cookies {
-		if c.Name == "apigate_session" {
-			found = true
-			if c.Value == "" {
-				t.Error("Cookie value should not be empty")
-			}
-			break
-		}
-	}
-	if !found {
-		t.Error("apigate_session cookie should be set")
 	}
 }
 

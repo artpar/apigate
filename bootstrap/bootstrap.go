@@ -308,6 +308,11 @@ func (a *App) initHTTPServer() error {
 	if jwtSecret := s.Get(settings.KeyAuthJWTSecret); jwtSecret != "" {
 		tokenService := auth.NewTokenService(jwtSecret, 7*24*time.Hour)
 		a.proxyService.SetTokenService(tokenService)
+
+		// Also inject into module HTTP channel so auth uses the shared secret
+		if a.ModuleRuntime != nil && a.ModuleRuntime.HTTP != nil {
+			a.ModuleRuntime.HTTP.SetTokenService(tokenService)
+		}
 	}
 
 	a.Logger.Info().Msg("route and transform services initialized")

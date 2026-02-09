@@ -3,7 +3,6 @@ package web
 import (
 	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -22,33 +21,6 @@ import (
 	"github.com/artpar/apigate/ports"
 	"github.com/go-chi/chi/v5"
 )
-
-// setModuleSessionCookie sets the apigate_session cookie for module WebUI compatibility.
-// This allows users logged in via the root WebUI to also access the module WebUI.
-func setModuleSessionCookie(w http.ResponseWriter, userID, email, name string, expiresAt time.Time) {
-	session := struct {
-		UserID    string    `json:"user_id"`
-		Email     string    `json:"email"`
-		Name      string    `json:"name"`
-		ExpiresAt time.Time `json:"expires_at"`
-	}{
-		UserID:    userID,
-		Email:     email,
-		Name:      name,
-		ExpiresAt: expiresAt,
-	}
-	data, _ := json.Marshal(session)
-	encoded := base64.StdEncoding.EncodeToString(data)
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     "apigate_session",
-		Value:    encoded,
-		Path:     "/",
-		Expires:  expiresAt,
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-	})
-}
 
 // LoginPage renders the login form.
 func (h *Handler) LoginPage(w http.ResponseWriter, r *http.Request) {
@@ -98,7 +70,7 @@ func (h *Handler) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate JWT token
-	token, expiresAt, err := h.tokens.GenerateToken(user.ID, user.Email, "admin")
+	token, expiresAt, err := h.tokens.GenerateToken(user.ID, user.Email, "admin", user.PlanID)
 	if err != nil {
 		h.renderLoginError(w, r, "Login failed", email)
 		return
@@ -113,9 +85,6 @@ func (h *Handler) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
 	})
-
-	// Also set apigate_session cookie for module WebUI compatibility
-	setModuleSessionCookie(w, user.ID, user.Email, user.Name, expiresAt)
 
 	http.Redirect(w, r, "/dashboard", http.StatusFound)
 }
@@ -134,22 +103,13 @@ func (h *Handler) renderLoginError(w http.ResponseWriter, r *http.Request, errMs
 	h.render(w, "login", data)
 }
 
-// Logout clears the session cookies.
+// Logout clears the JWT cookie.
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
-	// Clear root WebUI JWT cookie
 	http.SetCookie(w, &http.Cookie{
 		Name:     "token",
 		Value:    "",
 		Path:     "/",
 		Expires:  time.Unix(0, 0),
-		HttpOnly: true,
-	})
-	// Clear module WebUI session cookie
-	http.SetCookie(w, &http.Cookie{
-		Name:     "apigate_session",
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
 		HttpOnly: true,
 	})
 	http.Redirect(w, r, "/login", http.StatusFound)
@@ -2418,7 +2378,7 @@ func (h *Handler) SetupStepSubmit(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Auto-login: Generate JWT token and set cookie
-		token, expiresAt, err := h.tokens.GenerateToken(user.ID, user.Email, "admin")
+		token, expiresAt, err := h.tokens.GenerateToken(user.ID, user.Email, "admin", user.PlanID)
 		if err == nil {
 			http.SetCookie(w, &http.Cookie{
 				Name:     "token",
@@ -2428,8 +2388,6 @@ func (h *Handler) SetupStepSubmit(w http.ResponseWriter, r *http.Request) {
 				HttpOnly: true,
 				SameSite: http.SameSiteStrictMode,
 			})
-			// Also set apigate_session cookie for module WebUI compatibility
-			setModuleSessionCookie(w, user.ID, user.Email, user.Email, expiresAt)
 		}
 
 		// Track step completion for sequence validation

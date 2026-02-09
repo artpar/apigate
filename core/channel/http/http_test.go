@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	authpkg "github.com/artpar/apigate/adapters/auth"
 	"github.com/artpar/apigate/core/convention"
 	"github.com/artpar/apigate/core/runtime"
 	"github.com/artpar/apigate/core/schema"
@@ -740,7 +741,6 @@ func TestNewAuthHandler(t *testing.T) {
 	if h == nil {
 		t.Fatal("NewAuthHandler should return non-nil handler")
 	}
-	// sessionSecret is private, can't check directly but NewAuthHandler sets it
 }
 
 func TestAuthHandler_Routes(t *testing.T) {
@@ -840,23 +840,20 @@ func TestAuthHandler_HandleLogout(t *testing.T) {
 
 	h.handleLogout(w, req)
 
-	// Should succeed and clear cookie
+	// Should succeed — stateless, just returns success
 	if w.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	// Check cookie was cleared
-	cookies := w.Result().Cookies()
-	for _, cookie := range cookies {
-		if cookie.Name == SessionCookie {
-			if cookie.MaxAge >= 0 {
-				t.Error("cookie should have negative MaxAge to clear it")
-			}
-		}
+	// Verify response body
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["success"] != true {
+		t.Errorf("expected success=true, got %v", resp["success"])
 	}
 }
 
-func TestAuthHandler_HandleMe_NoSession(t *testing.T) {
+func TestAuthHandler_HandleMe_NoToken(t *testing.T) {
 	h := NewAuthHandler(nil)
 
 	req := httptest.NewRequest("GET", "/auth/me", nil)
@@ -864,80 +861,15 @@ func TestAuthHandler_HandleMe_NoSession(t *testing.T) {
 
 	h.handleMe(w, req)
 
-	// Should fail with unauthorized since no session cookie
+	// Should fail with unauthorized since no Bearer token
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
 	}
 }
 
-func TestAuthHandler_SetSessionCookie(t *testing.T) {
+func TestAuthHandler_AuthMiddleware_NoToken(t *testing.T) {
 	h := NewAuthHandler(nil)
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest("POST", "/test", nil)
-
-	session := Session{
-		UserID:    "user123",
-		Email:     "test@example.com",
-		Name:      "Test User",
-		ExpiresAt: time.Now().Add(time.Hour),
-	}
-
-	h.setSessionCookie(w, r, session)
-
-	// Check cookie was set
-	cookies := w.Result().Cookies()
-	found := false
-	for _, cookie := range cookies {
-		if cookie.Name == SessionCookie {
-			found = true
-			if cookie.Value == "" {
-				t.Error("cookie should have a value")
-			}
-			if !cookie.HttpOnly {
-				t.Error("cookie should be HttpOnly")
-			}
-		}
-	}
-
-	if !found {
-		t.Error("session cookie should be set")
-	}
-}
-
-func TestAuthHandler_GetSession_NoCookie(t *testing.T) {
-	h := NewAuthHandler(nil)
-
-	req := httptest.NewRequest("GET", "/test", nil)
-
-	session, err := h.getSession(req)
-	if err == nil {
-		t.Error("getSession should error with no cookie")
-	}
-	if session != nil {
-		t.Error("session should be nil")
-	}
-}
-
-func TestAuthHandler_GetSession_InvalidCookie(t *testing.T) {
-	h := NewAuthHandler(nil)
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.AddCookie(&http.Cookie{
-		Name:  SessionCookie,
-		Value: "invalid-base64",
-	})
-
-	session, err := h.getSession(req)
-	if err == nil {
-		t.Error("getSession should error with invalid cookie")
-	}
-	if session != nil {
-		t.Error("session should be nil")
-	}
-}
-
-func TestAuthHandler_AuthMiddleware_NoSession(t *testing.T) {
-	h := NewAuthHandler(nil)
+	h.SetTokenService(authpkg.NewTokenService("test-secret", time.Hour))
 
 	handlerCalled := false
 	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -952,11 +884,155 @@ func TestAuthHandler_AuthMiddleware_NoSession(t *testing.T) {
 	middleware.ServeHTTP(w, req)
 
 	if handlerCalled {
-		t.Error("next handler should not be called without valid session")
+		t.Error("next handler should not be called without valid token")
 	}
 
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestAuthHandler_AuthMiddleware_ValidToken(t *testing.T) {
+	ts := authpkg.NewTokenService("test-secret", time.Hour)
+	h := NewAuthHandler(nil)
+	h.SetTokenService(ts)
+
+	token, _, err := ts.GenerateToken("user123", "test@example.com", "user", "free")
+	if err != nil {
+		t.Fatalf("failed to generate token: %v", err)
+	}
+
+	handlerCalled := false
+	var capturedUserID string
+	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+		capturedUserID, _ = r.Context().Value(authUserIDKey).(string)
+	})
+
+	middleware := h.AuthMiddleware(nextHandler)
+
+	req := httptest.NewRequest("GET", "/protected", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+
+	middleware.ServeHTTP(w, req)
+
+	if !handlerCalled {
+		t.Error("next handler should be called with valid token")
+	}
+
+	if capturedUserID != "user123" {
+		t.Errorf("userID = %q, want %q", capturedUserID, "user123")
+	}
+}
+
+func TestAuthHandler_AuthMiddleware_InvalidToken(t *testing.T) {
+	h := NewAuthHandler(nil)
+	h.SetTokenService(authpkg.NewTokenService("test-secret", time.Hour))
+
+	handlerCalled := false
+	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+	})
+
+	middleware := h.AuthMiddleware(nextHandler)
+
+	req := httptest.NewRequest("GET", "/protected", nil)
+	req.Header.Set("Authorization", "Bearer invalid-token")
+	w := httptest.NewRecorder()
+
+	middleware.ServeHTTP(w, req)
+
+	if handlerCalled {
+		t.Error("next handler should not be called with invalid token")
+	}
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestAuthHandler_AuthMiddleware_MissingBearer(t *testing.T) {
+	h := NewAuthHandler(nil)
+	h.SetTokenService(authpkg.NewTokenService("test-secret", time.Hour))
+
+	handlerCalled := false
+	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+	})
+
+	middleware := h.AuthMiddleware(nextHandler)
+
+	req := httptest.NewRequest("GET", "/protected", nil)
+	req.Header.Set("Authorization", "Basic some-token")
+	w := httptest.NewRecorder()
+
+	middleware.ServeHTTP(w, req)
+
+	if handlerCalled {
+		t.Error("next handler should not be called with non-Bearer auth")
+	}
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestAuthHandler_AuthMiddleware_NoTokenService(t *testing.T) {
+	h := NewAuthHandler(nil)
+	// Deliberately do NOT set token service
+
+	handlerCalled := false
+	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+	})
+
+	middleware := h.AuthMiddleware(nextHandler)
+
+	req := httptest.NewRequest("GET", "/protected", nil)
+	req.Header.Set("Authorization", "Bearer some-token")
+	w := httptest.NewRecorder()
+
+	middleware.ServeHTTP(w, req)
+
+	if handlerCalled {
+		t.Error("next handler should not be called when token service not configured")
+	}
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestAuthHandler_ExtractUserID(t *testing.T) {
+	ts := authpkg.NewTokenService("test-secret", time.Hour)
+	h := NewAuthHandler(nil)
+	h.SetTokenService(ts)
+
+	token, _, _ := ts.GenerateToken("user456", "test@example.com", "user", "pro")
+
+	tests := []struct {
+		name       string
+		authHeader string
+		wantUserID string
+	}{
+		{"valid bearer", "Bearer " + token, "user456"},
+		{"no header", "", ""},
+		{"no bearer prefix", token, ""},
+		{"invalid token", "Bearer bad-token", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/test", nil)
+			if tt.authHeader != "" {
+				req.Header.Set("Authorization", tt.authHeader)
+			}
+			got := h.extractUserID(req)
+			if got != tt.wantUserID {
+				t.Errorf("extractUserID() = %q, want %q", got, tt.wantUserID)
+			}
+		})
 	}
 }
 

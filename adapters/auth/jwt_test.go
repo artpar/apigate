@@ -22,7 +22,7 @@ func TestNewTokenService_EmptySecret(t *testing.T) {
 	}
 
 	// Should still work
-	token, _, err := svc.GenerateToken("user1", "test@example.com", "admin")
+	token, _, err := svc.GenerateToken("user1", "test@example.com", "admin", "free")
 	if err != nil {
 		t.Fatalf("GenerateToken failed: %v", err)
 	}
@@ -37,7 +37,7 @@ func TestNewTokenService_DefaultExpiration(t *testing.T) {
 		t.Fatal("expected service")
 	}
 
-	_, expiresAt, err := svc.GenerateToken("user1", "test@example.com", "user")
+	_, expiresAt, err := svc.GenerateToken("user1", "test@example.com", "user", "free")
 	if err != nil {
 		t.Fatalf("GenerateToken failed: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestNewTokenService_DefaultExpiration(t *testing.T) {
 func TestTokenService_GenerateToken(t *testing.T) {
 	svc := auth.NewTokenService("test-secret", time.Hour)
 
-	token, expiresAt, err := svc.GenerateToken("user123", "user@example.com", "admin")
+	token, expiresAt, err := svc.GenerateToken("user123", "user@example.com", "admin", "free")
 	if err != nil {
 		t.Fatalf("GenerateToken failed: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestTokenService_GenerateToken(t *testing.T) {
 func TestTokenService_ValidateToken_Success(t *testing.T) {
 	svc := auth.NewTokenService("test-secret", time.Hour)
 
-	token, _, err := svc.GenerateToken("user123", "user@example.com", "admin")
+	token, _, err := svc.GenerateToken("user123", "user@example.com", "admin", "free")
 	if err != nil {
 		t.Fatalf("GenerateToken failed: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestTokenService_ValidateToken_WrongSecret(t *testing.T) {
 	svc1 := auth.NewTokenService("secret1", time.Hour)
 	svc2 := auth.NewTokenService("secret2", time.Hour)
 
-	token, _, _ := svc1.GenerateToken("user1", "test@example.com", "user")
+	token, _, _ := svc1.GenerateToken("user1", "test@example.com", "user", "free")
 
 	_, err := svc2.ValidateToken(token)
 	if err == nil {
@@ -123,7 +123,7 @@ func TestTokenService_ValidateToken_Expired(t *testing.T) {
 	// Create service with very short expiration
 	svc := auth.NewTokenService("test-secret", time.Millisecond)
 
-	token, _, _ := svc.GenerateToken("user1", "test@example.com", "user")
+	token, _, _ := svc.GenerateToken("user1", "test@example.com", "user", "free")
 
 	// Wait for token to expire
 	time.Sleep(10 * time.Millisecond)
@@ -137,7 +137,7 @@ func TestTokenService_ValidateToken_Expired(t *testing.T) {
 func TestTokenService_RefreshToken_Success(t *testing.T) {
 	svc := auth.NewTokenService("test-secret", time.Hour)
 
-	originalToken, originalExpiry, _ := svc.GenerateToken("user1", "test@example.com", "admin")
+	originalToken, originalExpiry, _ := svc.GenerateToken("user1", "test@example.com", "admin", "free")
 
 	// Small delay to ensure new expiry is different
 	time.Sleep(50 * time.Millisecond)
@@ -193,7 +193,7 @@ func TestGenerateSecret(t *testing.T) {
 func TestClaims_Fields(t *testing.T) {
 	svc := auth.NewTokenService("test-secret", time.Hour)
 
-	token, _, _ := svc.GenerateToken("uid123", "email@test.com", "moderator")
+	token, _, _ := svc.GenerateToken("uid123", "email@test.com", "moderator", "pro")
 	claims, _ := svc.ValidateToken(token)
 
 	if claims.UserID != "uid123" {
@@ -210,5 +210,36 @@ func TestClaims_Fields(t *testing.T) {
 	}
 	if claims.Subject != "uid123" {
 		t.Errorf("Subject = %s", claims.Subject)
+	}
+	if claims.PlanID != "pro" {
+		t.Errorf("PlanID = %s, want pro", claims.PlanID)
+	}
+}
+
+func TestClaims_PlanID(t *testing.T) {
+	svc := auth.NewTokenService("test-secret", time.Hour)
+
+	tests := []struct {
+		planID string
+	}{
+		{""},
+		{"free"},
+		{"pro"},
+	}
+
+	for _, tt := range tests {
+		token, _, err := svc.GenerateToken("user1", "test@example.com", "user", tt.planID)
+		if err != nil {
+			t.Fatalf("GenerateToken failed for planID=%q: %v", tt.planID, err)
+		}
+
+		claims, err := svc.ValidateToken(token)
+		if err != nil {
+			t.Fatalf("ValidateToken failed for planID=%q: %v", tt.planID, err)
+		}
+
+		if claims.PlanID != tt.planID {
+			t.Errorf("PlanID = %q, want %q", claims.PlanID, tt.planID)
+		}
 	}
 }
