@@ -226,6 +226,7 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
+          pattern: apigate-*
           path: dist
 
       - name: Prepare release files
