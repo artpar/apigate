@@ -1420,6 +1420,99 @@ func TestProxyHandlerWithMetrics_SuccessfulRequest(t *testing.T) {
 }
 
 // TestConfigurableHandlerPaths tests that handlers can be mounted at custom paths.
+func TestRootRedirect(t *testing.T) {
+	webHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		w.Write([]byte("web-ui"))
+	})
+	portalHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		w.Write([]byte("portal"))
+	})
+
+	tests := []struct {
+		name           string
+		isSetup        func() bool
+		cookie         *http.Cookie
+		portalHandler  http.Handler
+		wantStatus     int
+		wantLocation   string
+		wantBody       string
+	}{
+		{
+			name:          "fresh install redirects to setup",
+			isSetup:       func() bool { return false },
+			portalHandler: portalHandler,
+			wantStatus:    302,
+			wantLocation:  "/setup",
+		},
+		{
+			name:          "setup done no cookie redirects to portal",
+			isSetup:       func() bool { return true },
+			portalHandler: portalHandler,
+			wantStatus:    302,
+			wantLocation:  "/portal",
+		},
+		{
+			name:          "setup done with token serves web UI",
+			isSetup:       func() bool { return true },
+			cookie:        &http.Cookie{Name: "token", Value: "abc123"},
+			portalHandler: portalHandler,
+			wantStatus:    200,
+			wantBody:      "web-ui",
+		},
+		{
+			name:          "nil isSetup redirects to portal",
+			isSetup:       nil,
+			portalHandler: portalHandler,
+			wantStatus:    302,
+			wantLocation:  "/portal",
+		},
+		{
+			name:         "no portal handler serves web UI",
+			isSetup:      func() bool { return true },
+			portalHandler: nil,
+			wantStatus:   200,
+			wantBody:     "web-ui",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler, _ := setupTestHandler()
+			healthHandler := apihttp.NewHealthHandler(&testUpstream{healthy: true})
+			logger := zerolog.Nop()
+
+			cfg := apihttp.RouterConfig{
+				WebHandler:    webHandler,
+				PortalHandler: tt.portalHandler,
+				IsSetup:       tt.isSetup,
+			}
+			router := apihttp.NewRouterWithConfig(handler, healthHandler, logger, cfg)
+
+			req := httptest.NewRequest("GET", "/", nil)
+			if tt.cookie != nil {
+				req.AddCookie(tt.cookie)
+			}
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d", rec.Code, tt.wantStatus)
+			}
+			if tt.wantLocation != "" {
+				loc := rec.Result().Header.Get("Location")
+				if loc != tt.wantLocation {
+					t.Errorf("Location = %q, want %q", loc, tt.wantLocation)
+				}
+			}
+			if tt.wantBody != "" && rec.Body.String() != tt.wantBody {
+				t.Errorf("body = %q, want %q", rec.Body.String(), tt.wantBody)
+			}
+		})
+	}
+}
+
 func TestConfigurableHandlerPaths(t *testing.T) {
 	tests := []struct {
 		name       string

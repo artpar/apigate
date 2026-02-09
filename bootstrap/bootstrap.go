@@ -559,6 +559,10 @@ func (a *App) initHTTPServer() error {
 		PaymentWebhookHandler: paymentWebhookHandler,
 		MeterHandler:          adminHandler.MeterRouter(),
 		RouteService:          a.routeService, // Enable priority-based routing
+		IsSetup: func() bool {
+			users, err := deps.Users.List(context.Background(), 1, 0)
+			return err == nil && len(users) > 0
+		},
 
 		// Configurable handler paths (with backward-compatible defaults)
 		AdminBasePath:          s.GetOrDefault(settings.KeyAdminBasePath, "/admin"),

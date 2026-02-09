@@ -564,6 +564,7 @@ type RouterConfig struct {
 	ModuleHandler         http.Handler  // Optional declarative module handler (mounted at /api/v2)
 	PaymentWebhookHandler http.Handler  // Optional payment webhook handler for Stripe/Paddle/LemonSqueezy
 	MeterHandler          http.Handler  // Optional metering API handler (mounted at /api/v1/meter)
+	IsSetup               func() bool   // Returns true if initial setup is complete (at least one user exists)
 	RouteService          interface{}   // Optional route service for priority-based routing (uses reflection to avoid circular dependency)
 
 	// Configurable handler paths (backward compatible defaults if empty)
@@ -763,7 +764,7 @@ func NewRouterWithConfig(proxyHandler *ProxyHandler, healthHandler *HealthHandle
 
 		if basePath == "" {
 			// Mount at root (backward compatible)
-			mountWebUIAtRoot(r, cfg.WebHandler, cfg.PortalHandler, logger)
+			mountWebUIAtRoot(r, cfg.WebHandler, cfg.PortalHandler, cfg.IsSetup, logger)
 		} else {
 			// Mount at custom base path
 			logger.Info().
@@ -800,17 +801,20 @@ func NewRouterWithConfig(proxyHandler *ProxyHandler, healthHandler *HealthHandle
 }
 
 // mountWebUIAtRoot mounts the web UI at root path (backward compatible behavior).
-func mountWebUIAtRoot(r chi.Router, webHandler http.Handler, portalHandler http.Handler, logger zerolog.Logger) {
-	// Root URL: redirect to portal for unauthenticated users (self-onboarding)
-	// If portal is enabled, new users should land there to sign up
+func mountWebUIAtRoot(r chi.Router, webHandler http.Handler, portalHandler http.Handler, isSetup func() bool, logger zerolog.Logger) {
+	// Root URL: setup wizard for fresh installs, portal for unauthenticated users, admin UI for logged-in admins
 	r.Get("/", func(w http.ResponseWriter, req *http.Request) {
-		// Check if user has admin session cookie
-		if _, err := req.Cookie("admin_session"); err != nil && portalHandler != nil {
-			// No admin session and portal is enabled - redirect to portal
+		// Setup not complete → setup wizard
+		if isSetup != nil && !isSetup() {
+			http.Redirect(w, req, "/setup", http.StatusFound)
+			return
+		}
+		// No admin token + portal available → portal for customers
+		if _, err := req.Cookie("token"); err != nil && portalHandler != nil {
 			http.Redirect(w, req, "/portal", http.StatusFound)
 			return
 		}
-		// Has session or no portal - go to admin UI
+		// Admin logged in or no portal → web UI
 		webHandler.ServeHTTP(w, req)
 	})
 
