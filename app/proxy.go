@@ -386,6 +386,17 @@ func (s *ProxyService) Handle(ctx context.Context, req proxy.Request) HandleResu
 		req.Headers[k] = v
 	}
 
+	// 10.6. Inject identity headers for upstream
+	if auth.UserID != "" {
+		req.Headers["X-User-ID"] = auth.UserID
+	}
+	if auth.PlanID != "" {
+		req.Headers["X-Plan-ID"] = auth.PlanID
+	}
+	if auth.KeyID != "" {
+		req.Headers["X-Key-ID"] = auth.KeyID
+	}
+
 	// 10. Apply request transform (PURE + Expr eval)
 	if matchedRoute != nil && matchedRoute.RequestTransform != nil && s.transformService != nil {
 		var err error
@@ -1018,6 +1029,20 @@ func (s *ProxyService) HandleStreaming(ctx context.Context, req proxy.Request, s
 		PlanID:    user.PlanID,
 		RateLimit: rlConfig.Limit,
 		Scopes:    matchedKey.Scopes,
+	}
+
+	// 10.6. Inject identity headers for upstream
+	if req.Headers == nil {
+		req.Headers = make(map[string]string)
+	}
+	if auth.UserID != "" {
+		req.Headers["X-User-ID"] = auth.UserID
+	}
+	if auth.PlanID != "" {
+		req.Headers["X-Plan-ID"] = auth.PlanID
+	}
+	if auth.KeyID != "" {
+		req.Headers["X-Key-ID"] = auth.KeyID
 	}
 
 	// 11. Continue route processing (reuse match from step 1)
