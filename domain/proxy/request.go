@@ -65,7 +65,7 @@ var (
 	ErrMissingKey = ErrorResponse{
 		Status:  401,
 		Code:    "missing_api_key",
-		Message: "API key is required",
+		Message: "Authentication required",
 	}
 	ErrInvalidKey = ErrorResponse{
 		Status:  401,

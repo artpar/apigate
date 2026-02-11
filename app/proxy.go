@@ -194,24 +194,31 @@ func (s *ProxyService) Handle(ctx context.Context, req proxy.Request) HandleResu
 		var claims *auth.Claims
 		claims, err = s.tokens.ValidateToken(req.APIKey)
 		if err == nil {
-			// JWT is valid - get user directly
-			user, err = s.users.Get(ctx, claims.UserID)
-			if err == nil && user.Status == "active" {
-				// Create a synthetic key for tracking (no actual key exists)
-				matchedKey = key.Key{
-					ID:     "session:" + claims.UserID,
-					UserID: claims.UserID,
+			matchedKey = key.Key{
+				ID:     "session:" + claims.UserID,
+				UserID: claims.UserID,
+			}
+			authEmail = claims.Email
+			authRole = claims.Role
+			// Try DB lookup; fallback to claims if user not in local DB
+			dbUser, dbErr := s.users.Get(ctx, claims.UserID)
+			if dbErr == nil {
+				if dbUser.Status != "active" {
+					return HandleResult{Error: &proxy.ErrorResponse{
+						Status:  403,
+						Code:    "user_suspended",
+						Message: "Account is suspended",
+					}}
 				}
-				authEmail = claims.Email
-				authRole = claims.Role
-			} else if err != nil {
-				return HandleResult{Error: &proxy.ErrInvalidKey}
+				user = dbUser
 			} else {
-				return HandleResult{Error: &proxy.ErrorResponse{
-					Status:  403,
-					Code:    "user_suspended",
-					Message: "Account is suspended",
-				}}
+				// User not in local DB — trust JWT claims (external auth)
+				user = ports.User{
+					ID:     claims.UserID,
+					Email:  claims.Email,
+					PlanID: claims.PlanID,
+					Status: "active",
+				}
 			}
 		} else {
 			// JWT validation failed
@@ -891,24 +898,31 @@ func (s *ProxyService) HandleStreaming(ctx context.Context, req proxy.Request, s
 		var claims *auth.Claims
 		claims, err = s.tokens.ValidateToken(req.APIKey)
 		if err == nil {
-			// JWT is valid - get user directly
-			user, err = s.users.Get(ctx, claims.UserID)
-			if err == nil && user.Status == "active" {
-				// Create a synthetic key for tracking (no actual key exists)
-				matchedKey = key.Key{
-					ID:     "session:" + claims.UserID,
-					UserID: claims.UserID,
+			matchedKey = key.Key{
+				ID:     "session:" + claims.UserID,
+				UserID: claims.UserID,
+			}
+			authEmail = claims.Email
+			authRole = claims.Role
+			// Try DB lookup; fallback to claims if user not in local DB
+			dbUser, dbErr := s.users.Get(ctx, claims.UserID)
+			if dbErr == nil {
+				if dbUser.Status != "active" {
+					return StreamingHandleResult{Error: &proxy.ErrorResponse{
+						Status:  403,
+						Code:    "user_suspended",
+						Message: "Account is suspended",
+					}}
 				}
-				authEmail = claims.Email
-				authRole = claims.Role
-			} else if err != nil {
-				return StreamingHandleResult{Error: &proxy.ErrInvalidKey}
+				user = dbUser
 			} else {
-				return StreamingHandleResult{Error: &proxy.ErrorResponse{
-					Status:  403,
-					Code:    "user_suspended",
-					Message: "Account is suspended",
-				}}
+				// User not in local DB — trust JWT claims (external auth)
+				user = ports.User{
+					ID:     claims.UserID,
+					Email:  claims.Email,
+					PlanID: claims.PlanID,
+					Status: "active",
+				}
 			}
 		} else {
 			// JWT validation failed

@@ -591,6 +591,7 @@ The wiki must be initialized via GitHub UI before git access works:
 | Resource-Types | `docs/spec/resource-types.md` |
 | TLS-Certificates | `docs/spec/tls-certificates.md` |
 | Metering-API | `docs/spec/metering-api.md` |
+| Authentication | `docs/spec/authentication.md` |
 
 **Important**: Always edit `docs/spec/` first. Wiki syncs automatically on push to main.
 

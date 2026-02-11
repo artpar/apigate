@@ -38,6 +38,7 @@ jobs:
           cp main/docs/spec/resource-types.md wiki/Resource-Types.md
           cp main/docs/spec/tls-certificates.md wiki/TLS-Certificates.md
           cp main/docs/spec/metering-api.md wiki/Metering-API.md
+          cp main/docs/spec/authentication.md wiki/Authentication.md
 
           # Add sync timestamp
           echo "" >> wiki/Home.md

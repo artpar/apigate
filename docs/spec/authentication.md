@@ -275,6 +275,39 @@ X-API-Key: ak_1234567890abcdef
 
 ---
 
+## Proxy Route Authentication
+
+Proxy routes use the `Authorization: Bearer` header to authenticate requests. The proxy detects the token type by format: API keys start with the configured prefix (e.g., `ak_`), while JWTs do not.
+
+### Auth-Required Routes (Billing Routes)
+
+Routes with `auth_required=1` accept both API keys and JWT Bearer tokens:
+
+```http
+GET /api/billing HTTP/1.1
+Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
+```
+
+**JWT authentication flow:**
+
+1. Validate the JWT signature and expiration
+2. Look up user in the local database by `uid` claim
+3. If found and active: use database user record (authoritative for `PlanID`, `Status`)
+4. If found and suspended: return `403 user_suspended`
+5. **If not found**: construct user from JWT claims directly (external auth)
+
+This allows users who exist in an external auth provider (e.g., a hosting platform) but not in APIGate's local database to access billing routes using their JWT. The JWT claims (`uid`, `email`, `role`, `pid`) provide all necessary auth context.
+
+### Pass-Through Routes (Public)
+
+Routes with `auth_required=0` perform opportunistic JWT validation: if a valid JWT is present, auth context is populated for transforms (e.g., `X-User-ID` headers). Invalid or missing tokens are silently ignored — the request proceeds anonymously.
+
+### Legacy `apigate_session` Cookie
+
+The `apigate_session` cookie is **no longer set** by any APIGate component (removed in v2.0.0, Issue #58). Browsers may still send stale cookies from prior versions; the server ignores them. Users should clear old cookies if observed.
+
+---
+
 ## SSR Web Handlers (Go Templates)
 
 The root web handlers (`web/handlers.go`) use a `token` JWT cookie for SSR Go template pages. This is **not** a dual auth path — it is the same JWT token, transported via cookie because HTML form submissions cannot set `Authorization` headers.

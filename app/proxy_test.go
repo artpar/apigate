@@ -1334,3 +1334,193 @@ func TestProxyService_Handle_PublicRouteWithAPIKey(t *testing.T) {
 		t.Errorf("X-User-ID = %q, want empty", forwarded.Headers["X-User-ID"])
 	}
 }
+
+func TestProxyService_Handle_JWTBillingRoute_UserNotInDB(t *testing.T) {
+	ctx := context.Background()
+	upstream := &capturingUpstream{}
+	svc, _ := newTestProxyServiceWithUpstream(upstream)
+
+	tokenService := auth.NewTokenService("test-secret-key", time.Hour)
+	svc.SetTokenService(tokenService)
+
+	jwt, _, err := tokenService.GenerateToken("ext-user-1", "ext@example.com", "user", "pro")
+	if err != nil {
+		t.Fatalf("failed to generate JWT: %v", err)
+	}
+
+	// No user created in store — simulates external auth (user in Hoster, not in APIGate DB)
+
+	req := proxy.Request{
+		APIKey:    jwt,
+		Method:    "GET",
+		Path:      "/api/billing",
+		Headers:   map[string]string{},
+		RemoteIP:  "1.2.3.4",
+		UserAgent: "test-agent",
+	}
+	result := svc.Handle(ctx, req)
+
+	if result.Error != nil {
+		t.Fatalf("expected no error, got status=%d code=%s msg=%s",
+			result.Error.Status, result.Error.Code, result.Error.Message)
+	}
+	if result.Response.Status != 200 {
+		t.Errorf("status = %d, want 200", result.Response.Status)
+	}
+	if result.Auth == nil {
+		t.Fatal("expected auth context")
+	}
+	if result.Auth.UserID != "ext-user-1" {
+		t.Errorf("auth.UserID = %q, want %q", result.Auth.UserID, "ext-user-1")
+	}
+	if result.Auth.Email != "ext@example.com" {
+		t.Errorf("auth.Email = %q, want %q", result.Auth.Email, "ext@example.com")
+	}
+	if result.Auth.PlanID != "pro" {
+		t.Errorf("auth.PlanID = %q, want %q", result.Auth.PlanID, "pro")
+	}
+	if result.Auth.KeyID != "session:ext-user-1" {
+		t.Errorf("auth.KeyID = %q, want %q", result.Auth.KeyID, "session:ext-user-1")
+	}
+}
+
+func TestProxyService_Handle_JWTBillingRoute_UserInDB(t *testing.T) {
+	ctx := context.Background()
+	upstream := &capturingUpstream{}
+	svc, stores := newTestProxyServiceWithUpstream(upstream)
+
+	tokenService := auth.NewTokenService("test-secret-key", time.Hour)
+	svc.SetTokenService(tokenService)
+
+	jwt, _, err := tokenService.GenerateToken("user-1", "db@example.com", "user", "free")
+	if err != nil {
+		t.Fatalf("failed to generate JWT: %v", err)
+	}
+
+	// User exists in DB with different plan — DB values should be used
+	stores.users.Create(ctx, ports.User{
+		ID:     "user-1",
+		Email:  "db@example.com",
+		PlanID: "enterprise",
+		Status: "active",
+	})
+
+	req := proxy.Request{
+		APIKey:    jwt,
+		Method:    "GET",
+		Path:      "/api/billing",
+		Headers:   map[string]string{},
+		RemoteIP:  "1.2.3.4",
+		UserAgent: "test-agent",
+	}
+	result := svc.Handle(ctx, req)
+
+	if result.Error != nil {
+		t.Fatalf("expected no error, got status=%d code=%s msg=%s",
+			result.Error.Status, result.Error.Code, result.Error.Message)
+	}
+	if result.Auth == nil {
+		t.Fatal("expected auth context")
+	}
+	if result.Auth.UserID != "user-1" {
+		t.Errorf("auth.UserID = %q, want %q", result.Auth.UserID, "user-1")
+	}
+	// PlanID should come from DB user, not JWT claims
+	if result.Auth.PlanID != "enterprise" {
+		t.Errorf("auth.PlanID = %q, want %q (from DB)", result.Auth.PlanID, "enterprise")
+	}
+}
+
+func TestProxyService_Handle_JWTBillingRoute_UserSuspended(t *testing.T) {
+	ctx := context.Background()
+	svc, stores := newTestProxyServiceWithUpstream(&capturingUpstream{})
+
+	tokenService := auth.NewTokenService("test-secret-key", time.Hour)
+	svc.SetTokenService(tokenService)
+
+	jwt, _, err := tokenService.GenerateToken("user-1", "suspended@example.com", "user", "free")
+	if err != nil {
+		t.Fatalf("failed to generate JWT: %v", err)
+	}
+
+	stores.users.Create(ctx, ports.User{
+		ID:     "user-1",
+		Email:  "suspended@example.com",
+		PlanID: "free",
+		Status: "suspended",
+	})
+
+	req := proxy.Request{
+		APIKey:    jwt,
+		Method:    "GET",
+		Path:      "/api/billing",
+		Headers:   map[string]string{},
+		RemoteIP:  "1.2.3.4",
+		UserAgent: "test-agent",
+	}
+	result := svc.Handle(ctx, req)
+
+	if result.Error == nil {
+		t.Fatal("expected error for suspended user")
+	}
+	if result.Error.Status != 403 {
+		t.Errorf("status = %d, want 403", result.Error.Status)
+	}
+	if result.Error.Code != "user_suspended" {
+		t.Errorf("code = %q, want %q", result.Error.Code, "user_suspended")
+	}
+}
+
+func TestProxyService_HandleStreaming_JWTBillingRoute_UserNotInDB(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := newTestProxyServiceWithUpstream(&capturingUpstream{})
+
+	tokenService := auth.NewTokenService("test-secret-key", time.Hour)
+	svc.SetTokenService(tokenService)
+
+	jwt, _, err := tokenService.GenerateToken("ext-user-2", "stream@example.com", "user", "pro")
+	if err != nil {
+		t.Fatalf("failed to generate JWT: %v", err)
+	}
+
+	// No user in DB — should use JWT claims
+
+	req := proxy.Request{
+		APIKey:    jwt,
+		Method:    "GET",
+		Path:      "/api/stream",
+		Headers:   map[string]string{"Accept": "text/event-stream"},
+		RemoteIP:  "1.2.3.4",
+		UserAgent: "test-agent",
+	}
+
+	streamUpstream := &testStreamingUpstream{}
+	result := svc.HandleStreaming(ctx, req, streamUpstream)
+
+	if result.Error != nil {
+		t.Fatalf("expected no error, got status=%d code=%s msg=%s",
+			result.Error.Status, result.Error.Code, result.Error.Message)
+	}
+	if result.Auth == nil {
+		t.Fatal("expected auth context")
+	}
+	if result.Auth.UserID != "ext-user-2" {
+		t.Errorf("auth.UserID = %q, want %q", result.Auth.UserID, "ext-user-2")
+	}
+	if result.Auth.Email != "stream@example.com" {
+		t.Errorf("auth.Email = %q, want %q", result.Auth.Email, "stream@example.com")
+	}
+	if result.Auth.PlanID != "pro" {
+		t.Errorf("auth.PlanID = %q, want %q", result.Auth.PlanID, "pro")
+	}
+}
+
+type testStreamingUpstream struct{}
+
+func (u *testStreamingUpstream) ForwardStreaming(ctx context.Context, req proxy.Request) (interface{ Status() int }, error) {
+	return &testStreamResponse{status: 200}, nil
+}
+
+type testStreamResponse struct{ status int }
+
+func (r *testStreamResponse) Status() int { return r.status }

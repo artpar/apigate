@@ -37,6 +37,7 @@ cp "$REPO_ROOT/docs/spec/pagination.md" "$WIKI_DIR/Pagination.md"
 cp "$REPO_ROOT/docs/spec/resource-types.md" "$WIKI_DIR/Resource-Types.md"
 cp "$REPO_ROOT/docs/spec/tls-certificates.md" "$WIKI_DIR/TLS-Certificates.md"
 cp "$REPO_ROOT/docs/spec/metering-api.md" "$WIKI_DIR/Metering-API.md"
+cp "$REPO_ROOT/docs/spec/authentication.md" "$WIKI_DIR/Authentication.md"
 
 # Show diff
 echo ""
