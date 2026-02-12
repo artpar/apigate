@@ -1935,6 +1935,141 @@ func TestUsageStore_GetRecentRequestsWithOptionalFields(t *testing.T) {
 	}
 }
 
+func TestUsageStore_ExternalEventRoundTrip(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewUsageStore(db)
+	ctx := context.Background()
+
+	now := time.Now().UTC().Truncate(time.Second)
+
+	events := []usage.Event{
+		usage.NewExternalEvent(
+			"evt-ext-1",
+			"user-ext",
+			"deployment.created",
+			"depl_456",
+			"deployment",
+			"hoster-service",
+			3.5,
+			map[string]string{"region": "us-east", "tier": "pro"},
+			now,
+		),
+		usage.NewExternalEvent(
+			"evt-ext-2",
+			"user-ext",
+			"compute.minutes",
+			"",
+			"",
+			"worker",
+			1.0,
+			nil,
+			now,
+		),
+	}
+
+	if err := store.RecordBatch(ctx, events); err != nil {
+		t.Fatalf("record batch: %v", err)
+	}
+
+	recent, err := store.GetRecentRequests(ctx, "user-ext", 10)
+	if err != nil {
+		t.Fatalf("get recent: %v", err)
+	}
+
+	if len(recent) != 2 {
+		t.Fatalf("len = %d, want 2", len(recent))
+	}
+
+	// Events come back in reverse chronological order; same timestamp so check both
+	byID := map[string]usage.Event{}
+	for _, e := range recent {
+		byID[e.ID] = e
+	}
+
+	// Validate first external event (with all fields)
+	e1 := byID["evt-ext-1"]
+	if e1.EventType != "deployment.created" {
+		t.Errorf("EventType = %q, want %q", e1.EventType, "deployment.created")
+	}
+	if e1.ResourceID != "depl_456" {
+		t.Errorf("ResourceID = %q, want %q", e1.ResourceID, "depl_456")
+	}
+	if e1.ResourceType != "deployment" {
+		t.Errorf("ResourceType = %q, want %q", e1.ResourceType, "deployment")
+	}
+	if e1.Quantity != 3.5 {
+		t.Errorf("Quantity = %f, want 3.5", e1.Quantity)
+	}
+	if e1.Source != usage.SourceExternal {
+		t.Errorf("Source = %q, want %q", e1.Source, usage.SourceExternal)
+	}
+	if e1.SourceName != "hoster-service" {
+		t.Errorf("SourceName = %q, want %q", e1.SourceName, "hoster-service")
+	}
+	if e1.Metadata["region"] != "us-east" {
+		t.Errorf("Metadata[region] = %q, want %q", e1.Metadata["region"], "us-east")
+	}
+	if e1.Metadata["tier"] != "pro" {
+		t.Errorf("Metadata[tier] = %q, want %q", e1.Metadata["tier"], "pro")
+	}
+
+	// Validate second external event (minimal fields)
+	e2 := byID["evt-ext-2"]
+	if e2.EventType != "compute.minutes" {
+		t.Errorf("EventType = %q, want %q", e2.EventType, "compute.minutes")
+	}
+	if e2.Source != usage.SourceExternal {
+		t.Errorf("Source = %q, want %q", e2.Source, usage.SourceExternal)
+	}
+	if e2.Metadata != nil {
+		t.Errorf("Metadata = %v, want nil", e2.Metadata)
+	}
+}
+
+func TestUsageStore_ProxyEventPreservesDefaults(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := sqlite.NewUsageStore(db)
+	ctx := context.Background()
+
+	now := time.Now().UTC().Truncate(time.Second)
+
+	events := []usage.Event{
+		usage.NewProxyEvent(
+			"evt-proxy-1", "key-1", "user-proxy",
+			"GET", "/api/data", 200, 50, 100, 500, 1.0,
+			"10.0.0.1", "curl/7.0", now,
+		),
+	}
+
+	if err := store.RecordBatch(ctx, events); err != nil {
+		t.Fatalf("record batch: %v", err)
+	}
+
+	recent, err := store.GetRecentRequests(ctx, "user-proxy", 10)
+	if err != nil {
+		t.Fatalf("get recent: %v", err)
+	}
+
+	if len(recent) != 1 {
+		t.Fatalf("len = %d, want 1", len(recent))
+	}
+
+	e := recent[0]
+	if e.Source != usage.SourceProxy {
+		t.Errorf("Source = %q, want %q", e.Source, usage.SourceProxy)
+	}
+	if e.EventType != "" {
+		t.Errorf("EventType = %q, want empty", e.EventType)
+	}
+	if e.Method != "GET" {
+		t.Errorf("Method = %q, want GET", e.Method)
+	}
+}
+
 // -----------------------------------------------------------------------------
 // PlanStore Tests
 // -----------------------------------------------------------------------------

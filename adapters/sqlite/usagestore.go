@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"time"
 
 	"github.com/artpar/apigate/domain/usage"
@@ -34,8 +35,9 @@ func (s *UsageStore) RecordBatch(ctx context.Context, events []usage.Event) erro
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO usage_events (
 			id, key_id, user_id, method, path, status_code, latency_ms,
-			request_bytes, response_bytes, cost_multiplier, ip_address, user_agent, timestamp
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			request_bytes, response_bytes, cost_multiplier, ip_address, user_agent, timestamp,
+			event_type, resource_id, resource_type, quantity, source, source_name, metadata
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return err
@@ -43,10 +45,21 @@ func (s *UsageStore) RecordBatch(ctx context.Context, events []usage.Event) erro
 	defer stmt.Close()
 
 	for _, e := range events {
+		var metadataJSON *string
+		if len(e.Metadata) > 0 {
+			b, err := json.Marshal(e.Metadata)
+			if err != nil {
+				return err
+			}
+			s := string(b)
+			metadataJSON = &s
+		}
+
 		// Store timestamp in UTC for consistent querying
 		_, err := stmt.ExecContext(ctx,
 			e.ID, e.KeyID, e.UserID, e.Method, e.Path, e.StatusCode, e.LatencyMs,
 			e.RequestBytes, e.ResponseBytes, e.CostMultiplier, e.IPAddress, e.UserAgent, e.Timestamp.UTC(),
+			e.EventType, e.ResourceID, e.ResourceType, e.Quantity, string(e.Source), e.SourceName, metadataJSON,
 		)
 		if err != nil {
 			return err
@@ -150,7 +163,8 @@ func (s *UsageStore) GetHistory(ctx context.Context, userID string, periods int)
 func (s *UsageStore) GetRecentRequests(ctx context.Context, userID string, limit int) ([]usage.Event, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, key_id, user_id, method, path, status_code, latency_ms,
-		       request_bytes, response_bytes, cost_multiplier, ip_address, user_agent, timestamp
+		       request_bytes, response_bytes, cost_multiplier, ip_address, user_agent, timestamp,
+		       event_type, resource_id, resource_type, quantity, source, source_name, metadata
 		FROM usage_events
 		WHERE user_id = ?
 		ORDER BY timestamp DESC
@@ -164,11 +178,13 @@ func (s *UsageStore) GetRecentRequests(ctx context.Context, userID string, limit
 	var events []usage.Event
 	for rows.Next() {
 		var e usage.Event
-		var ipAddress, userAgent sql.NullString
+		var ipAddress, userAgent, metadataJSON sql.NullString
+		var source string
 
 		err := rows.Scan(
 			&e.ID, &e.KeyID, &e.UserID, &e.Method, &e.Path, &e.StatusCode, &e.LatencyMs,
 			&e.RequestBytes, &e.ResponseBytes, &e.CostMultiplier, &ipAddress, &userAgent, &e.Timestamp,
+			&e.EventType, &e.ResourceID, &e.ResourceType, &e.Quantity, &source, &e.SourceName, &metadataJSON,
 		)
 		if err != nil {
 			return nil, err
@@ -179,6 +195,10 @@ func (s *UsageStore) GetRecentRequests(ctx context.Context, userID string, limit
 		}
 		if userAgent.Valid {
 			e.UserAgent = userAgent.String
+		}
+		e.Source = usage.EventSource(source)
+		if metadataJSON.Valid {
+			json.Unmarshal([]byte(metadataJSON.String), &e.Metadata)
 		}
 
 		events = append(events, e)
