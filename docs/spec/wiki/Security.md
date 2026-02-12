@@ -201,7 +201,7 @@ Invitations are managed via the admin UI:
 
 Admin endpoints require authentication:
 - `/admin/*` - Admin UI and API
-- Requires valid admin session
+- Requires valid admin JWT or API key
 - Actions are logged
 
 ---

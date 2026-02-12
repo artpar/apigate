@@ -29,7 +29,6 @@ type PortalHandler struct {
 	keys             ports.KeyStore
 	usage            ports.UsageStore
 	plans            ports.PlanStore
-	sessions         ports.SessionStore
 	authTokens       ports.TokenStore
 	emailSender      ports.EmailSender
 	settings         ports.SettingsStore
@@ -57,7 +56,6 @@ type PortalDeps struct {
 	Keys             ports.KeyStore
 	Usage            ports.UsageStore
 	Plans            ports.PlanStore
-	Sessions         ports.SessionStore
 	AuthTokens       ports.TokenStore
 	EmailSender      ports.EmailSender
 	Settings         ports.SettingsStore
@@ -86,12 +84,11 @@ func NewPortalHandler(deps PortalDeps) (*PortalHandler, error) {
 	}
 
 	return &PortalHandler{
-		tokens:           auth.NewTokenService(deps.JWTSecret, 7*24*time.Hour), // 7 day sessions
+		tokens:           auth.NewTokenService(deps.JWTSecret, 7*24*time.Hour), // 7 day tokens
 		users:            deps.Users,
 		keys:             deps.Keys,
 		usage:            deps.Usage,
 		plans:            deps.Plans,
-		sessions:         deps.Sessions,
 		authTokens:       deps.AuthTokens,
 		emailSender:      deps.EmailSender,
 		settings:         deps.Settings,
@@ -138,6 +135,12 @@ func (h *PortalHandler) Router() chi.Router {
 		r.Post("/login", h.APILogin)
 		r.Post("/forgot-password", h.APIForgotPassword)
 		r.Post("/reset-password", h.APIResetPassword)
+
+		// Protected API routes (require Bearer JWT)
+		r.Group(func(r chi.Router) {
+			r.Use(h.PortalAuthMiddleware)
+			r.Post("/checkout", h.APICheckout)
+		})
 	})
 
 	// Public form routes (no auth required)
@@ -203,26 +206,43 @@ func (h *PortalHandler) Router() chi.Router {
 	return r
 }
 
-// PortalAuthMiddleware validates JWT token for portal users.
+// PortalAuthMiddleware validates JWT Bearer token for portal users.
 func (h *PortalHandler) PortalAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cookie, err := r.Cookie("portal_token")
-		if err != nil {
-			http.Redirect(w, r, "/portal/login", http.StatusFound)
-			return
+		// Extract JWT: Bearer header for API calls, cookie for browser navigation
+		var claims *auth.Claims
+		if authHeader := r.Header.Get("Authorization"); strings.HasPrefix(authHeader, "Bearer ") {
+			tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+			c, err := h.tokens.ValidateToken(tokenStr)
+			if err == nil {
+				claims = c
+			}
 		}
 
-		claims, err := h.tokens.ValidateToken(cookie.Value)
-		if err != nil {
-			http.Redirect(w, r, "/portal/login", http.StatusFound)
+		// Fall back to portal_token cookies (try all — browsers may send
+		// duplicates from stale instances on the same host).
+		if claims == nil {
+			for _, cookie := range r.Cookies() {
+				if cookie.Name != "portal_token" {
+					continue
+				}
+				c, err := h.tokens.ValidateToken(cookie.Value)
+				if err == nil {
+					claims = c
+					break
+				}
+			}
+		}
+
+		if claims == nil {
+			h.writeJSONError(w, http.StatusUnauthorized, "missing_token", "Authorization header with Bearer token required")
 			return
 		}
 
 		// Verify user still exists and is active
 		user, err := h.users.Get(r.Context(), claims.UserID)
 		if err != nil || user.Status != "active" {
-			h.clearPortalCookie(w)
-			http.Redirect(w, r, "/portal/login", http.StatusFound)
+			h.writeJSONError(w, http.StatusUnauthorized, "invalid_token", "User not found or inactive")
 			return
 		}
 
@@ -273,53 +293,13 @@ func (h *PortalHandler) newPortalPageData(ctx context.Context, title string) Por
 	}
 }
 
-// setPortalCookie sets the JWT cookie for portal session.
-func (h *PortalHandler) setPortalCookie(w http.ResponseWriter, token string) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     "portal_token",
-		Value:    token,
-		Path:     "/portal",
-		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   7 * 24 * 60 * 60, // 7 days
-	})
-}
-
-func (h *PortalHandler) clearPortalCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     "portal_token",
-		Value:    "",
-		Path:     "/portal",
-		HttpOnly: true,
-		Secure:   true,
-		MaxAge:   -1,
-	})
-}
 
 // -----------------------------------------------------------------------------
 // Landing Page
 // -----------------------------------------------------------------------------
 
-// LandingPage shows a public landing page or redirects to dashboard if logged in
+// LandingPage shows a public landing page.
 func (h *PortalHandler) LandingPage(w http.ResponseWriter, r *http.Request) {
-	// Check if user is logged in via JWT cookie
-	cookie, err := r.Cookie("portal_token")
-	if err == nil && cookie.Value != "" {
-		// Validate JWT token
-		claims, err := h.tokens.ValidateToken(cookie.Value)
-		if err == nil {
-			// Verify user still exists and is active
-			user, err := h.users.Get(r.Context(), claims.UserID)
-			if err == nil && user.Status == "active" {
-				// User is logged in, redirect to dashboard
-				http.Redirect(w, r, "/portal/dashboard", http.StatusFound)
-				return
-			}
-		}
-	}
-
-	// Show landing page
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(h.renderLandingPage()))
 }
@@ -460,20 +440,9 @@ func (h *PortalHandler) SignupSubmit(w http.ResponseWriter, r *http.Request) {
 		// Redirect to login with verification message, pre-fill email
 		http.Redirect(w, r, "/portal/login?signup=success&email="+url.QueryEscape(req.Email), http.StatusFound)
 	} else {
-		// Auto-login: generate JWT and set cookie, then redirect to dashboard
-		token, _, err := h.tokens.GenerateToken(userID, req.Email, "user", "")
-		if err != nil {
-			h.logger.Error().Err(err).Msg("failed to generate token after signup")
-			// Fall back to login redirect
-			http.Redirect(w, r, "/portal/login?signup=ready&email="+url.QueryEscape(req.Email), http.StatusFound)
-			return
-		}
-
-		h.setPortalCookie(w, token)
-		h.logger.Info().Str("user_id", userID).Str("email", req.Email).Msg("user signed up and auto-logged in")
-
-		// Redirect to dashboard
-		http.Redirect(w, r, "/portal/dashboard", http.StatusFound)
+		// Redirect to login page — user logs in via API/SPA to get JWT
+		h.logger.Info().Str("user_id", userID).Str("email", req.Email).Msg("user signed up")
+		http.Redirect(w, r, "/portal/login?signup=ready&email="+url.QueryEscape(req.Email), http.StatusFound)
 	}
 }
 
@@ -511,7 +480,7 @@ func (h *PortalHandler) PortalLoginSubmit(w http.ResponseWriter, r *http.Request
 	ctx := r.Context()
 
 	if err := r.ParseForm(); err != nil {
-		h.renderError(w, http.StatusBadRequest, "Invalid form data")
+		h.writeJSONError(w, http.StatusBadRequest, "invalid_request", "Invalid form data")
 		return
 	}
 
@@ -523,40 +492,30 @@ func (h *PortalHandler) PortalLoginSubmit(w http.ResponseWriter, r *http.Request
 	// Validate input
 	result := domainAuth.ValidateLogin(req)
 	if !result.Valid {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusUnprocessableEntity)
-		w.Write([]byte(h.renderLoginPage(req.Email, "", "", result.Errors)))
+		h.writeJSONValidationErrors(w, result.Errors)
 		return
 	}
 
 	// Get user
 	user, err := h.users.GetByEmail(ctx, req.Email)
 	if err != nil {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(h.renderLoginPage(req.Email, "Invalid email or password", "error", nil)))
+		h.writeJSONError(w, http.StatusUnauthorized, "invalid_credentials", "Invalid email or password")
 		return
 	}
 
 	// Check password
 	if !h.hasher.Compare(user.PasswordHash, req.Password) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(h.renderLoginPage(req.Email, "Invalid email or password", "error", nil)))
+		h.writeJSONError(w, http.StatusUnauthorized, "invalid_credentials", "Invalid email or password")
 		return
 	}
 
 	// Check status
 	if user.Status == "pending" {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusForbidden)
-		w.Write([]byte(h.renderLoginPage(req.Email, "Please verify your email before logging in", "warning", nil)))
+		h.writeJSONError(w, http.StatusForbidden, "email_not_verified", "Please verify your email before logging in")
 		return
 	}
 	if user.Status != "active" {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusForbidden)
-		w.Write([]byte(h.renderLoginPage(req.Email, "Your account is not active", "error", nil)))
+		h.writeJSONError(w, http.StatusForbidden, "account_inactive", "Your account is not active")
 		return
 	}
 
@@ -564,16 +523,30 @@ func (h *PortalHandler) PortalLoginSubmit(w http.ResponseWriter, r *http.Request
 	token, _, err := h.tokens.GenerateToken(user.ID, user.Email, "user", user.PlanID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("failed to generate token")
-		h.renderError(w, http.StatusInternalServerError, "Failed to log in")
+		h.writeJSONError(w, http.StatusInternalServerError, "server_error", "Failed to log in")
 		return
 	}
 
-	h.setPortalCookie(w, token)
-	http.Redirect(w, r, "/portal/dashboard", http.StatusFound)
+	h.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"user": map[string]interface{}{
+			"id":    user.ID,
+			"email": user.Email,
+			"name":  user.Name,
+		},
+		"token": token,
+	})
 }
 
 func (h *PortalHandler) PortalLogout(w http.ResponseWriter, r *http.Request) {
-	h.clearPortalCookie(w)
+	http.SetCookie(w, &http.Cookie{
+		Name:     "portal_token",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
 	http.Redirect(w, r, "/portal/login", http.StatusFound)
 }
 
@@ -830,11 +803,6 @@ func (h *PortalHandler) ResetPasswordSubmit(w http.ResponseWriter, r *http.Reque
 	// Mark token as used
 	if err := h.authTokens.MarkUsed(ctx, token.ID, time.Now().UTC()); err != nil {
 		h.logger.Error().Err(err).Msg("failed to mark token as used")
-	}
-
-	// Invalidate all sessions
-	if err := h.sessions.DeleteByUser(ctx, user.ID); err != nil {
-		h.logger.Error().Err(err).Msg("failed to delete sessions")
 	}
 
 	http.Redirect(w, r, "/portal/login?reset=success", http.StatusFound)
@@ -1192,12 +1160,14 @@ func (h *PortalHandler) CloseAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Delete sessions
-	if err := h.sessions.DeleteByUser(ctx, user.ID); err != nil {
-		h.logger.Error().Err(err).Msg("failed to delete sessions")
-	}
-
-	h.clearPortalCookie(w)
+	http.SetCookie(w, &http.Cookie{
+		Name:     "portal_token",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
 	http.Redirect(w, r, "/portal/login?closed=true", http.StatusFound)
 }
 
@@ -1774,7 +1744,6 @@ func (h *PortalHandler) APIRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.setPortalCookie(w, token)
 	h.logger.Info().Str("user_id", userID).Str("email", req.Email).Msg("user signed up via API")
 
 	h.writeJSON(w, http.StatusCreated, map[string]interface{}{
@@ -1845,8 +1814,6 @@ func (h *PortalHandler) APILogin(w http.ResponseWriter, r *http.Request) {
 		h.writeJSONError(w, http.StatusInternalServerError, "server_error", "Failed to log in")
 		return
 	}
-
-	h.setPortalCookie(w, token)
 
 	h.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
@@ -1987,14 +1954,93 @@ func (h *PortalHandler) APIResetPassword(w http.ResponseWriter, r *http.Request)
 		h.logger.Error().Err(err).Msg("failed to mark token as used")
 	}
 
-	// Invalidate all sessions
-	if err := h.sessions.DeleteByUser(ctx, user.ID); err != nil {
-		h.logger.Error().Err(err).Msg("failed to delete sessions")
-	}
-
 	h.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"message": "Password reset successfully. You can now log in with your new password.",
+	})
+}
+
+// APICheckout creates a Stripe checkout session via JSON API.
+// POST /portal/api/checkout
+func (h *PortalHandler) APICheckout(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := getPortalUser(ctx)
+
+	var req struct {
+		PlanID     string `json:"plan_id"`
+		SuccessURL string `json:"success_url"`
+		CancelURL  string `json:"cancel_url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeJSONError(w, http.StatusBadRequest, "invalid_request", "Invalid JSON body")
+		return
+	}
+
+	if req.PlanID == "" {
+		h.writeJSONError(w, http.StatusBadRequest, "missing_field", "plan_id is required")
+		return
+	}
+	if req.SuccessURL == "" || req.CancelURL == "" {
+		h.writeJSONError(w, http.StatusBadRequest, "missing_field", "success_url and cancel_url are required")
+		return
+	}
+
+	// Get the plan
+	plan, err := h.plans.Get(ctx, req.PlanID)
+	if err != nil || !plan.Enabled {
+		h.writeJSONError(w, http.StatusNotFound, "plan_not_found", "Plan not found or not available")
+		return
+	}
+
+	// Free plans don't need checkout
+	if plan.PriceMonthly <= 0 {
+		h.writeJSONError(w, http.StatusBadRequest, "free_plan", "Free plans do not require checkout")
+		return
+	}
+
+	// Check payment provider
+	if h.payment == nil || h.payment.Name() == "none" {
+		h.writeJSONError(w, http.StatusServiceUnavailable, "no_provider", "Payments are not configured")
+		return
+	}
+
+	// Get or create Stripe customer
+	dbUser, err := h.users.Get(ctx, user.ID)
+	if err != nil {
+		h.writeJSONError(w, http.StatusInternalServerError, "server_error", "Failed to get user")
+		return
+	}
+
+	customerID := dbUser.StripeID
+	if customerID == "" {
+		customerID, err = h.payment.CreateCustomer(ctx, dbUser.Email, dbUser.Name, dbUser.ID)
+		if err != nil {
+			h.logger.Error().Err(err).Msg("failed to create payment customer")
+			h.writeJSONError(w, http.StatusInternalServerError, "customer_failed", "Could not set up billing account")
+			return
+		}
+		dbUser.StripeID = customerID
+		dbUser.UpdatedAt = time.Now().UTC()
+		if err := h.users.Update(ctx, dbUser); err != nil {
+			h.logger.Error().Err(err).Msg("failed to store customer ID")
+		}
+	}
+
+	priceID := plan.StripePriceID
+	if priceID == "" && h.payment.Name() != "dummy" {
+		h.writeJSONError(w, http.StatusBadRequest, "no_price", "Plan has no price configured")
+		return
+	}
+
+	checkoutURL, err := h.payment.CreateCheckoutSession(ctx, customerID, priceID, req.SuccessURL, req.CancelURL, plan.TrialDays)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to create checkout session")
+		h.writeJSONError(w, http.StatusInternalServerError, "checkout_failed", "Failed to create checkout session")
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"checkout_url": checkoutURL,
 	})
 }
 

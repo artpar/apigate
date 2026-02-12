@@ -148,7 +148,7 @@ route:
 | Level | Description |
 |-------|-------------|
 | Public | No authentication required |
-| Authenticated | Valid API key or session |
+| Authenticated | Valid API key or JWT Bearer token |
 | Self or Admin | User can access own resources, admin all |
 | Admin Only | Requires admin role |
 
@@ -721,7 +721,7 @@ hooks:
 |--------|------|-------------|
 | POST | `/auth/login` | Login with email/password |
 | POST | `/auth/register` | Create new account |
-| POST | `/auth/logout` | End session |
+| POST | `/auth/logout` | Clear auth token |
 | GET | `/auth/me` | Get current user |
 | GET | `/auth/setup-required` | Check if setup needed |
 | POST | `/auth/setup` | Complete initial setup |
@@ -940,7 +940,7 @@ apigate mod <module> delete <id>
 | `usage_summaries` | Aggregated stats |
 | `rate_limits` | Rate limit state |
 | `settings` | Configuration |
-| `sessions` | Portal security sessions |
+| `auth_tokens` | Email verification and password reset tokens |
 | `schema_migrations` | Migration tracking |
 
 ### 17.3 Migrations

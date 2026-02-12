@@ -176,8 +176,8 @@ When Stripe is configured, the portal automatically shows:
 Create checkout sessions via API:
 
 ```bash
-curl -X POST http://localhost:8080/api/portal/checkout \
-  -H "Authorization: Bearer USER_SESSION" \
+curl -X POST http://localhost:8080/portal/api/checkout \
+  -H "Authorization: Bearer USER_JWT" \
   -d '{
     "plan_id": "pro-plan-id",
     "success_url": "https://yoursite.com/success",

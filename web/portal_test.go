@@ -1,7 +1,9 @@
 package web
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -140,44 +142,6 @@ func (m *mockTokenStore) DeleteByUser(ctx context.Context, userID string) error 
 	return nil
 }
 
-// mockSessionStore implements ports.SessionStore for testing.
-type mockSessionStore struct {
-	sessions map[string]domainAuth.Session
-}
-
-func newMockSessionStore() *mockSessionStore {
-	return &mockSessionStore{sessions: make(map[string]domainAuth.Session)}
-}
-
-func (m *mockSessionStore) Create(ctx context.Context, session domainAuth.Session) error {
-	m.sessions[session.ID] = session
-	return nil
-}
-
-func (m *mockSessionStore) Get(ctx context.Context, id string) (domainAuth.Session, error) {
-	if s, ok := m.sessions[id]; ok {
-		return s, nil
-	}
-	return domainAuth.Session{}, errNotFound
-}
-
-func (m *mockSessionStore) Delete(ctx context.Context, id string) error {
-	delete(m.sessions, id)
-	return nil
-}
-
-func (m *mockSessionStore) DeleteByUser(ctx context.Context, userID string) error {
-	for id, s := range m.sessions {
-		if s.UserID == userID {
-			delete(m.sessions, id)
-		}
-	}
-	return nil
-}
-
-func (m *mockSessionStore) DeleteExpired(ctx context.Context) (int64, error) {
-	return 0, nil
-}
 
 // mockHasher implements ports.Hasher for testing.
 type mockHasher struct{}
@@ -433,7 +397,6 @@ func (m *mockPaymentProvider) ParseWebhook(payload []byte, signature string) (st
 func newTestPortalHandlerWithBilling() (*PortalHandler, *mockUserStore, *mockSubscriptionStore, *mockInvoiceStore, *mockPaymentProvider) {
 	userStore := newMockUserStore()
 	tokenStore := newMockTokenStore()
-	sessionStore := newMockSessionStore()
 	planStore := newMockPlanStore()
 	emailSender := email.NewMockSender("https://test.com", "TestApp")
 	subStore := newMockSubscriptionStore()
@@ -445,7 +408,6 @@ func newTestPortalHandlerWithBilling() (*PortalHandler, *mockUserStore, *mockSub
 		Keys:          &mockKeyStore{},
 		Usage:         &mockUsageStore{},
 		AuthTokens:    tokenStore,
-		Sessions:      sessionStore,
 		Plans:         planStore,
 		EmailSender:   emailSender,
 		Subscriptions: subStore,
@@ -467,7 +429,6 @@ func newTestPortalHandlerWithBilling() (*PortalHandler, *mockUserStore, *mockSub
 func newTestPortalHandler() (*PortalHandler, *mockUserStore, *mockTokenStore, *email.MockSender) {
 	userStore := newMockUserStore()
 	tokenStore := newMockTokenStore()
-	sessionStore := newMockSessionStore()
 	planStore := newMockPlanStore()
 	emailSender := email.NewMockSender("https://test.com", "TestApp")
 
@@ -476,7 +437,6 @@ func newTestPortalHandler() (*PortalHandler, *mockUserStore, *mockTokenStore, *e
 		Keys:        &mockKeyStore{},
 		Usage:       &mockUsageStore{},
 		AuthTokens:  tokenStore,
-		Sessions:    sessionStore,
 		Plans:       planStore,
 		EmailSender: emailSender,
 		Logger:      zerolog.Nop(),
@@ -527,27 +487,14 @@ func TestPortalHandler_SignupSubmit_Success(t *testing.T) {
 
 	handler.SignupSubmit(w, req)
 
-	// Should redirect to dashboard (auto-login when no email verification required)
+	// Should redirect to login page (user logs in via API/SPA to get JWT)
 	if w.Code != http.StatusFound {
 		t.Errorf("Status = %d, want %d", w.Code, http.StatusFound)
 	}
 
 	location := w.Header().Get("Location")
-	if !strings.Contains(location, "/portal/dashboard") {
-		t.Errorf("Location = %s, want to contain /portal/dashboard", location)
-	}
-
-	// Should set portal_token cookie for auto-login
-	cookies := w.Result().Cookies()
-	foundToken := false
-	for _, c := range cookies {
-		if c.Name == "portal_token" && c.Value != "" {
-			foundToken = true
-			break
-		}
-	}
-	if !foundToken {
-		t.Error("Expected portal_token cookie to be set for auto-login")
+	if !strings.Contains(location, "/portal/login") {
+		t.Errorf("Location = %s, want to contain /portal/login", location)
 	}
 
 	// User should be created
@@ -707,26 +654,17 @@ func TestPortalHandler_PortalLoginSubmit_Success(t *testing.T) {
 
 	handler.PortalLoginSubmit(w, req)
 
-	if w.Code != http.StatusFound {
-		t.Errorf("Status = %d, want %d", w.Code, http.StatusFound)
+	// Should return JSON with token
+	if w.Code != http.StatusOK {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	location := w.Header().Get("Location")
-	if location != "/portal/dashboard" {
-		t.Errorf("Location = %s, want /portal/dashboard", location)
+	body := w.Body.String()
+	if !strings.Contains(body, `"success":true`) && !strings.Contains(body, `"success": true`) {
+		t.Error("Response should contain success:true")
 	}
-
-	// Should set cookie
-	cookies := w.Result().Cookies()
-	var found bool
-	for _, c := range cookies {
-		if c.Name == "portal_token" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("portal_token cookie should be set")
+	if !strings.Contains(body, `"token"`) {
+		t.Error("Response should contain token")
 	}
 }
 
@@ -883,13 +821,12 @@ func TestPortalHandler_PortalAuthMiddleware_NoToken(t *testing.T) {
 
 	protected.ServeHTTP(w, req)
 
-	if w.Code != http.StatusFound {
-		t.Errorf("Status = %d, want %d", w.Code, http.StatusFound)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusUnauthorized)
 	}
 
-	location := w.Header().Get("Location")
-	if location != "/portal/login" {
-		t.Errorf("Location = %s, want /portal/login", location)
+	if !strings.Contains(w.Body.String(), "missing_token") {
+		t.Errorf("body should contain missing_token error code, got: %s", w.Body.String())
 	}
 }
 
@@ -916,7 +853,7 @@ func TestPortalHandler_PortalAuthMiddleware_ValidToken(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest("GET", "/portal/dashboard", nil)
-	req.AddCookie(&http.Cookie{Name: "portal_token", Value: token})
+	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 
 	protected.ServeHTTP(w, req)
@@ -930,6 +867,64 @@ func TestPortalHandler_PortalAuthMiddleware_ValidToken(t *testing.T) {
 	}
 	if gotUser.ID != "user1" {
 		t.Errorf("User ID = %s, want user1", gotUser.ID)
+	}
+}
+
+func TestPortalHandler_PortalAuthMiddleware_CookieToken(t *testing.T) {
+	handler, userStore, _, _ := newTestPortalHandler()
+
+	userStore.users["user1"] = ports.User{
+		ID:     "user1",
+		Email:  "user@example.com",
+		Name:   "Test User",
+		Status: "active",
+	}
+
+	tokenService := auth.NewTokenService("test-secret", 24*time.Hour)
+	token, _, _ := tokenService.GenerateToken("user1", "user@example.com", "user", "free")
+
+	var gotUser *PortalUser
+	protected := handler.PortalAuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUser = getPortalUser(r.Context())
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/portal/dashboard", nil)
+	req.AddCookie(&http.Cookie{Name: "portal_token", Value: token})
+	w := httptest.NewRecorder()
+
+	protected.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if gotUser == nil {
+		t.Fatal("User should be in context")
+	}
+	if gotUser.ID != "user1" {
+		t.Errorf("User ID = %s, want user1", gotUser.ID)
+	}
+}
+
+func TestPortalHandler_PortalAuthMiddleware_MissingBearer(t *testing.T) {
+	handler, _, _, _ := newTestPortalHandler()
+
+	protected := handler.PortalAuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/portal/dashboard", nil)
+	w := httptest.NewRecorder()
+
+	protected.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "missing_token") {
+		t.Error("Response should contain missing_token error code")
 	}
 }
 
@@ -1098,7 +1093,7 @@ func TestPortalHandler_PortalLogout(t *testing.T) {
 	token, _, _ := tokenService.GenerateToken("user1", "user@example.com", "user", "free")
 
 	req := httptest.NewRequest("POST", "/portal/logout", nil)
-	req.AddCookie(&http.Cookie{Name: "portal_token", Value: token})
+	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 
 	handler.PortalLogout(w, req)
@@ -1110,15 +1105,6 @@ func TestPortalHandler_PortalLogout(t *testing.T) {
 	if w.Header().Get("Location") != "/portal/login" {
 		t.Errorf("Location = %s, want /portal/login", w.Header().Get("Location"))
 	}
-
-	// Check cookie is cleared
-	cookies := w.Result().Cookies()
-	for _, c := range cookies {
-		if c.Name == "portal_token" && c.MaxAge == -1 {
-			return
-		}
-	}
-	t.Error("Cookie should be cleared")
 }
 
 func TestPortalHandler_PortalDashboard(t *testing.T) {
@@ -1138,9 +1124,9 @@ func TestPortalHandler_PortalDashboard(t *testing.T) {
 	token, _, _ := tokenService.GenerateToken("user1", "user@example.com", "user", "free")
 
 	req := httptest.NewRequest("GET", "/portal/dashboard", nil)
-	req.AddCookie(&http.Cookie{Name: "portal_token", Value: token})
+	req.Header.Set("Authorization", "Bearer "+token)
 
-	// Add context with portal user
+	// Add context with portal user (middleware would normally set this)
 	ctx := withPortalUser(req.Context(), &PortalUser{
 		ID:    "user1",
 		Email: "user@example.com",
@@ -1651,13 +1637,18 @@ func TestPortalHandler_PortalAuthMiddleware_InvalidToken(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest("GET", "/portal/dashboard", nil)
-	req.AddCookie(&http.Cookie{Name: "portal_token", Value: "invalid-token"})
+	req.Header.Set("Authorization", "Bearer invalid-token")
 	w := httptest.NewRecorder()
 
 	protected.ServeHTTP(w, req)
 
-	if w.Code != http.StatusFound {
-		t.Errorf("Status = %d, want %d", w.Code, http.StatusFound)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "missing_token") {
+		t.Errorf("Response should contain missing_token error code, got: %s", body)
 	}
 }
 
@@ -1672,13 +1663,13 @@ func TestPortalHandler_PortalAuthMiddleware_UserNotFound(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest("GET", "/portal/dashboard", nil)
-	req.AddCookie(&http.Cookie{Name: "portal_token", Value: token})
+	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 
 	protected.ServeHTTP(w, req)
 
-	if w.Code != http.StatusFound {
-		t.Errorf("Status = %d, want %d", w.Code, http.StatusFound)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusUnauthorized)
 	}
 }
 
@@ -1699,13 +1690,13 @@ func TestPortalHandler_PortalAuthMiddleware_UserNotActive(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest("GET", "/portal/dashboard", nil)
-	req.AddCookie(&http.Cookie{Name: "portal_token", Value: token})
+	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 
 	protected.ServeHTTP(w, req)
 
-	if w.Code != http.StatusFound {
-		t.Errorf("Status = %d, want %d", w.Code, http.StatusFound)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusUnauthorized)
 	}
 }
 
@@ -1859,18 +1850,16 @@ func (m *mockKeyStoreWithData) UpdateLastUsed(ctx context.Context, id string, at
 func newTestPortalHandlerWithKeyStore() (*PortalHandler, *mockUserStore, *mockKeyStoreWithData) {
 	userStore := newMockUserStore()
 	tokenStore := newMockTokenStore()
-	sessionStore := newMockSessionStore()
 	planStore := newMockPlanStore()
 	keyStore := newMockKeyStoreWithData()
 	emailSender := email.NewMockSender("https://test.com", "TestApp")
 
 	deps := PortalDeps{
-		Users:       userStore,
-		Keys:        keyStore,
-		Usage:       &mockUsageStore{},
-		AuthTokens:  tokenStore,
-		Sessions:    sessionStore,
-		Plans:       planStore,
+		Users:      userStore,
+		Keys:       keyStore,
+		Usage:      &mockUsageStore{},
+		AuthTokens: tokenStore,
+		Plans:      planStore,
 		EmailSender: emailSender,
 		Logger:      zerolog.Nop(),
 		Hasher:      &mockHasher{},
@@ -2138,17 +2127,15 @@ func newTestPortalHandlerWithWebhooks() (*PortalHandler, *mockUserStore, *mockWe
 	userStore := newMockUserStore()
 	webhookStore := newMockWebhookStore()
 	tokenStore := newMockTokenStore()
-	sessionStore := newMockSessionStore()
 	planStore := newMockPlanStore()
 	emailSender := email.NewMockSender("https://test.com", "TestApp")
 
 	deps := PortalDeps{
-		Users:       userStore,
-		Keys:        &mockKeyStore{},
-		Usage:       &mockUsageStore{},
-		AuthTokens:  tokenStore,
-		Sessions:    sessionStore,
-		Plans:       planStore,
+		Users:      userStore,
+		Keys:       &mockKeyStore{},
+		Usage:      &mockUsageStore{},
+		AuthTokens: tokenStore,
+		Plans:      planStore,
 		Webhooks:    webhookStore,
 		EmailSender: emailSender,
 		Logger:      zerolog.Nop(),
@@ -2435,84 +2422,6 @@ func TestPortalHandler_LandingPage_NotLoggedIn(t *testing.T) {
 	}
 }
 
-func TestPortalHandler_LandingPage_WithInvalidCookie(t *testing.T) {
-	handler, _, _, _ := newTestPortalHandler()
-
-	req := httptest.NewRequest("GET", "/portal", nil)
-	req.AddCookie(&http.Cookie{
-		Name:  "portal_token",
-		Value: "invalid-token",
-	})
-	w := httptest.NewRecorder()
-
-	handler.LandingPage(w, req)
-
-	// Should show landing page since token is invalid
-	if w.Code != http.StatusOK {
-		t.Errorf("Status = %d, want %d", w.Code, http.StatusOK)
-	}
-}
-
-func TestPortalHandler_LandingPage_LoggedIn(t *testing.T) {
-	handler, userStore, _, _ := newTestPortalHandler()
-
-	// Add a user
-	userStore.users["user1"] = ports.User{
-		ID:     "user1",
-		Email:  "test@example.com",
-		Status: "active",
-	}
-
-	// Generate a valid token
-	tokenService := auth.NewTokenService("test-secret", 24*time.Hour)
-	token, _, _ := tokenService.GenerateToken("user1", "test@example.com", "user", "free")
-
-	req := httptest.NewRequest("GET", "/portal", nil)
-	req.AddCookie(&http.Cookie{
-		Name:  "portal_token",
-		Value: token,
-	})
-	w := httptest.NewRecorder()
-
-	handler.LandingPage(w, req)
-
-	// Should redirect to dashboard
-	if w.Code != http.StatusFound {
-		t.Errorf("Status = %d, want %d", w.Code, http.StatusFound)
-	}
-	if w.Header().Get("Location") != "/portal/dashboard" {
-		t.Errorf("Location = %q, want /portal/dashboard", w.Header().Get("Location"))
-	}
-}
-
-func TestPortalHandler_LandingPage_LoggedInButInactive(t *testing.T) {
-	handler, userStore, _, _ := newTestPortalHandler()
-
-	// Add an inactive user
-	userStore.users["user1"] = ports.User{
-		ID:     "user1",
-		Email:  "test@example.com",
-		Status: "inactive",
-	}
-
-	// Generate a valid token
-	tokenService := auth.NewTokenService("test-secret", 24*time.Hour)
-	token, _, _ := tokenService.GenerateToken("user1", "test@example.com", "user", "free")
-
-	req := httptest.NewRequest("GET", "/portal", nil)
-	req.AddCookie(&http.Cookie{
-		Name:  "portal_token",
-		Value: token,
-	})
-	w := httptest.NewRecorder()
-
-	handler.LandingPage(w, req)
-
-	// Should show landing page since user is inactive
-	if w.Code != http.StatusOK {
-		t.Errorf("Status = %d, want %d", w.Code, http.StatusOK)
-	}
-}
 
 // =============================================================================
 // VerifyEmail Tests
@@ -6455,6 +6364,146 @@ func TestPortalHandler_APIKeysPartial_WithKeys(t *testing.T) {
 	if !strings.Contains(body, "Test Key") && !strings.Contains(body, "test_") {
 		// The key should appear in the table
 		// If keys list is empty or error, it shows "No API keys yet"
+	}
+}
+
+// =============================================================================
+// APICheckout Tests
+// =============================================================================
+
+func TestPortalHandler_APICheckout_HappyPath(t *testing.T) {
+	handler, userStore, _, _, payment := newTestPortalHandlerWithBilling()
+
+	user := ports.User{ID: "user1", Email: "test@test.com", Name: "Test", Status: "active", StripeID: "cus_123"}
+	userStore.users["user1"] = user
+
+	handler.plans.(*mockPlanStore).plans = append(handler.plans.(*mockPlanStore).plans, ports.Plan{
+		ID:            "pro",
+		Name:          "Pro",
+		Enabled:       true,
+		PriceMonthly:  999,
+		StripePriceID: "price_pro",
+	})
+
+	payment.checkoutURL = "https://checkout.stripe.com/sess_abc"
+
+	body := `{"plan_id":"pro","success_url":"https://example.com/ok","cancel_url":"https://example.com/cancel"}`
+	req := httptest.NewRequest("POST", "/portal/api/checkout", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(withPortalUser(req.Context(), &PortalUser{ID: "user1", Email: "test@test.com"}))
+	w := httptest.NewRecorder()
+
+	handler.APICheckout(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+	if resp["checkout_url"] != "https://checkout.stripe.com/sess_abc" {
+		t.Errorf("checkout_url = %q, want %q", resp["checkout_url"], "https://checkout.stripe.com/sess_abc")
+	}
+}
+
+func TestPortalHandler_APICheckout_MissingFields(t *testing.T) {
+	handler, userStore, _, _, _ := newTestPortalHandlerWithBilling()
+
+	userStore.users["user1"] = ports.User{ID: "user1", Email: "test@test.com", Status: "active"}
+
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"missing plan_id", `{"success_url":"x","cancel_url":"y"}`, "plan_id"},
+		{"missing urls", `{"plan_id":"pro"}`, "success_url"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/portal/api/checkout", bytes.NewBufferString(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			req = req.WithContext(withPortalUser(req.Context(), &PortalUser{ID: "user1", Email: "test@test.com"}))
+			w := httptest.NewRecorder()
+
+			handler.APICheckout(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("Status = %d, want %d", w.Code, http.StatusBadRequest)
+			}
+			if !strings.Contains(w.Body.String(), tt.want) {
+				t.Errorf("body %q should contain %q", w.Body.String(), tt.want)
+			}
+		})
+	}
+}
+
+func TestPortalHandler_APICheckout_PlanNotFound(t *testing.T) {
+	handler, userStore, _, _, _ := newTestPortalHandlerWithBilling()
+
+	userStore.users["user1"] = ports.User{ID: "user1", Email: "test@test.com", Status: "active"}
+
+	body := `{"plan_id":"nonexistent","success_url":"https://x.com/ok","cancel_url":"https://x.com/no"}`
+	req := httptest.NewRequest("POST", "/portal/api/checkout", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(withPortalUser(req.Context(), &PortalUser{ID: "user1", Email: "test@test.com"}))
+	w := httptest.NewRecorder()
+
+	handler.APICheckout(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+func TestPortalHandler_APICheckout_FreePlan(t *testing.T) {
+	handler, userStore, _, _, _ := newTestPortalHandlerWithBilling()
+
+	userStore.users["user1"] = ports.User{ID: "user1", Email: "test@test.com", Status: "active"}
+
+	// plan_default is the free plan already in mockPlanStore (PriceMonthly == 0)
+	body := `{"plan_id":"plan_default","success_url":"https://x.com/ok","cancel_url":"https://x.com/no"}`
+	req := httptest.NewRequest("POST", "/portal/api/checkout", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(withPortalUser(req.Context(), &PortalUser{ID: "user1", Email: "test@test.com"}))
+	w := httptest.NewRecorder()
+
+	handler.APICheckout(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(w.Body.String(), "free_plan") {
+		t.Errorf("body should contain free_plan error code")
+	}
+}
+
+func TestPortalHandler_APICheckout_NoPaymentProvider(t *testing.T) {
+	handler, userStore, _, _ := newTestPortalHandler()
+
+	userStore.users["user1"] = ports.User{ID: "user1", Email: "test@test.com", Status: "active"}
+
+	handler.plans.(*mockPlanStore).plans = append(handler.plans.(*mockPlanStore).plans, ports.Plan{
+		ID:            "pro",
+		Name:          "Pro",
+		Enabled:       true,
+		PriceMonthly:  999,
+		StripePriceID: "price_pro",
+	})
+
+	body := `{"plan_id":"pro","success_url":"https://x.com/ok","cancel_url":"https://x.com/no"}`
+	req := httptest.NewRequest("POST", "/portal/api/checkout", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(withPortalUser(req.Context(), &PortalUser{ID: "user1", Email: "test@test.com"}))
+	w := httptest.NewRecorder()
+
+	handler.APICheckout(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusServiceUnavailable)
 	}
 }
 

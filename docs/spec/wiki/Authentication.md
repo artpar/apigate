@@ -6,7 +6,7 @@ APIGate supports multiple authentication methods for different use cases.
 
 ## API Authentication (Proxy Requests)
 
-For proxied API requests, use API keys or JWT session tokens:
+For proxied API requests, use API keys or JWT Bearer tokens:
 
 ### API Key via Header
 
@@ -22,7 +22,7 @@ X-API-Key: ak_abc123...
 Authorization: Bearer ak_abc123...
 ```
 
-### JWT Session Token
+### JWT Bearer Token
 
 ```http
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
@@ -30,7 +30,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
 APIGate automatically detects the token type by format:
 - Tokens starting with `ak_` (or configured prefix) → API key authentication
-- Other tokens → JWT session token validation
+- Other tokens → JWT Bearer token validation
 
 See [[API-Keys]] for details on creating and managing API keys.
 
@@ -56,8 +56,8 @@ Content-Type: application/json
 ```json
 {
   "data": {
-    "type": "sessions",
-    "id": "sess_abc123",
+    "type": "auth",
+    "id": "auth_abc123",
     "attributes": {
       "user_id": "usr_xyz789",
       "user_email": "user@example.com",

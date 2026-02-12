@@ -289,8 +289,8 @@ func (h *PortalHandler) renderLoginPage(email, message, messageType string, erro
                 <h1>%s</h1>
                 <p>Log in to your account</p>
             </div>
-            %s
-            <form method="POST" action="/portal/login" class="auth-form">
+            <div id="alert-container">%s</div>
+            <form id="login-form" class="auth-form">
                 <div class="form-group">
                     <label for="email">Email</label>
                     <input type="email" id="email" name="email" value="%s" required autofocus>
@@ -309,14 +309,49 @@ func (h *PortalHandler) renderLoginPage(email, message, messageType string, erro
     </div>
     <script>
     (function() {
-        var alert = document.querySelector('.alert-error');
-        if (alert) {
-            document.querySelectorAll('input').forEach(function(input) {
-                input.addEventListener('input', function() {
-                    alert.style.display = 'none';
-                });
+        var form = document.getElementById('login-form');
+        var alertContainer = document.getElementById('alert-container');
+
+        // Clear alerts on input
+        document.querySelectorAll('input').forEach(function(input) {
+            input.addEventListener('input', function() {
+                var alert = alertContainer.querySelector('.alert-error');
+                if (alert) alert.style.display = 'none';
             });
-        }
+        });
+
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            var btn = form.querySelector('button[type="submit"]');
+            btn.disabled = true;
+            btn.textContent = 'Logging in...';
+
+            var formData = new URLSearchParams(new FormData(form));
+
+            fetch('/portal/login', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: formData.toString()
+            })
+            .then(function(resp) { return resp.json(); })
+            .then(function(data) {
+                if (data.success && data.token) {
+                    localStorage.setItem('auth_token', data.token);
+                    document.cookie = 'portal_token=' + data.token + '; path=/; SameSite=Lax';
+                    window.location.href = '/portal/dashboard';
+                } else {
+                    var msg = (data.error && data.error.message) || 'Login failed';
+                    alertContainer.innerHTML = '<div class="alert alert-error">' + msg + '</div>';
+                    btn.disabled = false;
+                    btn.textContent = 'Log In';
+                }
+            })
+            .catch(function() {
+                alertContainer.innerHTML = '<div class="alert alert-error">Network error. Please try again.</div>';
+                btn.disabled = false;
+                btn.textContent = 'Log In';
+            });
+        });
     })();
     </script>
 </body>

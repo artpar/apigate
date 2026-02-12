@@ -340,7 +340,6 @@ func (a *App) initHTTPServer() error {
 	planStore := sqlite.NewPlanStore(a.DB)
 	SetPlanStore(planStore) // Wire plan store for clear_other_defaults function
 	bcryptHasher := hasher.NewBcrypt(0)
-	sessionStore := sqlite.NewSessionStore(a.DB)
 	tokenStore := sqlite.NewTokenStore(a.DB)
 
 	// Create email sender (used by both admin and portal)
@@ -483,7 +482,6 @@ func (a *App) initHTTPServer() error {
 			Keys:             deps.Keys,
 			Usage:            usageStore,
 			Plans:            planStore,
-			Sessions:         sessionStore,
 			AuthTokens:       tokenStore,
 			EmailSender:      emailSender,
 			Settings:         a.Settings.Store(),

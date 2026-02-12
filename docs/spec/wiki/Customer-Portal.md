@@ -197,13 +197,26 @@ Overview with:
 
 ## Portal Security
 
-### Session Management
+### Authentication
 
-Portal uses secure session cookies with automatic expiration.
+Portal uses JWT Bearer tokens. The same JWT token is accepted via:
+- `Authorization: Bearer <token>` header (for API/fetch calls)
+- `portal_token` cookie (for browser navigation to SSR pages)
 
-### CSRF Protection
+Both transports use the same JWT validation — no server-side sessions.
 
-Automatically enabled for all portal forms.
+### API Checkout
+
+Custom frontends can create Stripe Checkout sessions via the JSON API:
+
+```bash
+curl -X POST https://api.example.com/portal/api/checkout \
+  -H "Authorization: Bearer USER_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"plan_id": "pro", "success_url": "https://yoursite.com/success", "cancel_url": "https://yoursite.com/pricing"}'
+```
+
+Response: `{"checkout_url": "https://checkout.stripe.com/pay/cs_xxx"}`
 
 ### Rate Limiting
 
