@@ -1513,6 +1513,56 @@ func TestRootRedirect(t *testing.T) {
 	}
 }
 
+func TestMeterEndpointNotShadowedByProxyRoutes(t *testing.T) {
+	handler, _ := setupTestHandler()
+	upstream := &testUpstream{healthy: true}
+	healthHandler := apihttp.NewHealthHandler(upstream)
+	logger := zerolog.Nop()
+
+	meterHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		w.Write([]byte("meter"))
+	})
+
+	cfg := apihttp.RouterConfig{
+		MeterHandler:  meterHandler,
+		MeterEnabled:  true,
+		MeterBasePath: "/api/v1/meter",
+	}
+	router := apihttp.NewRouterWithConfig(handler, healthHandler, logger, cfg)
+
+	req := httptest.NewRequest("POST", "/api/v1/meter", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Result().StatusCode != 200 {
+		t.Errorf("status = %d, want 200", rec.Result().StatusCode)
+	}
+	if rec.Body.String() != "meter" {
+		t.Errorf("body = %q, want %q (request was proxied instead of handled by meter)", rec.Body.String(), "meter")
+	}
+}
+
+func TestApiPathsStillProxied(t *testing.T) {
+	handler, _ := setupTestHandler()
+	upstream := &testUpstream{healthy: true}
+	healthHandler := apihttp.NewHealthHandler(upstream)
+	logger := zerolog.Nop()
+
+	// No meter handler — /api/* should be proxied via NotFound fallback
+	cfg := apihttp.RouterConfig{}
+	router := apihttp.NewRouterWithConfig(handler, healthHandler, logger, cfg)
+
+	req := httptest.NewRequest("GET", "/api/something", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	// Proxy auth requires an API key — missing key returns 401
+	if rec.Result().StatusCode != 401 {
+		t.Errorf("status = %d, want 401 (proxy auth behavior, not 404)", rec.Result().StatusCode)
+	}
+}
+
 func TestConfigurableHandlerPaths(t *testing.T) {
 	tests := []struct {
 		name       string

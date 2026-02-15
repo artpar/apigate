@@ -56,11 +56,17 @@ Event types follow a `{resource}.{action}` naming convention:
 
 Custom event types can be defined by prefixing with `custom.`.
 
+## Endpoint Path
+
+The metering API is mounted at a configurable base path (default: `/api/v1/meter`). This can be changed via the `routes.meter_base_path` setting to avoid conflicts with proxy routes (e.g., if a route pattern like `/api/*` is configured).
+
+Example: setting `routes.meter_base_path` to `/_internal/meter` moves the endpoint out of the `/api/` namespace entirely.
+
 ## Endpoints
 
 ### Submit Usage Events
 
-**POST** `/api/v1/meter`
+**POST** `{meter_base_path}` (default: `/api/v1/meter`)
 
 Submit one or more usage events for billing.
 
@@ -152,7 +158,7 @@ When all events fail validation:
 
 ### Query Usage Events
 
-**GET** `/api/v1/meter`
+**GET** `{meter_base_path}` (default: `/api/v1/meter`)
 
 Query submitted usage events (admin only).
 
@@ -391,4 +397,5 @@ Events are aggregated in `domain/usage/aggregate.go`:
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.1.0 | 2026-02-15 | Configurable endpoint path, fixed route shadowing by proxy catch-all (#66) |
 | 1.0.0 | 2026-01-19 | Initial metering API specification |

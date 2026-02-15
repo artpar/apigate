@@ -776,9 +776,6 @@ func NewRouterWithConfig(proxyHandler *ProxyHandler, healthHandler *HealthHandle
 		logger.Info().Msg("web UI disabled (API-only mode)")
 	}
 
-	// Proxy handles /api/* and catch-all for unmatched routes
-	r.HandleFunc("/api/*", proxyHandler.ServeHTTP)
-
 	// Catch-all for proxy: routes not matched by web UI or other handlers
 	// This allows dynamic routes (from database) to work as a fallback
 	// IMPORTANT: Never proxy reserved paths (admin UI, health checks, etc.)
