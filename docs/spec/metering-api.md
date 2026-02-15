@@ -16,10 +16,19 @@ APIGate tracks usage for requests that pass through its proxy automatically. How
 
 ### Authentication
 
-The metering API requires a **service API key** with the `meter:write` scope. This is a special key type that:
-- Is not tied to a specific user
-- Can submit events on behalf of any user
-- Should only be issued to trusted services
+The metering API is protected by the admin `AuthMiddleware`. Both JWT Bearer tokens and API keys are accepted.
+
+**POST** (submit events) additionally requires the `meter:write` scope:
+- API keys with `scopes: ["meter:write"]` — explicitly granted
+- API keys with no scopes (empty list) — full access, implicitly allowed
+- API keys with `scopes: ["*"]` — wildcard, implicitly allowed
+- JWT tokens — no scope restriction (admin users)
+
+**GET** (query events) requires authentication only (no scope check).
+
+Service API keys for metering should be created with:
+- `scopes: ["meter:write"]` to restrict the key to metering only
+- `quota_bypass: true` to exempt from rate limiting (trusted service accounts)
 
 ## Resource Type
 
@@ -322,17 +331,38 @@ Use `Idempotency-Key` header for batch-level deduplication:
 
 ### Creating a Service Key
 
-Service keys are created via admin API with `meter:write` scope:
+Service keys are created via the admin API with the `meter:write` scope:
+
+```http
+POST /admin/keys HTTP/1.1
+Authorization: Bearer <admin-jwt>
+Content-Type: application/json
+
+{
+  "user_id": "user_service_account",
+  "name": "Hoster Metering Service",
+  "scopes": ["meter:write"],
+  "quota_bypass": true
+}
+```
+
+Response includes the raw key (shown once):
 
 ```json
-POST /admin/keys
 {
   "data": {
     "type": "api_keys",
+    "id": "key_abc123",
     "attributes": {
+      "prefix": "ak_abc123def4",
       "name": "Hoster Metering Service",
       "scopes": ["meter:write"],
-      "service": true
+      "quota_bypass": true,
+      "created_at": "2026-02-15T12:00:00Z"
+    },
+    "meta": {
+      "key": "ak_abc123def456789...(full key)",
+      "note": "Save this key securely. It will not be shown again."
     }
   }
 }
@@ -342,9 +372,9 @@ POST /admin/keys
 
 | Attribute | Description |
 |-----------|-------------|
-| `service` | `true` for service keys |
-| `scopes` | Must include `meter:write` |
-| `source_name` | Identifies the service in event logs |
+| `scopes` | Must include `meter:write` (or be empty for full access) |
+| `quota_bypass` | `true` to exempt from rate limiting |
+| `user_id` | Owner user ID (for audit trail) |
 
 ## Implementation Notes
 
@@ -397,5 +427,6 @@ Events are aggregated in `domain/usage/aggregate.go`:
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.2.0 | 2026-02-15 | Authentication enforced: AuthMiddleware + `meter:write` scope on POST, scoped API keys |
 | 1.1.0 | 2026-02-15 | Configurable endpoint path, fixed route shadowing by proxy catch-all (#66) |
 | 1.0.0 | 2026-01-19 | Initial metering API specification |

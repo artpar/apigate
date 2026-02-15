@@ -1502,6 +1502,136 @@ func TestCreateKey_InvalidJSON(t *testing.T) {
 	}
 }
 
+func TestCreateKey_WithScopes(t *testing.T) {
+	h, rawKey := setupHandler(t)
+
+	// Create a user first
+	userBody := map[string]string{"email": "scopeuser@test.com"}
+	userResp := doRequest(t, h, "POST", "/users", userBody, rawKey)
+	var user map[string]any
+	json.NewDecoder(userResp.Body).Decode(&user)
+	userID := getResourceID(user)
+
+	// Create key with scopes
+	keyBody := map[string]any{
+		"user_id": userID,
+		"name":    "Scoped Key",
+		"scopes":  []string{"meter:write", "admin:read"},
+	}
+	resp := doRequest(t, h, "POST", "/keys", keyBody, rawKey)
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("Expected 201, got %d", resp.StatusCode)
+	}
+
+	var result map[string]any
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	// Verify scopes in response
+	scopesRaw := getResourceAttr(result, "scopes")
+	if scopesRaw == nil {
+		t.Fatal("Expected scopes in response attributes")
+	}
+	scopes, ok := scopesRaw.([]any)
+	if !ok {
+		t.Fatalf("Expected scopes to be array, got %T", scopesRaw)
+	}
+	if len(scopes) != 2 {
+		t.Errorf("Expected 2 scopes, got %d", len(scopes))
+	}
+}
+
+func TestCreateKey_WithQuotaBypass(t *testing.T) {
+	h, rawKey := setupHandler(t)
+
+	// Create a user first
+	userBody := map[string]string{"email": "bypassuser@test.com"}
+	userResp := doRequest(t, h, "POST", "/users", userBody, rawKey)
+	var user map[string]any
+	json.NewDecoder(userResp.Body).Decode(&user)
+	userID := getResourceID(user)
+
+	// Create key with quota_bypass
+	keyBody := map[string]any{
+		"user_id":      userID,
+		"name":         "Bypass Key",
+		"quota_bypass": true,
+	}
+	resp := doRequest(t, h, "POST", "/keys", keyBody, rawKey)
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("Expected 201, got %d", resp.StatusCode)
+	}
+
+	var result map[string]any
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	// Verify quota_bypass in response
+	bypass := getResourceAttr(result, "quota_bypass")
+	if bypass != true {
+		t.Errorf("Expected quota_bypass=true, got %v", bypass)
+	}
+}
+
+func TestAuthMiddleware_SetsScopes(t *testing.T) {
+	userStore := memory.NewUserStore()
+	keyStore := memory.NewKeyStore()
+	h := hasher.NewBcrypt(4)
+
+	adminUser := ports.User{
+		ID:        "user_scoped",
+		Email:     "scoped@test.com",
+		PlanID:    "free",
+		Status:    "active",
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	userStore.Create(context.Background(), adminUser)
+
+	// Create key with specific scopes
+	rawKey, keyData := key.Generate("ak_")
+	keyData = keyData.WithUserID(adminUser.ID).WithScopes([]string{"meter:write", "admin:read"})
+	keyStore.Create(context.Background(), keyData)
+
+	planStore := newMockPlanStore()
+	now := time.Now().UTC()
+	planStore.Create(context.Background(), ports.Plan{
+		ID: "free", Name: "Free", RateLimitPerMinute: 60, IsDefault: true, Enabled: true,
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	handler := admin.NewHandler(admin.Deps{
+		Users:  userStore,
+		Keys:   keyStore,
+		Plans:  planStore,
+		Logger: zerolog.Nop(),
+		Hasher: h,
+	})
+
+	// Make an authenticated request and verify we can reach the handler
+	// with the correct user ID (not "admin")
+	req := httptest.NewRequest("GET", "/me", nil)
+	req.Header.Set("X-API-Key", rawKey)
+
+	rec := httptest.NewRecorder()
+	handler.Router().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", rec.Code)
+	}
+
+	var result map[string]any
+	json.NewDecoder(rec.Body).Decode(&result)
+
+	// Verify the user ID is the real user ID (not "admin")
+	if getResourceID(result) != "user_scoped" {
+		t.Errorf("Expected user ID 'user_scoped', got %v", getResourceID(result))
+	}
+	if getResourceAttr(result, "email") != "scoped@test.com" {
+		t.Errorf("Expected email 'scoped@test.com', got %v", getResourceAttr(result, "email"))
+	}
+}
+
 func TestCreateKey_WithExpiry(t *testing.T) {
 	h, rawKey := setupHandler(t)
 

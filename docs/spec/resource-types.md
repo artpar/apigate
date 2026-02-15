@@ -95,10 +95,20 @@ This document defines all JSON:API resource types used in the APIGate API.
 |-----------|------|-------------|---------|
 | `name` | string | Key name/description | Yes |
 | `prefix` | string | Key prefix (for identification) | No |
+| `scopes` | []string | Scope restrictions (empty = full access) | Yes |
+| `quota_bypass` | bool | Exempt from rate limiting/quota | Yes |
 | `expires_at` | timestamp | Expiration time | Yes |
 | `last_used` | timestamp | Last usage time | No |
 | `revoked_at` | timestamp | Revocation time | No |
 | `created_at` | timestamp | Creation time | No |
+
+### Scope Values
+
+| Scope | Description |
+|-------|-------------|
+| (empty) | Full access — no restrictions |
+| `meter:write` | Submit usage events via metering API |
+| `*` | Wildcard — matches any required scope |
 
 ### Relationships
 
@@ -106,7 +116,7 @@ This document defines all JSON:API resource types used in the APIGate API.
 |--------------|------|-------------|
 | `user` | to-one | Key owner |
 
-### Example: Create Response
+### Example: Create Response (Scoped Service Key)
 
 The full key is returned in `meta` at creation (only shown once):
 
@@ -116,9 +126,11 @@ The full key is returned in `meta` at creation (only shown once):
     "type": "api_keys",
     "id": "key_abc123",
     "attributes": {
-      "name": "Production Key",
+      "name": "Hoster Metering Service",
       "prefix": "ak_abc123def456",
-      "created_at": "2025-01-19T10:00:00Z"
+      "scopes": ["meter:write"],
+      "quota_bypass": true,
+      "created_at": "2026-02-15T10:00:00Z"
     },
     "relationships": {
       "user": {
@@ -135,7 +147,7 @@ The full key is returned in `meta` at creation (only shown once):
 
 ### Example: List Response
 
-Keys in list don't include the full key:
+Keys in list don't include the full key. `scopes` and `quota_bypass` are omitted when empty/false:
 
 ```json
 {
@@ -229,14 +241,18 @@ The admin/auth endpoints accept authentication via:
    Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
    ```
 
-2. **Session Cookie** (for browser-based apps):
+2. **JWT Cookie** (for SSR browser pages):
    ```http
-   Cookie: apigate_session=base64_encoded_session...
+   Cookie: token=eyJhbGciOiJIUzI1NiIs...
    ```
 
 3. **API Key** (for service accounts):
    ```http
    Authorization: Bearer ak_abc123...
+   ```
+   Or:
+   ```http
+   X-API-Key: ak_abc123...
    ```
 
 ### Register Request

@@ -105,3 +105,15 @@ func (k Key) WithName(name string) Key {
 	k.Name = name
 	return k
 }
+
+// WithScopes returns a copy of the key with the Scopes set.
+func (k Key) WithScopes(scopes []string) Key {
+	k.Scopes = scopes
+	return k
+}
+
+// WithQuotaBypass returns a copy of the key with the QuotaBypass set.
+func (k Key) WithQuotaBypass(bypass bool) Key {
+	k.QuotaBypass = bypass
+	return k
+}

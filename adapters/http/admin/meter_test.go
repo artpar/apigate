@@ -747,7 +747,7 @@ func TestRequireMeterScope_Authorized(t *testing.T) {
 	handler := admin.RequireMeterScope(next)
 
 	req := httptest.NewRequest(http.MethodPost, "/", nil)
-	ctx := context.WithValue(req.Context(), "scopes", []string{"meter:write"})
+	ctx := admin.ContextWithScopes(req.Context(), []string{"meter:write"})
 	req = req.WithContext(ctx)
 	rec := httptest.NewRecorder()
 
@@ -755,6 +755,78 @@ func TestRequireMeterScope_Authorized(t *testing.T) {
 
 	if !called {
 		t.Error("Handler was not called")
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", rec.Code)
+	}
+}
+
+func TestRequireMeterScope_WildcardScope(t *testing.T) {
+	called := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := admin.RequireMeterScope(next)
+
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	ctx := admin.ContextWithScopes(req.Context(), []string{"*"})
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if !called {
+		t.Error("Handler was not called with wildcard scope")
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", rec.Code)
+	}
+}
+
+func TestRequireMeterScope_EmptyScopes_FullAccess(t *testing.T) {
+	called := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := admin.RequireMeterScope(next)
+
+	// Empty scopes = full access (no restrictions on the key)
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	ctx := admin.ContextWithScopes(req.Context(), []string{})
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if !called {
+		t.Error("Handler was not called with empty scopes (full access)")
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", rec.Code)
+	}
+}
+
+func TestRequireMeterScope_NoScopesInContext_FullAccess(t *testing.T) {
+	called := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := admin.RequireMeterScope(next)
+
+	// No scopes set at all (JWT auth — no scopes in context)
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if !called {
+		t.Error("Handler was not called with nil scopes (full access)")
 	}
 	if rec.Code != http.StatusOK {
 		t.Errorf("Expected status 200, got %d", rec.Code)
@@ -773,19 +845,16 @@ func TestRequireMeterScope_Forbidden(t *testing.T) {
 		name   string
 		scopes []string
 	}{
-		{"empty scopes", []string{}},
 		{"wrong scope", []string{"read", "write"}},
-		{"no scopes in context", nil},
+		{"partial match", []string{"meter:read"}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			called = false
 			req := httptest.NewRequest(http.MethodPost, "/", nil)
-			if tt.scopes != nil {
-				ctx := context.WithValue(req.Context(), "scopes", tt.scopes)
-				req = req.WithContext(ctx)
-			}
+			ctx := admin.ContextWithScopes(req.Context(), tt.scopes)
+			req = req.WithContext(ctx)
 			rec := httptest.NewRecorder()
 
 			handler.ServeHTTP(rec, req)

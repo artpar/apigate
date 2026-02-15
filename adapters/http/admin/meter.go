@@ -413,18 +413,18 @@ func (h *MeterHandler) ListEvents(w http.ResponseWriter, r *http.Request) {
 // -----------------------------------------------------------------------------
 
 // RequireMeterScope is middleware that checks for meter:write scope.
-// This should be applied to the metering endpoints.
+// Uses HasScope semantics: empty scopes = full access, "*" = wildcard.
 func RequireMeterScope(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Check for meter:write scope in context
-		// This would be set by the API key auth middleware
-		scopes, ok := r.Context().Value("scopes").([]string)
-		if !ok {
-			jsonapi.WriteError(w, jsonapi.ErrInsufficientScope("meter:write"))
+		scopes := ScopesFromContext(r.Context())
+
+		// Empty scopes = full access (key has no restrictions)
+		if len(scopes) == 0 {
+			next.ServeHTTP(w, r)
 			return
 		}
 
-		if !slices.Contains(scopes, "meter:write") {
+		if !slices.Contains(scopes, "meter:write") && !slices.Contains(scopes, "*") {
 			jsonapi.WriteError(w, jsonapi.ErrInsufficientScope("meter:write"))
 			return
 		}

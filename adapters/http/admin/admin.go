@@ -161,13 +161,17 @@ func (h *Handler) Router() chi.Router {
 	return r
 }
 
-// MeterRouter returns the meter handler's router for external mounting.
-// This allows the metering API to be mounted at /api/v1/meter for service account access.
+// MeterRouter returns an authenticated meter router for external mounting.
+// POST requires auth + meter:write scope. GET requires auth only.
 func (h *Handler) MeterRouter() chi.Router {
 	if h.meterHandler == nil {
 		return nil
 	}
-	return h.meterHandler.Router()
+	r := chi.NewRouter()
+	r.Use(h.AuthMiddleware)
+	r.With(RequireMeterScope).Post("/", h.meterHandler.SubmitEvents)
+	r.Get("/", h.meterHandler.ListEvents)
+	return r
 }
 
 // -----------------------------------------------------------------------------
@@ -211,7 +215,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 	// Try API key authentication first
 	if req.APIKey != "" {
-		if err := h.authenticateByAPIKey(r.Context(), req.APIKey); err != nil {
+		if _, err := h.authenticateByAPIKey(r.Context(), req.APIKey); err != nil {
 			jsonapi.WriteUnauthorized(w, "Invalid API key")
 			return
 		}
@@ -283,29 +287,29 @@ func (h *Handler) generateTokenIfAvailable(userID, email, planID string) string 
 	return token
 }
 
-func (h *Handler) authenticateByAPIKey(ctx context.Context, apiKey string) error {
+func (h *Handler) authenticateByAPIKey(ctx context.Context, apiKey string) (key.Key, error) {
 	// Extract prefix for lookup
 	if len(apiKey) < 12 {
-		return ErrInvalidCredentials
+		return key.Key{}, ErrInvalidCredentials
 	}
 	prefix := apiKey[:12]
 
 	keys, err := h.keys.Get(ctx, prefix)
 	if err != nil || len(keys) == 0 {
-		return ErrInvalidCredentials
+		return key.Key{}, ErrInvalidCredentials
 	}
 
 	// Verify the key matches
 	for _, k := range keys {
 		if h.hasher.Compare(k.Hash, apiKey) {
 			if k.RevokedAt != nil {
-				return ErrInvalidCredentials
+				return key.Key{}, ErrInvalidCredentials
 			}
-			return nil
+			return k, nil
 		}
 	}
 
-	return ErrInvalidCredentials
+	return key.Key{}, ErrInvalidCredentials
 }
 
 // Logout ends an admin session.
@@ -333,15 +337,6 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 //	@Router			/admin/me [get]
 func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	userID := r.Context().Value(ctxUserIDKey).(string)
-
-	// If it's an API key auth, return minimal admin info
-	if userID == "admin" {
-		jsonapi.WriteResource(w, http.StatusOK, jsonapi.NewResource(TypeUser, "admin").
-			Attr("email", "admin@apigate").
-			Attr("role", "admin").
-			Build())
-		return
-	}
 
 	// Get user from store
 	user, err := h.users.Get(r.Context(), userID)
@@ -472,9 +467,10 @@ func (h *Handler) AuthMiddleware(next http.Handler) http.Handler {
 			}
 
 			// Check if it's an API key
-			if err := h.authenticateByAPIKey(r.Context(), token); err == nil {
+			if matchedKey, err := h.authenticateByAPIKey(r.Context(), token); err == nil {
 				ctx := context.WithValue(r.Context(), ctxSessionKey, "api_key")
-				ctx = context.WithValue(ctx, ctxUserIDKey, "admin")
+				ctx = context.WithValue(ctx, ctxUserIDKey, matchedKey.UserID)
+				ctx = ContextWithScopes(ctx, matchedKey.Scopes)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
@@ -494,9 +490,10 @@ func (h *Handler) AuthMiddleware(next http.Handler) http.Handler {
 
 		// Try X-API-Key header
 		if apiKey := r.Header.Get("X-API-Key"); apiKey != "" {
-			if err := h.authenticateByAPIKey(r.Context(), apiKey); err == nil {
+			if matchedKey, err := h.authenticateByAPIKey(r.Context(), apiKey); err == nil {
 				ctx := context.WithValue(r.Context(), ctxSessionKey, "api_key")
-				ctx = context.WithValue(ctx, ctxUserIDKey, "admin")
+				ctx = context.WithValue(ctx, ctxUserIDKey, matchedKey.UserID)
+				ctx = ContextWithScopes(ctx, matchedKey.Scopes)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
@@ -512,7 +509,19 @@ type ctxKey string
 const (
 	ctxSessionKey ctxKey = "session_id"
 	ctxUserIDKey  ctxKey = "user_id"
+	ctxScopesKey  ctxKey = "scopes"
 )
+
+// ContextWithScopes returns a context with the given scopes set.
+func ContextWithScopes(ctx context.Context, scopes []string) context.Context {
+	return context.WithValue(ctx, ctxScopesKey, scopes)
+}
+
+// ScopesFromContext extracts scopes from a context.
+func ScopesFromContext(ctx context.Context) []string {
+	scopes, _ := ctx.Value(ctxScopesKey).([]string)
+	return scopes
+}
 
 // -----------------------------------------------------------------------------
 // Users API
@@ -801,9 +810,11 @@ type KeyResponse struct {
 
 // CreateKeyRequest represents a request to create a key.
 type CreateKeyRequest struct {
-	UserID    string     `json:"user_id"`
-	Name      string     `json:"name,omitempty"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	UserID      string     `json:"user_id"`
+	Name        string     `json:"name,omitempty"`
+	Scopes      []string   `json:"scopes,omitempty"`
+	QuotaBypass bool       `json:"quota_bypass,omitempty"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
 }
 
 // CreateKeyResponse includes the raw key (only shown once).
@@ -896,7 +907,7 @@ func (h *Handler) CreateKey(w http.ResponseWriter, r *http.Request) {
 
 	// Generate key
 	rawKey, keyData := key.Generate("ak_")
-	keyData = keyData.WithUserID(req.UserID).WithName(req.Name)
+	keyData = keyData.WithUserID(req.UserID).WithName(req.Name).WithScopes(req.Scopes).WithQuotaBypass(req.QuotaBypass)
 	if req.ExpiresAt != nil {
 		keyData.ExpiresAt = req.ExpiresAt
 	}
@@ -910,14 +921,20 @@ func (h *Handler) CreateKey(w http.ResponseWriter, r *http.Request) {
 	h.logger.Info().Str("key_id", keyData.ID).Str("user_id", req.UserID).Msg("key created via admin api")
 
 	// Return key resource with the raw key in meta (only shown once)
-	resource := jsonapi.NewResource(TypeKey, keyData.ID).
+	rb := jsonapi.NewResource(TypeKey, keyData.ID).
 		Attr("prefix", keyData.Prefix).
 		Attr("name", req.Name).
 		Attr("created_at", keyData.CreatedAt.Format(time.RFC3339)).
 		BelongsTo("user", TypeUser, req.UserID).
 		Meta("key", rawKey).
-		Meta("note", "Save this key securely. It will not be shown again.").
-		Build()
+		Meta("note", "Save this key securely. It will not be shown again.")
+	if len(req.Scopes) > 0 {
+		rb.Attr("scopes", req.Scopes)
+	}
+	if req.QuotaBypass {
+		rb.Attr("quota_bypass", true)
+	}
+	resource := rb.Build()
 
 	jsonapi.WriteCreated(w, resource, "/admin/keys/"+keyData.ID)
 }
@@ -954,6 +971,12 @@ func keyToResource(k key.Key) jsonapi.Resource {
 		Attr("created_at", k.CreatedAt.Format(time.RFC3339)).
 		BelongsTo("user", TypeUser, k.UserID)
 
+	if len(k.Scopes) > 0 {
+		rb.Attr("scopes", k.Scopes)
+	}
+	if k.QuotaBypass {
+		rb.Attr("quota_bypass", true)
+	}
 	if k.ExpiresAt != nil {
 		rb.Attr("expires_at", k.ExpiresAt.Format(time.RFC3339))
 	}

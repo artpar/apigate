@@ -263,6 +263,32 @@ All API keys MUST start with the configured prefix (default: `ak_`).
 
 **Example**: `ak_1234567890abcdef`
 
+### Key Scopes
+
+API keys can optionally be restricted to specific scopes. If a key has **no scopes** (empty list), it has **full access** (no restrictions). If scopes are set, only the listed capabilities are allowed.
+
+| Scope | Description |
+|-------|-------------|
+| `meter:write` | Submit usage events via metering API |
+| `*` | Wildcard — matches any scope |
+
+Creating a scoped service key:
+
+```http
+POST /admin/keys HTTP/1.1
+Authorization: Bearer <admin-jwt>
+Content-Type: application/json
+
+{
+  "user_id": "user_service_account",
+  "name": "Hoster Metering Service",
+  "scopes": ["meter:write"],
+  "quota_bypass": true
+}
+```
+
+The `quota_bypass` flag exempts the key from rate limiting and quota enforcement (for trusted service accounts).
+
 ### Usage
 
 ```http
@@ -272,6 +298,7 @@ X-API-Key: ak_1234567890abcdef
 
 **Success**: Request proceeds with user context loaded from API key
 **Failure (401)**: Invalid or revoked API key
+**Failure (403)**: Key lacks required scope for the endpoint
 
 ---
 

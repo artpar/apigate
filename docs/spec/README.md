@@ -80,6 +80,7 @@ See [Resource Types](resource-types.md) for Settings and Certificates module end
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 2.2.0 | 2026-02-15 | Meter endpoint authentication: scoped API keys, `meter:write` scope enforcement (#66 follow-up) |
 | 2.1.0 | 2026-02-15 | Fixed meter endpoint shadowed by proxy routes (#66), configurable meter path |
 | 2.0.0 | 2026-02-09 | JWT-only auth, removed cookie/session auth, auto-generated JWT secret |
 | 1.2.0 | 2026-01-27 | Added authentication specification, documented cookie security requirements |
