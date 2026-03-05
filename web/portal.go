@@ -1826,7 +1826,7 @@ func (h *PortalHandler) APILogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate JWT
-	token, _, err := h.tokens.GenerateToken(user.ID, user.Email, user.Role, user.PlanID)
+	token, expiresAt, err := h.tokens.GenerateToken(user.ID, user.Email, user.Role, user.PlanID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("failed to generate token")
 		h.writeJSONError(w, http.StatusInternalServerError, "server_error", "Failed to log in")
@@ -1834,9 +1834,18 @@ func (h *PortalHandler) APILogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Admins logging in via portal get redirected to admin dashboard
+	// Also set the SSR "token" cookie so admin pages work
 	redirect := ""
 	if user.Role == "admin" {
 		redirect = "/dashboard"
+		http.SetCookie(w, &http.Cookie{
+			Name:     "token",
+			Value:    token,
+			Path:     "/",
+			Expires:  expiresAt,
+			HttpOnly: true,
+			SameSite: http.SameSiteStrictMode,
+		})
 	}
 
 	h.writeJSON(w, http.StatusOK, map[string]interface{}{
