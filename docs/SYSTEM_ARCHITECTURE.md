@@ -464,6 +464,7 @@ schema:
   email:         { type: email, unique: true, lookup: true, required: true }
   password_hash: { type: secret, internal: true }
   name:          { type: string, default: "" }
+  role:          { type: enum, values: [admin, user], default: user }
   stripe_id:     { type: string, internal: true }
   plan_id:       { type: ref, to: plan, default: "free" }
   status:        { type: enum, values: [pending, active, suspended, cancelled], default: active }

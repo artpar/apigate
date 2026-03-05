@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/artpar/apigate/adapters/auth"
 	"github.com/artpar/apigate/adapters/metrics"
 	"github.com/artpar/apigate/app"
 	_ "github.com/artpar/apigate/docs/swagger" // swagger docs
@@ -564,8 +565,9 @@ type RouterConfig struct {
 	ModuleHandler         http.Handler  // Optional declarative module handler (mounted at /api/v2)
 	PaymentWebhookHandler http.Handler  // Optional payment webhook handler for Stripe/Paddle/LemonSqueezy
 	MeterHandler          http.Handler  // Optional metering API handler (mounted at /api/v1/meter)
-	IsSetup               func() bool   // Returns true if initial setup is complete (at least one user exists)
-	RouteService          interface{}   // Optional route service for priority-based routing (uses reflection to avoid circular dependency)
+	TokenService          *auth.TokenService // Optional JWT token service for role-based routing
+	IsSetup               func() bool        // Returns true if initial setup is complete (at least one user exists)
+	RouteService          interface{}        // Optional route service for priority-based routing (uses reflection to avoid circular dependency)
 
 	// Configurable handler paths (backward compatible defaults if empty)
 	AdminBasePath          string // Default: /admin
@@ -764,7 +766,7 @@ func NewRouterWithConfig(proxyHandler *ProxyHandler, healthHandler *HealthHandle
 
 		if basePath == "" {
 			// Mount at root (backward compatible)
-			mountWebUIAtRoot(r, cfg.WebHandler, cfg.PortalHandler, cfg.IsSetup, logger)
+			mountWebUIAtRoot(r, cfg.WebHandler, cfg.PortalHandler, cfg.IsSetup, cfg.TokenService, logger)
 		} else {
 			// Mount at custom base path
 			logger.Info().
@@ -798,7 +800,7 @@ func NewRouterWithConfig(proxyHandler *ProxyHandler, healthHandler *HealthHandle
 }
 
 // mountWebUIAtRoot mounts the web UI at root path (backward compatible behavior).
-func mountWebUIAtRoot(r chi.Router, webHandler http.Handler, portalHandler http.Handler, isSetup func() bool, logger zerolog.Logger) {
+func mountWebUIAtRoot(r chi.Router, webHandler http.Handler, portalHandler http.Handler, isSetup func() bool, tokenService *auth.TokenService, logger zerolog.Logger) {
 	// Root URL: setup wizard for fresh installs, portal for unauthenticated users, admin UI for logged-in admins
 	r.Get("/", func(w http.ResponseWriter, req *http.Request) {
 		// Setup not complete → setup wizard
@@ -806,11 +808,40 @@ func mountWebUIAtRoot(r chi.Router, webHandler http.Handler, portalHandler http.
 			http.Redirect(w, req, "/setup", http.StatusFound)
 			return
 		}
-		// No admin token + portal available → portal for customers
-		if _, err := req.Cookie("token"); err != nil && portalHandler != nil {
-			http.Redirect(w, req, "/portal", http.StatusFound)
+
+		// Check for admin token cookie
+		cookie, err := req.Cookie("token")
+		if err != nil || cookie.Value == "" {
+			// No token → redirect to portal if available, otherwise serve web UI
+			if portalHandler != nil {
+				http.Redirect(w, req, "/portal", http.StatusFound)
+				return
+			}
+			webHandler.ServeHTTP(w, req)
 			return
 		}
+
+		// Token present → validate and check role
+		if tokenService != nil {
+			claims, err := tokenService.ValidateToken(cookie.Value)
+			if err != nil {
+				// Invalid/expired token → redirect to portal
+				if portalHandler != nil {
+					http.Redirect(w, req, "/portal", http.StatusFound)
+					return
+				}
+				webHandler.ServeHTTP(w, req)
+				return
+			}
+			if claims.Role != "admin" {
+				// Non-admin user → redirect to portal
+				if portalHandler != nil {
+					http.Redirect(w, req, "/portal", http.StatusFound)
+					return
+				}
+			}
+		}
+
 		// Admin logged in or no portal → web UI
 		webHandler.ServeHTTP(w, req)
 	})

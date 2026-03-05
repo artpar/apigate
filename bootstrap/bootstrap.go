@@ -569,6 +569,7 @@ func (a *App) initHTTPServer() error {
 		DocsHandler:           docsRouter,
 		PaymentWebhookHandler: paymentWebhookHandler,
 		MeterHandler:          adminHandler.MeterRouter(),
+		TokenService:          tokenService,
 		RouteService:          a.routeService, // Enable priority-based routing
 		IsSetup: func() bool {
 			users, err := deps.Users.List(context.Background(), 1, 0)

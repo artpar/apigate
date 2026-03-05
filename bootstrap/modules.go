@@ -142,7 +142,8 @@ func (mr *ModuleRuntime) loadModulesFromDir(ctx context.Context, dir string) err
 
 	for _, mod := range modules {
 		if err := mr.loadModule(ctx, mod); err != nil {
-			mr.Logger.Warn().Err(err).Str("module", mod.Name).Msg("failed to load module")
+			// Expected for core modules that exist as both Go and YAML definitions
+			mr.Logger.Debug().Err(err).Str("module", mod.Name).Msg("failed to load module")
 			continue
 		}
 	}
@@ -322,6 +323,7 @@ func coreUserModule() schema.Module {
 			"password_hash": {Type: schema.FieldTypeSecret, Internal: true, Description: "Hashed password for authentication"},
 			"name":          {Type: schema.FieldTypeString, Default: "", Description: "Display name for the user"},
 			"stripe_id":     {Type: schema.FieldTypeString, Internal: true, Description: "Stripe customer ID for payment processing"},
+			"role":          {Type: schema.FieldTypeEnum, Values: []string{"admin", "user"}, Default: "user", Description: "User role controlling access level"},
 			"plan_id":       {Type: schema.FieldTypeRef, To: "plan", Default: "free", Description: "Reference to the user's pricing plan"},
 			"status":        {Type: schema.FieldTypeEnum, Values: []string{"pending", "active", "suspended", "cancelled"}, Default: "active", Description: "Current account status controlling access"},
 		},

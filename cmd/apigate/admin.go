@@ -188,6 +188,7 @@ func runAdminCreate(cmd *cobra.Command, args []string) error {
 		ID:           generateAdminID(),
 		Email:        adminEmail,
 		PasswordHash: passwordHash,
+		Role:         "admin",
 		PlanID:       "admin",
 		Status:       "active",
 		CreatedAt:    now,

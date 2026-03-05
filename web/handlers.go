@@ -70,7 +70,7 @@ func (h *Handler) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate JWT token
-	token, expiresAt, err := h.tokens.GenerateToken(user.ID, user.Email, "admin", user.PlanID)
+	token, expiresAt, err := h.tokens.GenerateToken(user.ID, user.Email, user.Role, user.PlanID)
 	if err != nil {
 		h.renderLoginError(w, r, "Login failed", email)
 		return
@@ -2366,6 +2366,7 @@ func (h *Handler) SetupStepSubmit(w http.ResponseWriter, r *http.Request) {
 			Name:         name,
 			Email:        email,
 			PasswordHash: passwordHash,
+			Role:         "admin",
 			PlanID:       "admin", // Admin users have the special "admin" plan
 			Status:       "active",
 			CreatedAt:    now,
@@ -2378,7 +2379,7 @@ func (h *Handler) SetupStepSubmit(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Auto-login: Generate JWT token and set cookie
-		token, expiresAt, err := h.tokens.GenerateToken(user.ID, user.Email, "admin", user.PlanID)
+		token, expiresAt, err := h.tokens.GenerateToken(user.ID, user.Email, user.Role, user.PlanID)
 		if err == nil {
 			http.SetCookie(w, &http.Cookie{
 				Name:     "token",

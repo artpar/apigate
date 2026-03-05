@@ -338,7 +338,7 @@ func (h *PortalHandler) renderLoginPage(email, message, messageType string, erro
                 if (data.success && data.token) {
                     localStorage.setItem('auth_token', data.token);
                     document.cookie = 'portal_token=' + data.token + '; path=/; SameSite=Lax';
-                    window.location.href = '/portal/dashboard';
+                    window.location.href = data.redirect || '/portal/dashboard';
                 } else {
                     var msg = (data.error && data.error.message) || 'Login failed';
                     alertContainer.innerHTML = '<div class="alert alert-error">' + msg + '</div>';

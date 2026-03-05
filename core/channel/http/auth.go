@@ -140,7 +140,8 @@ func (h *AuthHandler) handleSetup(w http.ResponseWriter, r *http.Request) {
 	// Generate JWT if token service is available
 	if h.tokens != nil {
 		planID, _ := createResult.Data["plan_id"].(string)
-		token, expiresAt, err := h.tokens.GenerateToken(createResult.ID, req.Email, "user", planID)
+		role, _ := createResult.Data["role"].(string)
+		token, expiresAt, err := h.tokens.GenerateToken(createResult.ID, req.Email, role, planID)
 		if err == nil {
 			resp["token"] = token
 			resp["expires_at"] = expiresAt.Format(time.RFC3339)
@@ -221,7 +222,8 @@ func (h *AuthHandler) handleRegister(w http.ResponseWriter, r *http.Request) {
 	// Generate JWT if token service is available
 	if h.tokens != nil {
 		planID, _ := result.Data["plan_id"].(string)
-		token, expiresAt, err := h.tokens.GenerateToken(result.ID, req.Email, "user", planID)
+		role, _ := result.Data["role"].(string)
+		token, expiresAt, err := h.tokens.GenerateToken(result.ID, req.Email, role, planID)
 		if err == nil {
 			resp["token"] = token
 			resp["expires_at"] = expiresAt.Format(time.RFC3339)
@@ -310,7 +312,8 @@ func (h *AuthHandler) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// Generate JWT if token service is available
 	if h.tokens != nil {
 		planID, _ := result.Data["plan_id"].(string)
-		token, expiresAt, err := h.tokens.GenerateToken(userID, email, "user", planID)
+		role, _ := result.Data["role"].(string)
+		token, expiresAt, err := h.tokens.GenerateToken(userID, email, role, planID)
 		if err == nil {
 			resp["token"] = token
 			resp["expires_at"] = expiresAt.Format(time.RFC3339)

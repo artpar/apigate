@@ -216,6 +216,7 @@ func (s *ProxyService) Handle(ctx context.Context, req proxy.Request) HandleResu
 				user = ports.User{
 					ID:     claims.UserID,
 					Email:  claims.Email,
+					Role:   claims.Role,
 					PlanID: claims.PlanID,
 					Status: "active",
 				}
@@ -931,6 +932,7 @@ func (s *ProxyService) HandleStreaming(ctx context.Context, req proxy.Request, s
 				user = ports.User{
 					ID:     claims.UserID,
 					Email:  claims.Email,
+					Role:   claims.Role,
 					PlanID: claims.PlanID,
 					Status: "active",
 				}

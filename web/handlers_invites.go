@@ -255,6 +255,7 @@ func (h *Handler) AdminRegisterSubmit(w http.ResponseWriter, r *http.Request) {
 		ID:           uuid.New().String(),
 		Email:        invite.Email,
 		Name:         name,
+		Role:         "admin",
 		PasswordHash: passwordHash,
 		Status:       "active",
 		CreatedAt:    time.Now(),

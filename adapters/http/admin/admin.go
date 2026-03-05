@@ -223,12 +223,12 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		// Get user by email if provided, otherwise use admin
 		user, err := h.users.GetByEmail(r.Context(), req.Email)
 		if err != nil {
-			token := h.generateTokenIfAvailable("admin", "admin@apigate", "")
+			token := h.generateTokenIfAvailable("admin", "admin@apigate", "admin", "")
 			jsonapi.WriteResource(w, http.StatusOK, loginToResource("admin", "admin@apigate", token))
 			return
 		}
 
-		token := h.generateTokenIfAvailable(user.ID, user.Email, user.PlanID)
+		token := h.generateTokenIfAvailable(user.ID, user.Email, user.Role, user.PlanID)
 		jsonapi.WriteResource(w, http.StatusOK, loginToResource(user.ID, user.Email, token))
 		return
 	}
@@ -270,17 +270,17 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate JWT token
-	token := h.generateTokenIfAvailable(user.ID, user.Email, user.PlanID)
+	token := h.generateTokenIfAvailable(user.ID, user.Email, user.Role, user.PlanID)
 
 	jsonapi.WriteResource(w, http.StatusOK, loginToResource(user.ID, user.Email, token))
 }
 
 // generateTokenIfAvailable generates a JWT token if the token service is configured.
-func (h *Handler) generateTokenIfAvailable(userID, email, planID string) string {
+func (h *Handler) generateTokenIfAvailable(userID, email, role, planID string) string {
 	if h.tokens == nil {
 		return ""
 	}
-	token, _, err := h.tokens.GenerateToken(userID, email, "admin", planID)
+	token, _, err := h.tokens.GenerateToken(userID, email, role, planID)
 	if err != nil {
 		return ""
 	}
@@ -403,6 +403,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		Email:        req.Email,
 		Name:         req.Name,
 		PasswordHash: passwordHash,
+		Role:         "user",
 		Status:       "active",
 		PlanID:       "free", // Default plan
 		CreatedAt:    time.Now(),
@@ -414,7 +415,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate JWT token for immediate login
-	token := h.generateTokenIfAvailable(user.ID, user.Email, user.PlanID)
+	token := h.generateTokenIfAvailable(user.ID, user.Email, user.Role, user.PlanID)
 
 	// Return user with token
 	rb := jsonapi.NewResource(TypeUser, user.ID).

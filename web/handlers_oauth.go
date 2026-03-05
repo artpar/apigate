@@ -245,6 +245,7 @@ func (h *Handler) OAuthCallback(w http.ResponseWriter, r *http.Request) {
 			ID:        uuid.New().String(),
 			Email:     profile.Email,
 			Name:      name,
+			Role:      "user",
 			Status:    "active",
 			CreatedAt: now,
 			UpdatedAt: now,
@@ -299,10 +300,7 @@ func (h *Handler) OAuthCallback(w http.ResponseWriter, r *http.Request) {
 // loginUser logs in a user and redirects them.
 func (h *Handler) loginUser(w http.ResponseWriter, r *http.Request, u ports.User, redirectURI string) {
 	// Generate JWT token
-	// OAuth users are treated as customers (not admins) by default
-	role := "customer"
-
-	token, expiresAt, err := h.tokens.GenerateToken(u.ID, u.Email, role, u.PlanID)
+	token, expiresAt, err := h.tokens.GenerateToken(u.ID, u.Email, u.Role, u.PlanID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to generate token")
 		http.Redirect(w, r, "/login?error=token_generation_failed", http.StatusFound)

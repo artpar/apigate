@@ -409,6 +409,7 @@ func (h *PortalHandler) SignupSubmit(w http.ResponseWriter, r *http.Request) {
 		Email:        req.Email,
 		PasswordHash: passwordHash,
 		Name:         req.Name,
+		Role:         "user",
 		PlanID:       defaultPlanID,
 		Status:       userStatus,
 		CreatedAt:    time.Now().UTC(),
@@ -520,21 +521,37 @@ func (h *PortalHandler) PortalLoginSubmit(w http.ResponseWriter, r *http.Request
 	}
 
 	// Generate JWT
-	token, _, err := h.tokens.GenerateToken(user.ID, user.Email, "user", user.PlanID)
+	token, expiresAt, err := h.tokens.GenerateToken(user.ID, user.Email, user.Role, user.PlanID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("failed to generate token")
 		h.writeJSONError(w, http.StatusInternalServerError, "server_error", "Failed to log in")
 		return
 	}
 
+	// Admins logging in via portal get redirected to admin dashboard
+	// Also set the SSR "token" cookie so admin pages work
+	redirect := ""
+	if user.Role == "admin" {
+		redirect = "/dashboard"
+		http.SetCookie(w, &http.Cookie{
+			Name:     "token",
+			Value:    token,
+			Path:     "/",
+			Expires:  expiresAt,
+			HttpOnly: true,
+			SameSite: http.SameSiteStrictMode,
+		})
+	}
+
 	h.writeJSON(w, http.StatusOK, map[string]interface{}{
-		"success": true,
+		"success":  true,
 		"user": map[string]interface{}{
 			"id":    user.ID,
 			"email": user.Email,
 			"name":  user.Name,
 		},
-		"token": token,
+		"token":    token,
+		"redirect": redirect,
 	})
 }
 
@@ -1703,6 +1720,7 @@ func (h *PortalHandler) APIRegister(w http.ResponseWriter, r *http.Request) {
 		Email:        req.Email,
 		PasswordHash: passwordHash,
 		Name:         req.Name,
+		Role:         "user",
 		PlanID:       defaultPlanID,
 		Status:       userStatus,
 		CreatedAt:    time.Now().UTC(),
@@ -1734,7 +1752,7 @@ func (h *PortalHandler) APIRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Auto-login: generate JWT
-	token, _, err := h.tokens.GenerateToken(userID, req.Email, "user", "")
+	token, _, err := h.tokens.GenerateToken(userID, req.Email, "user", defaultPlanID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("failed to generate token after signup")
 		h.writeJSON(w, http.StatusCreated, map[string]interface{}{
@@ -1808,21 +1826,28 @@ func (h *PortalHandler) APILogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate JWT
-	token, _, err := h.tokens.GenerateToken(user.ID, user.Email, "user", user.PlanID)
+	token, _, err := h.tokens.GenerateToken(user.ID, user.Email, user.Role, user.PlanID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("failed to generate token")
 		h.writeJSONError(w, http.StatusInternalServerError, "server_error", "Failed to log in")
 		return
 	}
 
+	// Admins logging in via portal get redirected to admin dashboard
+	redirect := ""
+	if user.Role == "admin" {
+		redirect = "/dashboard"
+	}
+
 	h.writeJSON(w, http.StatusOK, map[string]interface{}{
-		"success": true,
+		"success":  true,
 		"user": map[string]interface{}{
 			"id":    user.ID,
 			"email": user.Email,
 			"name":  user.Name,
 		},
-		"token": token,
+		"token":    token,
+		"redirect": redirect,
 	})
 }
 

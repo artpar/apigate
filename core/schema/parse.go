@@ -65,6 +65,11 @@ func ParseDir(dir string) ([]Module, error) {
 			return nil, err
 		}
 
+		// Skip capability interface definitions — they are not loadable modules
+		if mod.IsCapability() {
+			continue
+		}
+
 		modules = append(modules, mod)
 	}
 

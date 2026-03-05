@@ -264,6 +264,7 @@ func createAdminUser(db *sqlite.DB, email, password string) (string, error) {
 		ID:           generateID(),
 		Email:        email,
 		PasswordHash: passwordHash,
+		Role:         "admin",
 		PlanID:       "free",
 		Status:       "active",
 	}

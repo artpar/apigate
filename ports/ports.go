@@ -83,6 +83,7 @@ type User struct {
 	Email        string
 	PasswordHash []byte // bcrypt hash for web UI login (optional for API-only users)
 	Name         string
+	Role         string // "admin" or "user"
 	PlanID       string
 	Status       string // "active", "suspended", "cancelled"
 	StripeID     string // Stripe customer ID for payment integration
