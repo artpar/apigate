@@ -302,22 +302,9 @@ Payment and email providers are configured via the Admin Dashboard settings.
 
 - **Documentation**: [docs.apigate.dev](https://docs.apigate.dev)
 - **GitHub Issues**: [github.com/artpar/apigate/issues](https://github.com/artpar/apigate/issues)
-- **Discord Community**: [discord.gg/apigate](https://discord.gg/apigate)
 
 ---
 
-## License
-
-**Commercial License** required for production use.
-
-Free for:
-- Local development
-- Testing and evaluation
-- Open source projects
-
-[Contact for pricing](mailto:hello@apigate.dev) | [View License](LICENSE)
-
----
 
 ## Built With
 
